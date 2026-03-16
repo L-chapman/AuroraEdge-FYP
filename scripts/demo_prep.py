@@ -13,10 +13,10 @@ Actions
 3.  DELETE the MTA-STS DNS record  → MTA-STS missing
 4.  (TLS-RPT, DKIM already configured — left intact)
 
-After running this, the domain should scan as Grade D/F with at least four
-violations (R3_DMARC_MISSING, R6_DKIM_NOT_FOUND, R8_MTA_STS_MISSING,
-R9_TLS_RPT_MISSING).  You can then hit "Auto-Fix DNS" on the scan
-results page to let AuroraEdge repair everything automatically.
+After running this, the domain should scan as Grade D with at least five
+violations (R3C_SPF_SOFTFAIL, R5B_DMARC_QUARANTINE, R5C_DMARC_PCT,
+R8_MTA_STS_MISSING, R12_NO_STRICT_POLICY).  You can then hit "Auto-Fix DNS"
+on the scan results page to let AuroraEdge repair everything automatically.
 
 Usage
 -----
@@ -48,16 +48,26 @@ DOMAIN = "auroraedge.co.uk"
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
 
 # Records to break for the demo
-RECORDS_TO_DELETE = [
-    {"type": "TXT", "name": f"_dmarc.{DOMAIN}",     "label": "DMARC"},
-    {"type": "TXT", "name": f"_smtp._tls.{DOMAIN}",  "label": "TLS-RPT"},
+RECORDS_TO_WEAKEN = [
+    {
+        "type": "TXT",
+        "name": DOMAIN,
+        "label": "SPF",
+        "weak_value": f"v=spf1 include:_spf.google.com ~all",
+        "strong_value": f"v=spf1 include:_spf.google.com -all",
+    },
+    {
+        "type": "TXT",
+        "name": f"_dmarc.{DOMAIN}",
+        "label": "DMARC",
+        "weak_value": f"v=DMARC1; p=quarantine; pct=50; aspf=s; adkim=s; rua=mailto:dmarc@{DOMAIN}; ruf=mailto:dmarc@{DOMAIN}",
+        "strong_value": f"v=DMARC1; p=reject; pct=100; aspf=s; adkim=s; rua=mailto:dmarc@{DOMAIN}; ruf=mailto:dmarc@{DOMAIN}",
+    },
 ]
 
-# Default values used by --restore to recreate the records
-RESTORE_DEFAULTS = {
-    f"_dmarc.{DOMAIN}":    f"v=DMARC1; p=reject; rua=mailto:dmarc@{DOMAIN}",
-    f"_smtp._tls.{DOMAIN}": f"v=TLSRPTv1; rua=mailto:tlsrpt@{DOMAIN}",
-}
+RECORDS_TO_DELETE = [
+    {"type": "TXT", "name": f"_mta-sts.{DOMAIN}", "label": "MTA-STS"},
+]
 
 
 def _db_path() -> Path:
@@ -137,54 +147,61 @@ def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def break_records():
-    """Delete DMARC and TLS-RPT records to simulate a vulnerable domain."""
-    print(f"\n🔧 DEMO PREP — Breaking DNS records for {DOMAIN}")
+    """Weaken SPF/DMARC and remove MTA-STS to simulate a vulnerable domain."""
+    print(f"\n🔧 DEMO PREP — Weakening DNS records for {DOMAIN}")
     print("=" * 55)
 
     token, zone_id = _get_cf_creds()
-    deleted = 0
+    changes = 0
+
+    for rec in RECORDS_TO_WEAKEN:
+        print(f"\n[{rec['label']}] Weakening {rec['name']} ...")
+        existing = _find_records(token, zone_id, rec["type"], rec["name"])
+        for ex in existing:
+            _delete_record(token, zone_id, ex["id"], rec["name"])
+        if _create_record(token, zone_id, rec["name"], rec["weak_value"]):
+            changes += 1
 
     for rec in RECORDS_TO_DELETE:
-        print(f"\n[{rec['label']}] Looking up {rec['name']} ...")
+        print(f"\n[{rec['label']}] Deleting {rec['name']} ...")
         matches = _find_records(token, zone_id, rec["type"], rec["name"])
         if not matches:
-            print(f"  – Record not found (already removed or never existed)")
+            print(f"  – Record not found (already removed)")
             continue
         for m in matches:
             if _delete_record(token, zone_id, m["id"], rec["name"]):
-                deleted += 1
+                changes += 1
 
     print(f"\n{'=' * 55}")
-    print(f"Done — deleted {deleted} record(s).")
+    print(f"Done — {changes} change(s) applied.")
     print(f"\nExpected scan result after DNS propagation:")
-    print(f"  • DMARC   → ❌ Missing")
-    print(f"  • TLS-RPT → ❌ Missing")
-    print(f"  • DKIM    → ❌ Missing  (was already absent)")
-    print(f"  • MTA-STS → ❌ Missing  (was already absent)")
-    print(f"  • SPF     → ✅ Present")
+    print(f"  • SPF     → ⚠ ~all (softfail, not -all)")
+    print(f"  • DMARC   → ⚠ p=quarantine; pct=50 (weak)")
+    print(f"  • MTA-STS → ❌ Missing")
+    print(f"  • TLS-RPT → ✅ Present (unchanged)")
+    print(f"  • DKIM    → ✅ Present (Google selector)")
     print(f"\nYou can now scan {DOMAIN} and click 'Auto-Fix DNS'.\n")
 
 
 def restore_records():
-    """Recreate the deleted records with sensible defaults."""
-    print(f"\n🔄 RESTORE — Recreating DNS records for {DOMAIN}")
+    """Restore records to their strong/fixed state."""
+    print(f"\n🔄 RESTORE — Strengthening DNS records for {DOMAIN}")
     print("=" * 55)
 
     token, zone_id = _get_cf_creds()
-    created = 0
+    changes = 0
 
-    for name, content in RESTORE_DEFAULTS.items():
-        label = "DMARC" if "_dmarc" in name else "TLS-RPT"
-        print(f"\n[{label}] Creating {name} ...")
-        # Remove existing first to avoid duplicates
-        existing = _find_records(token, zone_id, "TXT", name)
+    for rec in RECORDS_TO_WEAKEN:
+        label = rec["label"]
+        print(f"\n[{label}] Restoring {rec['name']} to strong value ...")
+        existing = _find_records(token, zone_id, rec["type"], rec["name"])
         for ex in existing:
-            _delete_record(token, zone_id, ex["id"], name)
-        if _create_record(token, zone_id, name, content):
-            created += 1
+            _delete_record(token, zone_id, ex["id"], rec["name"])
+        if _create_record(token, zone_id, rec["name"], rec["strong_value"]):
+            changes += 1
 
     print(f"\n{'=' * 55}")
-    print(f"Done — created {created} record(s).")
+    print(f"Done — {changes} record(s) restored.")
     print(f"Run a scan to verify the domain is healthy again.\n")
 
 
