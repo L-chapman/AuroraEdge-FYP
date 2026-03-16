@@ -1,6 +1,6 @@
 # AuroraEdge — Privacy, Legal & Ethics Policy
 
-*Version 1.0 — March 2026*
+*Version 3.1 — March 2026*
 *Final Year Project — Leon Chapman*
 
 ---
@@ -35,7 +35,7 @@ AuroraEdge queries **only publicly available information**:
 
 | Data | Storage | Purpose |
 |------|---------|---------|
-| Cloudflare API Token | Local SQLite DB (`state/aurora.db`) | DNS auto-remediation |
+| Cloudflare API Token | Local SQLite DB (`state/auroraedge.db`) | DNS auto-remediation |
 | Cloudflare Zone ID | Local SQLite DB | Zone identification |
 | Organisation name | Local SQLite DB | Report branding |
 | Dashboard token (`DASH_TOKEN`) | Environment variable only | Authentication |
@@ -58,7 +58,7 @@ AuroraEdge queries **only publicly available information**:
 All data is stored **locally on the operator's machine**:
 
 ```
-state/aurora.db     — SQLite database (scan results, settings, alerts)
+state/auroraedge.db — SQLite database (scan results, settings, alerts)
 reports/*.csv       — CSV scan reports
 reports/*.md        — Markdown scan reports
 logs/dns_audit.log  — DNS change audit trail (rotated, max 2MB × 3)

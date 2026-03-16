@@ -23,7 +23,7 @@ Usage
     python scripts/demo_prep.py            # break records
     python scripts/demo_prep.py --restore  # put them back manually
 
-Credentials are read from the AuroraEdge SQLite database (state/aurora.db)
+Credentials are read from the AuroraEdge SQLite database (state/auroraedge.db)
 so they stay consistent with the running server.
 """
 

@@ -74,9 +74,9 @@ CREATE TABLE domains (
 ## API
 
 ```python
-from app.database import ScanDatabase
+from app.database import AuroraDatabase
 
-db = ScanDatabase("state/auroraedge.db")
+db = AuroraDatabase("state/auroraedge.db")
 
 # Start a new scan session
 scan_id = db.start_scan()

@@ -10,7 +10,7 @@ AuroraEdge Security: Designing and Implementing an Automated Email Authenticatio
 
 Email attacks like phishing and spoofing are still one of the biggest problems in cybersecurity. Even though systems like SPF, DKIM, and DMARC exist to protect email domains, most small businesses either don’t set them up correctly or don’t know how to maintain them. This usually happens because it’s confusing, time consuming, and very easy to make mistakes.
 
-My project will focus on building a system called AuroraEdge Security that automates all of that. It checks a domain’s records, fixes error, enforces proper settings, and keeps them monitored all without needing the user to understand the technical details.
+My project will focus on building a system called AuroraEdge Security that automates all of that. It checks a domain’s records, fixes errors, enforces proper settings, and keeps them monitored all without needing the user to understand the technical details.
 
 I chose this topic because it combines two things I’m really interested in — cybersecurity and automation. It’s also relevant to the kind of work I want to do after the course, where simplifying security for small companies is a real challenge. Previous studies and reports (like the Verizon DBIR 2023 and Google Email Security Report 2022) have shown that most cyber-attacks still start with email, so this project aims to make a practical difference there.
 

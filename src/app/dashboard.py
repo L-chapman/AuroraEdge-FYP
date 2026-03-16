@@ -4492,7 +4492,7 @@ def _footer_html() -> str:
         </div>
         <p><strong>Final Year Project</strong> · Leon Chapman (50030738)</p>
         <p style="margin-top: 8px;">Belfast Metropolitan College · BSc Cybersecurity &amp; Networking Infrastructure · 2025/2026</p>
-        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Scans public DNS records only &middot; No personal data collected &middot; <a href="https://github.com" style="color: var(--accent);">Privacy &amp; Ethics Policy</a></p>
+        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Scans public DNS records only &middot; No personal data collected &middot; <a href="https://github.com/L-chapman/AuroraEdge-FYP/blob/master/docs/PRIVACY_AND_ETHICS.md" style="color: var(--accent);">Privacy &amp; Ethics Policy</a></p>
     </footer>
     """
 

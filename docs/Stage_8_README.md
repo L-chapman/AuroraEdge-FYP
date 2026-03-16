@@ -15,8 +15,10 @@ WEIGHTS = {
     "INFO": 2,       # Minor recommendations
     "OK": 0          # No penalty
 }
-Visit the dashboard at `http://127.0.0.1:8080/?token=aurora-dev` (default one-click start). If you run on a different port, substitute accordingly.
 
+GRADE_TABLE = [
+    (90, "A+"),  # Excellent - fully hardened
+    (80, "A"),   # Very good - minor tweaks
     (75, "B"),   # Good - some issues to address
     (60, "C"),   # Acceptable - notable gaps
     (40, "D"),   # Poor - significant vulnerabilities

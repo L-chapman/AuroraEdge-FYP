@@ -351,7 +351,7 @@ function Run-HealthCheck {
     Write-Host ""
     
     Set-Location $ProjectRoot
-    python scripts/system_check.py
+    python verify_system.py
     
     Write-Host ""
 }
