@@ -189,7 +189,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Rate limiting:** In-memory per-IP rate limiter on scan endpoints (10 scans per 60 seconds)
 - **Error info leakage fixed:** `/api/history/{domain}`, `/api/stats`, and `/api/report/pdf/{domain}` now return generic error messages instead of stack traces
 - **SSE stream authentication:** `/api/stream` endpoint now requires authentication token
-- **Privacy notice:** Footer on all pages states "No personal data collected"
+- **Privacy notice:** Footer on all pages states "Public DNS checks only" with a link to the privacy and ethics policy
 - **Privacy & Ethics Policy:** Comprehensive `docs/PRIVACY_AND_ETHICS.md` covering data collection, storage, retention, legal basis (Computer Misuse Act 1990, GDPR), ethical framework, third-party services
 - **Strengths & Weaknesses Analysis:** `docs/STRENGTHS_AND_WEAKNESSES.md` — academic self-critique with comparison tables and future work identification
 - **Custom 404 page:** Branded HTML error page for unknown routes (API routes still return JSON)

@@ -294,11 +294,11 @@ AuroraEdge_FYP/
 
 ## Privacy & Legal
 
-AuroraEdge only queries **publicly available DNS records** — the same data any
-browser or mail server can see. No authentication credentials are tested, no
-mail is sent, and no private data is accessed.
+AuroraEdge only queries **publicly available DNS and HTTPS security records** —
+the same data any mail server or browser can see. No mailbox credentials are
+tested, no mail is sent, and no private third-party systems are accessed.
 
-Full compliance details: UK Computer Misuse Act 1990, GDPR Article 4(1),
+Full compliance details: UK Computer Misuse Act 1990, GDPR considerations,
 Cloudflare API Terms of Service, and Spamhaus usage terms are documented in
 [docs/PRIVACY_AND_ETHICS.md](docs/PRIVACY_AND_ETHICS.md).
 

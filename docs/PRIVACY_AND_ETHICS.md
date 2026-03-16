@@ -1,6 +1,6 @@
 # AuroraEdge — Privacy, Legal & Ethics Policy
 
-*Version 3.1 — March 2026*
+*Version 3.2 — March 2026*
 *Final Year Project — Leon Chapman*
 
 ---
@@ -29,7 +29,7 @@ AuroraEdge queries **only publicly available information**:
 | STARTTLS support | Public SMTP banner (port 25) | TLS version, cipher info |
 | RBL/Blacklist status | Public DNSBL queries | Listed/not listed |
 
-**No private, confidential, or personal data is collected.** All queries use standard DNS resolution (UDP port 53) and HTTPS (TCP port 443) — the same mechanisms used by any email server or web browser.
+AuroraEdge is designed to process infrastructure data rather than user content. In some cases, published DNS records may contain contact mailbox values such as `rua=mailto:...`, `ruf=mailto:...`, or `TLS-RPT rua=mailto:...`. When present, those values are collected as part of the public record and stored with the scan results. All queries use standard DNS resolution (UDP port 53) and HTTPS (TCP port 443) — the same mechanisms used by any email server or web browser.
 
 ### 2.2 User-Provided Configuration
 
@@ -37,17 +37,18 @@ AuroraEdge queries **only publicly available information**:
 |------|---------|---------|
 | Cloudflare API Token | Local SQLite DB (`state/auroraedge.db`) | DNS auto-remediation |
 | Cloudflare Zone ID | Local SQLite DB | Zone identification |
+| Cloudflare Account ID | Local SQLite DB | Optional MTA-STS Worker deployment |
 | Organisation name | Local SQLite DB | Report branding |
+| Optional alert / contact email | Local SQLite DB | Operator-entered contact field (stored locally only; not used for outbound email in this version) |
 | Dashboard token (`DASH_TOKEN`) | Environment variable only | Authentication |
 
 ### 2.3 What We Do NOT Collect
 
-- No personal data (names, emails, addresses, phone numbers)
 - No user tracking, analytics, or telemetry
 - No cookies or browser fingerprinting
-- No email content or mail server authentication
+- No email content, mailbox access, or mail server authentication
 - No credentials beyond operator-provided Cloudflare tokens
-- No data from third-party APIs beyond Cloudflare (operator-configured)
+- No unnecessary personal data by design; operators should prefer shared role addresses (for example `security@org.example`) over individual mailboxes where possible
 
 ---
 
@@ -68,7 +69,7 @@ logs/dns_audit.log  — DNS change audit trail (rotated, max 2MB × 3)
 
 - **SQLite database** uses WAL (Write-Ahead Logging) mode for integrity
 - **No encryption at rest** — this is a local-only prototype; the operator's OS-level encryption (BitLocker, FileVault) provides disk-level protection
-- **No cloud sync** — data never leaves the local machine unless the operator explicitly copies it
+- **No application-managed cloud sync** — AuroraEdge does not upload data to a vendor cloud service itself. However, if the project folder is stored inside a synchronised directory (for example OneDrive, Google Drive, or Dropbox), database, report, and log files may sync according to that service's configuration
 - **Configurable data retention** — the `clear_on_start` setting wipes scan data on each server restart (default: enabled)
 - **On-demand data clearing** — `POST /api/data/clear` allows the operator to wipe all scan data at any time while preserving application settings
 - **Per-domain deletion** — `DELETE /api/history/{domain}` removes all scan records, domain entries, and alerts for a specific domain
@@ -116,22 +117,28 @@ AuroraEdge does **not** violate the Computer Misuse Act because:
 - **Section 2 (Intent to commit further offences)**: Not applicable — tool is defensive in nature
 - **Section 3 (Unauthorised modification)**: DNS modifications require operator-owned Cloudflare credentials and domain ownership verification
 
-### 4.3 GDPR Compliance
+### 4.3 GDPR Considerations
 
-AuroraEdge processes **no personal data** as defined by GDPR Article 4(1). DNS records, MX hostnames, and email policy configurations are **technical infrastructure data**, not personal data. Therefore:
+AuroraEdge primarily processes **technical infrastructure data** such as DNS records, MX hostnames, transport-security policies, and security scores. In many normal uses, that data will not identify a natural person. However, **limited personal data may be processed incidentally** where:
 
-- No Data Protection Impact Assessment (DPIA) is required
-- No consent mechanism is needed
-- No data subject rights apply to DNS record content
-- No Data Protection Officer appointment is necessary
+- a public DMARC or TLS-RPT record contains an identifiable email address
+- the operator stores a personal contact email in Settings
+- reports, logs, or screenshots are combined with other information that identifies an individual
 
-**Note:** If an operator scans domains and the resulting reports are shared with identifiable individuals, the operator (not AuroraEdge) is responsible for any GDPR obligations arising from that sharing.
+Where personal data is present, the operator is the data controller for that local deployment and should ensure:
+
+- a lawful basis for processing, typically legitimate interests or security administration
+- data minimisation, including preferring shared role mailboxes over personal addresses
+- secure local storage and access control on the host device
+- timely deletion using the built-in clear and per-domain deletion controls where appropriate
+
+For normal academic, lab, and local administrative use, the privacy risk is typically low because processing is limited, local, and focused on publicly published security records. A DPIA is not generally expected for this prototype in that context, but operators should assess their own deployment environment.
 
 ### 4.4 Cloudflare API Usage
 
 - Cloudflare API tokens are stored locally and transmitted only to Cloudflare's API endpoints over HTTPS
 - Token permissions should follow the principle of least privilege (Zone:DNS:Edit for a single zone)
-- AuroraEdge does not share, transmit, or log full API tokens (masked in UI/API responses)
+- AuroraEdge does not expose full API tokens in UI/API responses and does not write them to audit logs; the full token remains in local settings storage and process memory while the application is running
 
 ---
 
@@ -162,7 +169,7 @@ AuroraEdge can automatically modify DNS records via Cloudflare. Safeguards inclu
 
 This project complies with academic research ethics:
 
-- **No human subjects** — No user studies, surveys, or personal data collection
+- **No human subjects** — No user studies, surveys, or intervention-based participant research
 - **Public data only** — All analysed data is freely available via standard internet protocols
 - **Reproducibility** — All scanning methodology is documented and open-source
 - **Attribution** — All RFC standards and third-party tools are cited
@@ -233,7 +240,7 @@ This project complies with academic research ethics:
 | Barracuda DNSBL | Blacklist checking | MX server IP addresses | Public DNS service |
 | SORBS DNSBL | Blacklist checking | MX server IP addresses | Public DNS service |
 | UCEProtect DNSBL | Blacklist checking | MX server IP addresses | Public DNS service |
-| Chart.js CDN | Client-side charting | None (JS loaded by browser) | MIT License |
+| jsDelivr CDN (Chart.js) | Client-side charting | Browser request metadata when the chart library is loaded (for example IP address, headers, user agent) | MIT License |
 
 ---
 
@@ -247,4 +254,4 @@ For questions about this privacy and ethics policy:
 
 ---
 
-*This document satisfies the legal, ethical, and data protection requirements for an academic cybersecurity tool that processes only publicly available DNS and HTTPS data.*
+*This document defines the legal, ethical, and privacy controls for an academic cybersecurity tool that primarily processes public DNS and HTTPS security data, plus limited operator-provided local settings.*

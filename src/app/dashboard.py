@@ -4397,7 +4397,7 @@ def _footer_html() -> str:
         </div>
         <p><strong>Final Year Project</strong> · Leon Chapman (50030738)</p>
         <p style="margin-top: 8px;">Belfast Metropolitan College · BSc Cybersecurity &amp; Networking Infrastructure · 2025/2026</p>
-        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Scans public DNS records only &middot; No personal data collected &middot; <a href="https://github.com/L-chapman/AuroraEdge-FYP/blob/master/docs/PRIVACY_AND_ETHICS.md" style="color: var(--accent);">Privacy &amp; Ethics Policy</a></p>
+        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Public DNS checks only &middot; Local settings stay on this device &middot; <a href="https://github.com/L-chapman/AuroraEdge-FYP/blob/master/docs/PRIVACY_AND_ETHICS.md" style="color: var(--accent);">Privacy &amp; Ethics Policy</a></p>
     </footer>
     """
 
@@ -5374,16 +5374,16 @@ def settings_page():
                     <small>Displayed on exports, reports, and the dashboard</small>
                 </div>
                 <div class="form-row">
-                    <label for="alertEmail">Alert / Report Email</label>
+                    <label for="alertEmail">Contact Email (Optional)</label>
                     <input type="email" id="alertEmail" value="{alert_email}" placeholder="e.g., security@yourorg.com">
-                    <small>Receives monitoring alerts and scheduled scan reports</small>
+                    <small>Stored locally only for operator reference. This version does not send email automatically.</small>
                 </div>
             </div>
 
             <!-- Monitoring -->
             <div class="settings-card">
                 <h3>🔄 Monitoring Schedule</h3>
-                <p class="card-desc">Automatic background rescans of managed domains with drift detection alerts.</p>
+                <p class="card-desc">Saved scan interval preference for monitoring workflows. Managed-domain rescans are still manual in this version.</p>
                 <div class="form-row">
                     <label for="monitorInterval">Scan Interval</label>
                     <select id="monitorInterval">
