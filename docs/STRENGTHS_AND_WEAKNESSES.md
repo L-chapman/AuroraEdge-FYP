@@ -41,7 +41,7 @@ The standout differentiator: AuroraEdge can **automatically fix DNS records** vi
 
 ### 1.4 Security Posture (Defence-in-Depth)
 The system implements proper security controls:
-- **Authentication:** Token-based auth on all sensitive endpoints (34 endpoints, 18 tested for bypass)
+- **Authentication:** Token-based auth on all sensitive endpoints (36 endpoints, 18 tested for bypass)
 - **Input validation:** Strict domain regex, SQL injection prevention, XSS sanitisation, path traversal blocking
 - **Security headers:** X-Frame-Options DENY, CSP, X-Content-Type-Options nosniff, Referrer-Policy, Permissions-Policy
 - **Rate limiting:** In-memory per-IP limiter (10 scans/60s) on scan endpoints
