@@ -1,0 +1,41 @@
+﻿# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+coverage.xml
+# Logs & reports
+logs/
+reports/*.tmp
+*.log
+# Node (optional)
+node_modules/
+npm-debug.log*
+# Env & secrets
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.pfx
+# State / database (auto-created)
+state/*.db
+state/*.db-wal
+state/*.db-shm
+# Build artifacts
+dist/
+build/
+.cache/

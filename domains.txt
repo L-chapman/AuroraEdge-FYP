@@ -1,0 +1,66 @@
+﻿# AuroraEdge Academic Dataset
+# 50 domains for FYP analysis
+# Mix of UK organisations, tech companies, and educational institutions
+
+# UK Educational Institutions
+belfastmet.ac.uk
+qub.ac.uk
+ulster.ac.uk
+oxford.ac.uk
+cam.ac.uk
+imperial.ac.uk
+ucl.ac.uk
+ed.ac.uk
+manchester.ac.uk
+birmingham.ac.uk
+leeds.ac.uk
+bristol.ac.uk
+warwick.ac.uk
+glasgow.ac.uk
+exeter.ac.uk
+
+# UK Government & Public Sector
+gov.uk
+nhs.uk
+police.uk
+bbc.co.uk
+channel4.com
+
+# Major Tech Companies
+google.com
+microsoft.com
+amazon.co.uk
+apple.com
+meta.com
+openai.com
+github.com
+gitlab.com
+cloudflare.com
+digitalocean.com
+aws.amazon.com
+
+# UK Businesses
+tesco.com
+sainsburys.co.uk
+asda.com
+morrisons.co.uk
+bt.com
+sky.com
+vodafone.co.uk
+ee.co.uk
+three.co.uk
+virgin.com
+barclays.co.uk
+hsbc.co.uk
+lloydsbank.co.uk
+natwest.com
+
+# Security-focused organisations
+protonmail.com
+tutanota.com
+fastmail.com
+
+# Small/Medium Businesses for variety
+auroraedge.co.uk
+example.com
+auroraedge.co.uk

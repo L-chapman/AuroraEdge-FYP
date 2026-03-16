@@ -1,0 +1,2 @@
+# Large generated-style files — suppress expensive diff computation
+src/app/dashboard.py diff=nodiff
