@@ -2,7 +2,7 @@
 
 **Author:** Leon Chapman (50030738)  
 **Date:** February 2026  
-**Version:** Final Build (393 tests passing)
+**Version:** Final Build (395 tests passing)
 
 ---
 
@@ -50,12 +50,12 @@ The system implements proper security controls:
 - **Credential safety:** Cloudflare API tokens masked in API responses
 
 ### 1.5 Testing Depth
-**393 tests** across 5 categories:
+**395 tests** across 5 categories:
 - Misconfiguration scenarios (200): Comprehensive email security edge cases
 - Security & stress tests (118): Auth bypass, SQL injection, XSS, path traversal, credential masking, concurrency, security headers, privacy
 - Backend QA (38): Thread safety, RFC compliance, median edge cases, error extraction
-- Benchmark & rules (17): Tool comparison, scoring system, performance benchmarks
-- Functional tests (20): Core scanner, database, rules, analysis, CLI, remediation, fallbacks
+- Benchmark & rules (20): Tool comparison, scoring system, performance benchmarks, rules regressions
+- Functional tests (19): Core scanner, database, dashboard, analysis, CLI, remediation, and fallbacks
 
 This represents approximately **6× more security/stress tests than functional tests** — unusual for an academic project and demonstrates security-first thinking.
 

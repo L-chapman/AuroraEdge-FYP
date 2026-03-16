@@ -47,15 +47,15 @@
 
 ## Current Status: Final Build (Feb 2026)
 
-### Test Results: 393/393 Passing
+### Test Results: 395/395 Passing
 
-**Functional Tests (37):**
+**Functional Tests (39):**
 ```
 tests/test_analysis.py  (2)  — statistics calculation
 tests/test_benchmark.py (13) — tool comparison, scoring, rules, performance
 tests/test_cli.py       (1)  — CLI output generation
 tests/test_cli_domains.py(1) — domains-file parsing
-tests/test_dashboard.py (1)  — health & home page
+tests/test_dashboard.py (3)  — health, home page, search/settings regressions
 tests/test_dashboard_auth.py(1) — token enforcement
 tests/test_database.py  (3)  — SQLite persistence
 tests/test_fallbacks.py (1)  — missing-dependency handling
@@ -121,14 +121,14 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Feature expansion**: Remediations expanded from 5 to all 17 rules, `is_valid_domain()` exported, `_extract_error()` helper, `_ensure_ownership()` guard, context manager for DB, rotating audit log
 - **Code quality**: Dead imports removed, `print()` replaced with logging, `csv.writer` replacing manual CSV, accurate JSON log timestamps, domain validation regex
 - **38 new backend QA tests** covering every fix above
-- **393/393 tests passing** after backend audit
+- **395/395 tests passing** after final verification updates
 
 ### Week 19 Updates (2026-01-08)
 - Fixed all deprecated `datetime.utcnow()` calls (21 occurrences)
 - Updated to timezone-aware `datetime.now(timezone.utc)` per Python 3.12 standards
 - Added comprehensive benchmark test suite (`test_benchmark.py`)
 - New tests for tool comparison, scoring system, and performance benchmarks
-- All 393 tests passing with zero warnings
+- All 395 tests passing with zero warnings
 - **Full System Verification Complete**:
   - ✅ All modules import correctly
   - ✅ All 10 API endpoints verified working
@@ -220,7 +220,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Dashboard API integration:** POST /api/rescan tested end-to-end with mocked scanner — response shape, violation propagation, remediation population
 - **Explanation system:** All 18 rule IDs and 5 severity levels have complete why/fix/example/rfc entries
 - **Key finding:** R15 correctly treats unknown sp= values (e.g. "banana") as weaker than any known parent policy — secure default behaviour verified
-- **393/393 tests passing**
+- **395/395 tests passing**
 
 ---
 

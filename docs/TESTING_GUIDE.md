@@ -128,7 +128,7 @@ cd "g:\My Drive\College\AuroraEdge_FYP"
 $env:PYTHONPATH = "$PWD\src"
 python -m pytest tests/ -v
 ```
-Expected: **393/393 tests passing**
+Expected: **395/395 tests passing**
 
 
 ---
@@ -176,7 +176,7 @@ python -m app.cli --domain google.com
 | Interactive Test | Open `/test` in browser | Form to scan any domain |
 | Real-time Updates | Run scan while dashboard open | Dashboard auto-refreshes |
 | Database | Check `state/auroraedge.db` | Persistent scan history |
-| Unit Tests | `pytest tests/ -v` | 393/393 passing |
+| Unit Tests | `pytest tests/ -v` | 395/395 passing |
 
 ### Optional (Owned Domain Only): Automatic DNS Remediation
 If you have a Cloudflare-managed test domain and explicit permission, you can evaluate zero-touch remediation:

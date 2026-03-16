@@ -82,9 +82,9 @@ This notebook captures the academic rationale, design choices, and development l
 - **Interactive Demo**: `.\scripts\demo.ps1` - Menu-driven interface
 - **Single Scan**: `python -m app.cli --domain example.com --remediation`
 - **Batch Scan**: `python -m app.cli --domains domains.txt`
-- **Dashboard**: `cd src; python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080`
+- **Dashboard**: `$env:PYTHONPATH = "$PWD\src"; python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080`
 - **Test Hub**: Open `http://127.0.0.1:8080/test` in browser
-- **Tests**: `python -m pytest tests/ -v` (393 tests, all offline)
+- **Tests**: `python -m pytest tests/ -v` (395 tests, all offline)
 
 ## 9. Completed Stages (All Implemented)
 
@@ -127,7 +127,7 @@ This notebook captures the academic rationale, design choices, and development l
 ## 12. Evidence Collection for Dissertation
 - Screenshots: CLI Rich table, dashboard views, Test Hub
 - CI proof: GitHub Actions workflow
-- Testing proof: 393/393 pytest summary
+- Testing proof: 395/395 pytest summary
 - Architecture diagram: scanner → rules → outputs → dashboard
 - Analysis figures: matplotlib charts in `docs/figures/`
 
