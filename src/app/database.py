@@ -18,6 +18,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+import random
 
 logger = logging.getLogger("auroraedge.database")
 
@@ -237,7 +238,6 @@ class AuroraDatabase:
             scan_id: Unique identifier for this scan
         """
         # Include microseconds + random suffix to guarantee uniqueness
-        import random
         scan_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f") + f"_{random.randint(0, 9999):04d}"
         try:
             with self._lock:
@@ -351,8 +351,8 @@ class AuroraDatabase:
         grade = evaluation.get("grade", "")
 
         if existing:
-            best = max(existing["best_score"] or 0, score)
-            worst = min(existing["worst_score"] or 100, score)
+            best = max(existing["best_score"], score)
+            worst = min(existing["worst_score"], score)
             cursor.execute(
                 """
                 UPDATE domains SET

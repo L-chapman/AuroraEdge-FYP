@@ -47,7 +47,7 @@
 
 ## Current Status: Final Build (Feb 2026)
 
-### Test Results: 392/392 Passing
+### Test Results: 393/393 Passing
 
 **Functional Tests (34):**
 ```
@@ -57,7 +57,7 @@ tests/test_cli.py       (1)  — CLI output generation
 tests/test_cli_domains.py(1) — domains-file parsing
 tests/test_dashboard.py (1)  — health & home page
 tests/test_dashboard_auth.py(1) — token enforcement
-tests/test_database.py  (2)  — SQLite persistence
+tests/test_database.py  (3)  — SQLite persistence
 tests/test_fallbacks.py (1)  — missing-dependency handling
 tests/test_remediation.py(4) — fix recommendations
 tests/test_rules.py     (3)  — severity classification
@@ -220,7 +220,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Dashboard API integration:** POST /api/rescan tested end-to-end with mocked scanner — response shape, violation propagation, remediation population
 - **Explanation system:** All 18 rule IDs and 5 severity levels have complete why/fix/example/rfc entries
 - **Key finding:** R15 correctly treats unknown sp= values (e.g. "banana") as weaker than any known parent policy — secure default behaviour verified
-- **392/392 tests passing**
+- **393/393 tests passing**
 
 ---
 

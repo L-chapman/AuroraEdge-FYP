@@ -111,3 +111,39 @@ def test_database_multiple_scans():
         assert len(candidates) == 0
     finally:
         _cleanup(db, tmpdir)
+
+
+def test_score_zero_tracking():
+    """Regression test: worst_score of 0 must not be lost on rescan.
+
+    Previously, ``min(existing['worst_score'] or 100, score)`` treated
+    0 as falsy and defaulted to 100, corrupting the historical minimum.
+    """
+    db, tmpdir = _make_tmp_db()
+    try:
+        base_result = {"spf_present": False, "mx_present": False, "dmarc_present": False}
+
+        # First scan: score 0
+        sid1 = db.start_scan()
+        db.save_result(sid1, "zero.test", base_result, {
+            "severity": "CRITICAL", "score": 0, "grade": "F",
+            "violations": "R1,R2,R3", "violation_count": 3,
+        })
+        db.complete_scan(sid1, 1)
+
+        # Second scan: score 50
+        sid2 = db.start_scan()
+        db.save_result(sid2, "zero.test", base_result, {
+            "severity": "HIGH", "score": 50, "grade": "D",
+            "violations": "R2", "violation_count": 1,
+        })
+        db.complete_scan(sid2, 1)
+
+        # Worst score must still be 0, not 50
+        cur = db.conn.cursor()
+        cur.execute("SELECT best_score, worst_score FROM domains WHERE domain = ?", ("zero.test",))
+        row = cur.fetchone()
+        assert row["worst_score"] == 0, f"worst_score should be 0, got {row['worst_score']}"
+        assert row["best_score"] == 50, f"best_score should be 50, got {row['best_score']}"
+    finally:
+        _cleanup(db, tmpdir)

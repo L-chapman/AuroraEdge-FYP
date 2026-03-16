@@ -141,7 +141,7 @@ $env:PYTHONPATH = "$PWD\src"
 python -m pytest tests/ -v
 ```
 
-**Result:** 392 tests passing across functional, security, stress, and backend QA suites
+**Result:** 393 tests passing across functional, security, stress, and backend QA suites
 
 ---
 
@@ -191,7 +191,7 @@ AuroraEdge_FYP/
 │   ├── logging_config.py   # Structured JSON logging
 │   └── main.py             # CLI entry point
 │
-├── tests/                  ← 392 automated tests
+├── tests/                  ← 393 automated tests
 ├── docs/                   ← Stage READMEs, weekly logs, guides
 ├── reports/archive/        ← Historical scan results
 ├── scripts/
