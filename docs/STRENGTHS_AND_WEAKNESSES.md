@@ -50,12 +50,14 @@ The system implements proper security controls:
 - **Credential safety:** Cloudflare API tokens masked in API responses
 
 ### 1.5 Testing Depth
-**180 tests** across 4 categories:
-- Functional tests (34): Core scanner, database, rules, analysis, CLI
-- Security tests (108): Auth bypass, SQL injection (28), XSS (8), path traversal (10), credential masking, concurrency, security headers (7), privacy (3)
+**393 tests** across 5 categories:
+- Misconfiguration scenarios (200): Comprehensive email security edge cases
+- Security & stress tests (118): Auth bypass, SQL injection, XSS, path traversal, credential masking, concurrency, security headers, privacy
 - Backend QA (38): Thread safety, RFC compliance, median edge cases, error extraction
+- Benchmark & rules (17): Tool comparison, scoring system, performance benchmarks
+- Functional tests (20): Core scanner, database, rules, analysis, CLI, remediation, fallbacks
 
-This represents approximately **3.3× more security tests than functional tests** — unusual for an academic project and demonstrates security-first thinking.
+This represents approximately **6× more security/stress tests than functional tests** — unusual for an academic project and demonstrates security-first thinking.
 
 ### 1.6 Self-Contained Architecture
 - Single `pip install -r requirements.txt` sets up everything

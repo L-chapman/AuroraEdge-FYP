@@ -213,7 +213,7 @@ These changes extend the prototype toward the spec phrasing “set up, monitor, 
 | Dashboard | Complete | `src/app/dashboard.py` |
 | Database | Complete | `src/app/database.py` |
 | Analysis | Complete | `src/app/analysis.py` |
-| Test Suite | Complete | `tests/` (34 tests) |
+| Test Suite | Complete | `tests/` (393 tests) |
 | Documentation | In progress | `docs/` |
 | Dissertation | Pending | External |
 
