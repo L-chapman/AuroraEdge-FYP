@@ -53,6 +53,9 @@ def _sanitize_domain(raw) -> tuple:
         return ("", "Domain is required")
     if not _DOMAIN_RE.match(domain):
         return ("", "Invalid domain format")
+    # Reject bare IP addresses – we need a real domain for DNS checks
+    if all(part.isdigit() for part in domain.split(".")):
+        return ("", "IP addresses are not valid – enter a domain name")
     return (domain, None)
 
 
@@ -602,6 +605,8 @@ def api_severity_explanation(severity: str):
 @app.get("/api/explanations/rule/{rule_id}")
 def api_rule_explanation(rule_id: str):
     """Get explanation for a specific rule ID."""
+    if rule_id not in RULE_EXPLANATIONS:
+        raise HTTPException(status_code=404, detail="Unknown rule ID")
     return get_rule_explanation(rule_id)
 
 
@@ -669,7 +674,7 @@ def api_clear_all_data():
 # ---------------------------------------------------------------------------
 
 @app.post("/api/rescan/{domain}", dependencies=[Depends(require_token)])
-def api_rescan_domain(domain: str):
+def api_rescan_domain(request: Request, domain: str):
     """Re-scan a single domain and persist updated results.
 
     This is the endpoint that every "Rescan" button in the UI calls.
@@ -681,6 +686,8 @@ def api_rescan_domain(domain: str):
     """
     if not HAS_SCANNER:
         raise HTTPException(status_code=501, detail="Scanner module not available")
+
+    _rate_check(request)
 
     clean, err = _sanitize_domain(domain)
     if err:

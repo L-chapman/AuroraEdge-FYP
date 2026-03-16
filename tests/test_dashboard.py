@@ -105,3 +105,30 @@ def test_settings_reject_invalid_monitor_interval(monkeypatch):
     )
     assert r.status_code == 400
     assert "monitor_interval must be one of" in r.text
+
+
+def test_ip_address_rejected_as_domain(monkeypatch):
+    """IP addresses should be rejected — we need real domain names for DNS checks."""
+    monkeypatch.setenv("DASH_TOKEN", "")
+    client = TestClient(dashboard.app)
+
+    r = client.post("/api/rescan/127.0.0.1")
+    assert r.status_code == 400
+
+    r = client.post("/api/rescan/192.168.1.1")
+    assert r.status_code == 400
+
+    r = client.post("/api/rescan/10.0.0.1")
+    assert r.status_code == 400
+
+
+def test_unknown_rule_id_returns_404(monkeypatch):
+    """Unknown rule IDs should return 404, not a generic fallback."""
+    monkeypatch.setenv("DASH_TOKEN", "")
+    client = TestClient(dashboard.app)
+
+    r = client.get("/api/explanations/rule/FAKE_RULE")
+    assert r.status_code == 404
+
+    r = client.get("/api/explanations/rule/R1_MX_MISSING")
+    assert r.status_code == 200

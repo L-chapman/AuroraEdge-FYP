@@ -142,7 +142,7 @@ $env:PYTHONPATH = "$PWD\src"
 python -m pytest tests/ -v
 ```
 
-**Result:** 395 tests passing across functional, security, stress, and backend QA suites
+**Result:** 397 tests passing across functional, security, stress, and backend QA suites
 
 ---
 
