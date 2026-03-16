@@ -72,16 +72,18 @@ Once the server is running, open **http://127.0.0.1:8080** in your browser.
 ### Live Auto-Fix Demo
 
 The domain **`auroraedge.co.uk`** is pre-configured as the live demo domain.
-Its DMARC, DKIM, MTA-STS and TLS-RPT records have been **intentionally removed**
-so the automated remediation engine has real issues to fix during marking.
+It has **intentional weaknesses** — SPF set to softfail (`~all`), DMARC at
+`p=quarantine` with only 50% coverage (`pct=50`), and no MTA-STS policy —
+so the automated remediation engine has real issues to detect and fix.
 
 **Quick walkthrough:**
 
 1. Open the **Scan** page (`/test`).
 2. Click the **⭐ auroraedge.co.uk (Auto-Fix Demo)** quick-domain button and press **Scan Domain**.
-3. Observe the low security grade and the violations listed (DMARC Missing, DKIM Not Found, MTA-STS Missing, TLS-RPT Missing).
-4. Click **🔧 Auto-Fix DNS** on the scan results — the system will create the missing records via the Cloudflare API in real time.
-5. Press **🔄 Rescan** and watch the grade improve as each record is now present.
+3. Observe the low security grade (D) and the violations listed (SPF softfail, DMARC quarantine at 50%, MTA-STS missing, etc.).
+4. Click **🔧 Auto-Fix DNS** on the scan results — the system will harden/create DNS records via the Cloudflare API in real time.
+5. Press **🔄 Rescan** and watch the grade improve as each record is now corrected.
+6. The system performs a **post-fix verification scan** and shows the grade change (e.g. D → B).
 
 > **Note:** Only `auroraedge.co.uk` supports auto-fix because it is the Cloudflare-managed zone whose credentials are stored in Settings. You can scan any other domain freely, but auto-fix will only work for domains within this zone.
 
@@ -139,7 +141,7 @@ $env:PYTHONPATH = "$PWD\src"
 python -m pytest tests/ -v
 ```
 
-**Result:** 170/170 passing (34 functional + 98 security + 38 backend QA)
+**Result:** 392 tests passing across functional, security, stress, and backend QA suites
 
 ---
 
@@ -189,7 +191,7 @@ AuroraEdge_FYP/
 │   ├── logging_config.py   # Structured JSON logging
 │   └── main.py             # CLI entry point
 │
-├── tests/                  ← 170 automated tests
+├── tests/                  ← 392 automated tests
 ├── docs/                   ← Stage READMEs, weekly logs, guides
 ├── reports/archive/        ← Historical scan results
 ├── scripts/
@@ -246,3 +248,23 @@ AuroraEdge_FYP/
 | `docs/ACADEMIC_NOTEBOOK.md` | Design decisions and rationale |
 | `docs/VERIFICATION_REPORT.md` | System verification report |
 | `docs/weekly/` | Weekly development logs |
+| `docs/PRIVACY_AND_ETHICS.md` | GDPR, CMA 1990, legal compliance |
+
+---
+
+## Privacy & Legal
+
+AuroraEdge only queries **publicly available DNS records** — the same data any
+browser or mail server can see. No authentication credentials are tested, no
+mail is sent, and no private data is accessed.
+
+Full compliance details: UK Computer Misuse Act 1990, GDPR Article 4(1),
+Cloudflare API Terms of Service, and Spamhaus usage terms are documented in
+[docs/PRIVACY_AND_ETHICS.md](docs/PRIVACY_AND_ETHICS.md).
+
+---
+
+## License
+
+This project was developed as a Final Year Project for academic assessment.
+All rights reserved © 2025–2026 Leon Chapman.
