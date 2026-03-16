@@ -39,6 +39,7 @@ logger = logging.getLogger("auroraedge.dns_fix")
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
 CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 CF_ZONE_ID = os.environ.get("CF_ZONE_ID", "")
+CF_ACCOUNT_ID = os.environ.get("CF_ACCOUNT_ID", "")
 
 # Audit log path (rotated, max 2 MB, 3 backups)
 ROOT = Path(__file__).resolve().parents[2]
@@ -722,11 +723,17 @@ class CloudflareDNS:
 
     def get_account_id(self) -> Optional[str]:
         """
-        Retrieve the Cloudflare account ID from the configured zone.
+        Retrieve the Cloudflare account ID.
+
+        Prefers the configured CF_ACCOUNT_ID env/setting, falls back to
+        fetching it from the zone metadata.
 
         Returns:
             Account ID string, or None if unavailable.
         """
+        # Prefer explicitly configured account ID
+        if CF_ACCOUNT_ID:
+            return CF_ACCOUNT_ID
         url = f"{CF_API_BASE}/zones/{self.zone_id}"
         success, result = self._request("GET", url)
         if success:

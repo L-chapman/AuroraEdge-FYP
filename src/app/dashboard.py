@@ -1001,8 +1001,8 @@ async def api_save_settings(request: Request):
 
     db = get_database()
     allowed_keys = [
-        "cf_api_token", "cf_zone_id", "monitor_interval",
-        "alert_email", "org_name", "clear_on_start",
+        "cf_api_token", "cf_zone_id", "cf_account_id",
+        "monitor_interval", "alert_email", "org_name", "clear_on_start",
     ]
     saved = []
     for key in allowed_keys:
@@ -1024,12 +1024,16 @@ def _apply_cf_settings(db):
     import app.dns_fix as dns_mod
     token = db.get_setting("cf_api_token")
     zone = db.get_setting("cf_zone_id")
+    account_id = db.get_setting("cf_account_id")
     if token:
         dns_mod.CF_API_TOKEN = token
         os.environ["CF_API_TOKEN"] = token
     if zone:
         dns_mod.CF_ZONE_ID = zone
         os.environ["CF_ZONE_ID"] = zone
+    if account_id:
+        dns_mod.CF_ACCOUNT_ID = account_id
+        os.environ["CF_ACCOUNT_ID"] = account_id
 
 
 def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
@@ -1105,25 +1109,70 @@ def api_test_cloudflare():
     """Test the current Cloudflare connection using stored credentials.
 
     Returns ``zone_name`` so the frontend can perform a quick ownership
-    pre-check before allowing auto-fix.  Also probes Workers API access.
+    pre-check before allowing auto-fix.  Also probes Workers API access
+    and returns a granular permissions breakdown.
     """
     if not HAS_DB:
-        return {"ok": False, "message": "Database not available", "zone_name": "", "workers": False}
+        return {"ok": False, "message": "Database not available", "zone_name": "", "workers": False, "permissions": {}}
     db = get_database()
     _apply_cf_settings(db)
     if not HAS_DNS_FIX:
-        return {"ok": False, "message": "DNS fix module not available", "zone_name": "", "workers": False}
+        return {"ok": False, "message": "DNS fix module not available", "zone_name": "", "workers": False, "permissions": {}}
     cf = get_cloudflare_client()
     if not cf:
-        return {"ok": False, "message": "Cloudflare not configured — add API token and Zone ID in Settings", "zone_name": "", "workers": False}
+        return {"ok": False, "message": "Cloudflare not configured — add API token and Zone ID in Settings", "zone_name": "", "workers": False, "permissions": {}}
     ok, msg = cf.validate_connection()
     zone = (cf.zone_name or "").strip().lower().rstrip(".")
-    # Check if Workers API is accessible (needed for MTA-STS auto-hosting)
-    workers_ok = False
+
+    # Granular permission probing
+    perms = {"zone_read": ok, "dns_edit": False, "workers": False}
+    account_id = None
     if ok:
-        account_id = cf.get_account_id()
-        workers_ok = account_id is not None
-    return {"ok": ok, "message": msg, "zone_name": zone, "workers": workers_ok}
+        # Test DNS edit by listing records (safe read operation)
+        try:
+            import requests as _req
+            _h = {"Authorization": f"Bearer {cf.api_token}", "Content-Type": "application/json"}
+            dr = _req.get(f"{cf.base_url}?per_page=1", headers=_h, timeout=8)
+            perms["dns_edit"] = dr.json().get("success", False)
+        except Exception:
+            pass
+
+        # Get account ID (from settings or auto-detect from zone)
+        account_id = db.get_setting("cf_account_id") or cf.get_account_id()
+
+        # Actually probe Workers Scripts API (not just account ID existence)
+        if account_id:
+            try:
+                import requests as _req
+                _h = {"Authorization": f"Bearer {cf.api_token}", "Content-Type": "application/json"}
+                wr = _req.get(
+                    f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts",
+                    headers=_h, timeout=8,
+                )
+                perms["workers"] = wr.json().get("success", False)
+            except Exception:
+                pass
+
+        # Auto-store account ID if we discovered it and it wasn't saved
+        if account_id and not db.get_setting("cf_account_id"):
+            db.set_setting("cf_account_id", account_id)
+
+    # Build feature availability summary
+    features = []
+    if perms["dns_edit"]:
+        features.append("SPF, DMARC, DKIM, TLS-RPT, MTA-STS DNS")
+    if perms["workers"]:
+        features.append("MTA-STS HTTPS auto-hosting")
+
+    return {
+        "ok": ok,
+        "message": msg,
+        "zone_name": zone,
+        "workers": perms["workers"],
+        "permissions": perms,
+        "account_id": account_id or "",
+        "features": features,
+    }
 
 
 # =============================================================================
@@ -5162,6 +5211,7 @@ def settings_page():
         cf_token_set = True
 
     zone_id = settings.get("cf_zone_id", "")
+    account_id = settings.get("cf_account_id", "")
     interval = settings.get("monitor_interval", "24")
     org_name = settings.get("org_name", "")
     alert_email = settings.get("alert_email", "")
@@ -5453,17 +5503,41 @@ def settings_page():
             <div class="settings-card full-width">
                 <h3>☁️ Cloudflare Integration {cf_badge}</h3>
                 <p class="card-desc">
-                    Connect Cloudflare to enable one-click DNS auto-fix (SPF, DMARC, DKIM, MTA-STS, TLS-RPT).
-                    Your API token is encrypted at rest and never leaves this server.
+                    Connect your Cloudflare account to enable one-click DNS auto-fix.
+                    Enter your API token, Zone ID, and (optionally) Account ID below.
+                    Your credentials are stored locally and never leave this server.
                 </p>
-                <div style="margin-bottom:20px;">
-                    <span style="color:var(--text-secondary);font-size:0.85rem;">Required permissions: </span>
-                    <span class="perm-tag">Zone : DNS : Edit</span>
-                    <span class="perm-tag">Zone : Zone : Read</span>
-                    <span style="color:var(--text-muted);font-size:0.78rem;margin-left:6px;">
-                        + optional <span class="perm-tag">Account : Workers Scripts : Edit</span> for MTA-STS auto-hosting
-                    </span>
-                </div>
+
+                <!-- Token creation guide -->
+                <details style="margin-bottom:20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 18px;">
+                    <summary style="cursor:pointer;font-weight:600;font-size:0.88rem;color:var(--accent);">📖 How to create a Cloudflare API token</summary>
+                    <div style="margin-top:12px;font-size:0.84rem;color:var(--text-secondary);line-height:1.7;">
+                        <ol style="padding-left:18px;margin:8px 0;">
+                            <li>Go to <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="quick-link" style="display:inline;">dash.cloudflare.com/profile/api-tokens</a></li>
+                            <li>Click <strong>Create Token</strong></li>
+                            <li>Use <strong>Create Custom Token</strong> (not a template)</li>
+                            <li>Add these permissions:
+                                <div style="margin:8px 0 4px 0;">
+                                    <span class="perm-tag" style="background:var(--success-bg);border-color:var(--success);color:var(--success);">Zone : DNS : Edit</span>
+                                    <span style="font-size:0.75rem;color:var(--text-muted);margin:0 4px;">— Required for SPF, DMARC, DKIM, TLS-RPT, MTA-STS DNS</span>
+                                </div>
+                                <div style="margin:4px 0;">
+                                    <span class="perm-tag" style="background:var(--success-bg);border-color:var(--success);color:var(--success);">Zone : Zone : Read</span>
+                                    <span style="font-size:0.75rem;color:var(--text-muted);margin:0 4px;">— Required for zone verification</span>
+                                </div>
+                                <div style="margin:4px 0;">
+                                    <span class="perm-tag" style="background:var(--warning-bg);border-color:var(--warning);color:var(--warning);">Account : Workers Scripts : Edit</span>
+                                    <span style="font-size:0.75rem;color:var(--text-muted);margin:0 4px;">— Needed for MTA-STS HTTPS policy auto-hosting via Worker</span>
+                                </div>
+                            </li>
+                            <li>Under <strong>Zone Resources</strong>, select your domain</li>
+                            <li>Under <strong>Account Resources</strong>, select your account</li>
+                            <li>Click <strong>Continue to summary</strong> → <strong>Create Token</strong></li>
+                            <li>Copy the token and paste it below</li>
+                        </ol>
+                    </div>
+                </details>
+
                 <div class="settings-grid" style="margin-bottom:0;gap:16px;">
                     <div class="form-row" style="margin-bottom:0;">
                         <label for="cfToken">API Token</label>
@@ -5476,7 +5550,6 @@ def settings_page():
                             <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="quick-link">
                                 🔗 Create token on Cloudflare
                             </a>
-                            — Profile → API Tokens → Create Token → Edit zone DNS
                         </small>
                     </div>
                     <div class="form-row" style="margin-bottom:0;">
@@ -5484,13 +5557,27 @@ def settings_page():
                         <div class="input-group">
                             <input type="text" id="cfZone" value="{zone_id}" placeholder="32-character hex string" autocomplete="off">
                         </div>
-                        <small>Your domain's Overview page in Cloudflare → right sidebar → Zone ID</small>
+                        <small>Cloudflare dashboard → your domain → Overview → right sidebar → Zone ID</small>
+                    </div>
+                    <div class="form-row" style="margin-bottom:0;">
+                        <label for="cfAccount">Account ID <span style="color:var(--text-muted);font-weight:400;font-size:0.8rem;">(auto-detected)</span></label>
+                        <div class="input-group">
+                            <input type="text" id="cfAccount" value="{account_id}" placeholder="Auto-detected when you test the connection" autocomplete="off">
+                        </div>
+                        <small>Found on the same Overview page as Zone ID. Usually auto-detected.</small>
                     </div>
                 </div>
                 <div class="btn-row" style="margin-top:16px;">
                     <button class="btn btn-secondary" onclick="testCloudflare()" style="padding:10px 20px;">🧪 Test Connection</button>
                 </div>
                 <div class="test-result" id="cfTestResult"></div>
+
+                <!-- Permissions checklist (populated by Test Connection) -->
+                <div id="cfPermissions" style="display:none;margin-top:16px;padding:16px 20px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);">
+                    <div style="font-weight:600;font-size:0.88rem;margin-bottom:10px;">Token Permissions</div>
+                    <div id="cfPermList" style="font-size:0.85rem;line-height:2;"></div>
+                    <div id="cfFeatureList" style="margin-top:10px;font-size:0.82rem;color:var(--text-secondary);"></div>
+                </div>
             </div>
 
             <!-- Data Management -->
@@ -5582,6 +5669,7 @@ def settings_page():
         const data = {{
             org_name: document.getElementById('orgName').value,
             cf_zone_id: document.getElementById('cfZone').value,
+            cf_account_id: document.getElementById('cfAccount').value,
             monitor_interval: document.getElementById('monitorInterval').value,
             alert_email: document.getElementById('alertEmail').value,
             clear_on_start: document.getElementById('clearOnStart').checked ? 'true' : 'false',
@@ -5616,28 +5704,58 @@ def settings_page():
             await saveSettings();
         }}
         const result = document.getElementById('cfTestResult');
+        const permBox = document.getElementById('cfPermissions');
+        const permList = document.getElementById('cfPermList');
+        const featList = document.getElementById('cfFeatureList');
         result.className = 'test-result';
         result.style.display = 'block';
         result.innerHTML = '<span style="opacity:0.7;">Testing connection…</span>';
+        permBox.style.display = 'none';
         try {{
             const res = await fetch('/api/settings/test-cloudflare');
             const data = await res.json();
             if (data.ok) {{
                 let info = '✅ <strong>Connected</strong> — Zone: <code>' + data.zone_name + '</code>';
-                if (data.workers) {{
-                    info += '<br>✅ Workers API accessible — MTA-STS auto-hosting available';
-                }} else {{
-                    info += '<br>⚠️ Workers API not accessible — MTA-STS auto-hosting requires <code>Account : Workers Scripts : Edit</code> permission';
-                }}
                 result.className = 'test-result ok';
                 result.innerHTML = info;
+
+                // Auto-fill account ID if discovered
+                if (data.account_id) {{
+                    const acctInput = document.getElementById('cfAccount');
+                    if (!acctInput.value) {{
+                        acctInput.value = data.account_id;
+                    }}
+                }}
+
+                // Show permissions checklist
+                const p = data.permissions || {{}};
+                const tick = '<span style="color:var(--success);font-weight:700;">✓</span>';
+                const cross = '<span style="color:var(--danger);font-weight:700;">✗</span>';
+                let html = '';
+                html += '<div>' + (p.zone_read ? tick : cross) + ' <span class="perm-tag">Zone : Zone : Read</span> Zone verification</div>';
+                html += '<div>' + (p.dns_edit ? tick : cross) + ' <span class="perm-tag">Zone : DNS : Edit</span> SPF, DMARC, DKIM, TLS-RPT, MTA-STS records</div>';
+                html += '<div>' + (p.workers ? tick : cross) + ' <span class="perm-tag">Account : Workers Scripts : Edit</span> MTA-STS HTTPS auto-hosting';
+                if (!p.workers) {{
+                    html += ' <span style="color:var(--warning);font-size:0.78rem;margin-left:6px;">— update your token to enable this</span>';
+                }}
+                html += '</div>';
+                permList.innerHTML = html;
+
+                if (data.features && data.features.length) {{
+                    featList.innerHTML = '🔧 <strong>Available auto-fix features:</strong> ' + data.features.join(', ');
+                }} else {{
+                    featList.innerHTML = '⚠️ No auto-fix features available. Check your token permissions.';
+                }}
+                permBox.style.display = 'block';
             }} else {{
                 result.className = 'test-result fail';
                 result.innerHTML = '❌ ' + data.message;
+                permBox.style.display = 'none';
             }}
         }} catch(e) {{
             result.className = 'test-result fail';
             result.innerHTML = '❌ Connection failed: ' + e.message;
+            permBox.style.display = 'none';
         }}
     }}
 
