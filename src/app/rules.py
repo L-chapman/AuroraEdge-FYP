@@ -102,6 +102,18 @@ RULE_EXPLANATIONS = {
         "example": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
         "rfc": "RFC 7489",
     },
+    "R5C_DMARC_PCT": {
+        "why": "DMARC pct= controls what percentage of failing messages the policy applies to. A value below 100 means some spoofed emails bypass your DMARC policy entirely.",
+        "fix": "Set pct=100 (or remove the pct tag, which defaults to 100) so the policy applies to all messages.",
+        "example": "v=DMARC1; p=reject; pct=100; rua=mailto:dmarc@example.com",
+        "rfc": "RFC 7489",
+    },
+    "R5D_DMARC_NO_RUA": {
+        "why": "The rua= tag tells receivers where to send DMARC aggregate reports. Without it, you have no visibility into who is sending email as your domain or whether authentication is passing.",
+        "fix": "Add a rua= tag with a reporting mailbox to receive daily aggregate reports.",
+        "example": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
+        "rfc": "RFC 7489",
+    },
     "R6_DKIM_NOT_FOUND": {
         "why": "DKIM (DomainKeys Identified Mail) cryptographically signs emails, proving they haven't been tampered with. Without DKIM, emails can be modified in transit.",
         "fix": "Configure DKIM signing with your email provider. They'll give you a public key to publish in DNS.",

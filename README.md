@@ -50,6 +50,7 @@ Once the server is running, open **http://127.0.0.1:8080** in your browser.
 | **Dashboard** | `/` | Defence overview — domain health, scores, alerts, grade distribution |
 | **Scan Domains** | `/test` | Analyse any domain and get a full security assessment |
 | **My Domains** | `/domains` | Add your domains for continuous monitoring and auto-defence |
+| **Generator** | `/generator` | DNS record generator wizard — build SPF, DMARC, MTA-STS records |
 | **Settings** | `/settings` | Cloudflare credentials, monitoring intervals, export/import |
 
 ### Try a Scan
@@ -182,7 +183,7 @@ AuroraEdge_FYP/
 │
 ├── src/app/                ← Source code (10 modules)
 │   ├── scanner.py          # DNS lookups (SPF, DKIM, DMARC, MTA-STS, TLS-RPT)
-│   ├── rules.py            # 17 evaluation rules, scoring, grading
+│   ├── rules.py            # 20 evaluation rules, scoring, grading
 │   ├── dashboard.py        # FastAPI cyber defence dashboard
 │   ├── database.py         # SQLite persistence (WAL mode, thread-safe)
 │   ├── dns_fix.py          # Cloudflare auto-remediation engine
@@ -196,6 +197,7 @@ AuroraEdge_FYP/
 ├── reports/archive/        ← Historical scan results
 ├── scripts/
 │   ├── demo.ps1            # Interactive demo for evaluators
+│   ├── demo_prep.py        # Weaken/restore DNS for demo flow
 │   └── lab_experiment.py   # Lab evaluation protocol
 ├── state/                  ← SQLite database
 └── logs/                   ← Runtime logs (auto-created)
@@ -203,26 +205,64 @@ AuroraEdge_FYP/
 
 ---
 
-## API Endpoints
+## API Endpoints (36 total)
+
+### Pages
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Dashboard |
+| `/` | GET | Dashboard home |
 | `/test` | GET | Interactive scanner |
+| `/domains` | GET | Managed domains page |
+| `/generator` | GET | DNS record generator wizard |
 | `/settings` | GET | Settings page |
-| `/health` | GET | Health check |
-| `/api/scan` | POST | Scan domains |
+| `/health` | GET | Health check (JSON) |
+
+### Scan & Remediation
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/scan` | POST | Scan one or more domains |
+| `/api/rescan/{domain}` | POST | Rescan a single domain |
 | `/api/apply-fix` | POST | Apply DNS fixes via Cloudflare |
 | `/api/fix-status` | GET | Cloudflare availability check |
+
+### Data & Reports
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/runs` | GET | All scan report files |
+| `/api/latest` | GET | Latest scan results |
+| `/api/summary` | GET | Aggregate statistics |
+| `/api/stats` | GET | Score distribution data |
+| `/api/domain/{domain}` | GET | Single-domain results |
+| `/api/search` | GET | Search scan results |
+| `/api/history/{domain}` | GET/DELETE | Domain scan history |
+| `/api/stream` | GET | SSE real-time updates |
+| `/api/report/pdf/{domain}` | GET | PDF report download |
+| `/download/latest` | GET | Download latest report |
+| `/download/{filename}` | GET | Download specific report |
+| `/api/data/clear` | POST | Clear all scan data |
+
+### Domain Management
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/managed-domains` | GET/POST | Managed domains CRUD |
+| `/api/managed-domains/{domain}` | DELETE | Remove managed domain |
 | `/api/settings` | GET/POST | App settings |
 | `/api/settings/test-cloudflare` | GET | Validate Cloudflare credentials |
 | `/api/alerts` | GET | Monitoring alerts |
-| `/api/runs` | GET | All scan files |
-| `/api/latest` | GET | Latest scan results |
-| `/api/summary` | GET | Aggregate statistics |
-| `/api/stream` | GET | SSE real-time updates |
-| `/download/latest` | GET | Download report |
+| `/api/alerts/{id}/acknowledge` | POST | Acknowledge an alert |
+
+### Reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/explanations/all` | GET | All rule & severity explanations |
+| `/api/explanations/rule/{id}` | GET | Single rule explanation |
+| `/api/explanations/severity/{level}` | GET | Severity level explanation |
+| `/api/tools/comparison` | GET | Tool comparison data |
 
 ---
 

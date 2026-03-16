@@ -238,10 +238,13 @@ python -m app.cli --domain example.com --remediation
 
 ### Dashboard
 ```powershell
-cd src
+$env:PYTHONPATH = "$PWD\src"
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
-# Dashboard: http://127.0.0.1:8080
-# Test Hub:  http://127.0.0.1:8080/test
+# Dashboard:  http://127.0.0.1:8080
+# Test Hub:   http://127.0.0.1:8080/test
+# Domains:    http://127.0.0.1:8080/domains
+# Generator:  http://127.0.0.1:8080/generator
+# Settings:   http://127.0.0.1:8080/settings
 ```
 
 ### Run Tests

@@ -17,7 +17,9 @@ This launches a simple menu with the main testing options.
 
 ### Option B: Web Dashboard
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP\src"
+cd "g:\My Drive\College\AuroraEdge_FYP"
+.\.venv\Scripts\Activate.ps1
+$env:PYTHONPATH = "$PWD\src"
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 ```
 Then open: **http://127.0.0.1:8080/test**
@@ -55,7 +57,9 @@ python -m app.cli --domain belfast.ac.uk --remediation
 
 ### 1. Start the Dashboard
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP\src"
+cd "g:\My Drive\College\AuroraEdge_FYP"
+.\.venv\Scripts\Activate.ps1
+$env:PYTHONPATH = "$PWD\src"
 $env:DASH_TOKEN = ""  # Disable auth for testing
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 ```
@@ -67,6 +71,7 @@ python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 | http://127.0.0.1:8080 | Main Dashboard - View scan results |
 | http://127.0.0.1:8080/test | **Test Hub** - Scan any domain interactively |
 | http://127.0.0.1:8080/domains | **My Domains** - Managed domains + monitoring |
+| http://127.0.0.1:8080/generator | **Generator** - DNS record generator wizard |
 | http://127.0.0.1:8080/settings | **Settings** - Cloudflare + monitoring interval |
 | http://127.0.0.1:8080/health | Health check endpoint |
 | http://127.0.0.1:8080/api/runs | List all scan reports |

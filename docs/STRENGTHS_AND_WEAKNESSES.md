@@ -34,7 +34,7 @@ The standout differentiator: AuroraEdge can **automatically fix DNS records** vi
 - Domain ownership verification prevents cross-zone mistakes
 
 ### 1.3 Rules Engine Quality
-- **19 distinct rules** (R1–R14 + sub-rules) covering all major email security weaknesses
+- **20 distinct rules** (R1–R15 + sub-rules) covering all major email security weaknesses
 - Each rule includes: RFC reference, explanation (why it matters), fix guidance, and example DNS record
 - Weighted scoring system (CRITICAL: 40pts, HIGH: 25pts, WARN: 10pts, INFO: 2pts) produces 0–100 scores
 - Letter grades (A+ through F) provide instant comprehension
@@ -128,7 +128,7 @@ While the Managed Domains page allows adding domains for monitoring, there is no
 | Score timeline | ✅ | ✅ |
 | Record generator wizard | ✅ | Some |
 | Blacklist checking | ✅ | Some |
-| Security test suite | 108 tests | N/A |
+| Security test suite | 118 tests | N/A |
 
 ---
 
@@ -156,4 +156,4 @@ These features would strengthen AuroraEdge for production use beyond the FYP:
 
 ## 5. Conclusion
 
-AuroraEdge's core strength is its **breadth of protocol coverage** combined with **automated remediation** — a combination not found in any comparable academic or free tool. The security testing depth (108 security tests) demonstrates mature defensive engineering. The main limitations (no DMARC report parsing, no SPF flattening, monolithic architecture) are well-understood trade-offs appropriate for a single-developer FYP prototype targeting small organisations. The system successfully achieves its stated aim: reducing the complexity of email security for organisations without dedicated security teams.
+AuroraEdge's core strength is its **breadth of protocol coverage** combined with **automated remediation** — a combination not found in any comparable academic or free tool. The security testing depth (118 security tests) demonstrates mature defensive engineering. The main limitations (no DMARC report parsing, no SPF flattening, monolithic architecture) are well-understood trade-offs appropriate for a single-developer FYP prototype targeting small organisations. The system successfully achieves its stated aim: reducing the complexity of email security for organisations without dedicated security teams.
