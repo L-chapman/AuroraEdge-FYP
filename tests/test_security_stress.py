@@ -633,15 +633,15 @@ class TestPrivacyFooter:
 
     def test_privacy_notice_in_dashboard(self):
         r = client.get("/", headers=AUTH)
-        assert "No personal data collected" in r.text
+        assert "Public DNS checks only" in r.text
 
     def test_privacy_notice_in_domains(self):
         r = client.get("/domains", headers=AUTH)
-        assert "No personal data collected" in r.text
+        assert "Public DNS checks only" in r.text
 
     def test_privacy_notice_in_generator(self):
         r = client.get("/generator", headers=AUTH)
-        assert "No personal data collected" in r.text
+        assert "Public DNS checks only" in r.text
 
 
 # =========================================================================

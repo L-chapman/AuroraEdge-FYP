@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
 import os
+import json
 
 import app.dashboard as dashboard
+from app.database import AuroraDatabase
 
 
 def test_dashboard_health_and_home(tmp_path, monkeypatch):
@@ -51,3 +53,55 @@ def test_dashboard_health_and_home(tmp_path, monkeypatch):
     r = client.get("/download/latest?kind=md")
     assert r.status_code == 200
     assert "sample md" in r.text
+
+
+def test_search_prefers_database_results(tmp_path, monkeypatch):
+    monkeypatch.setenv("DASH_TOKEN", "")
+
+    db = AuroraDatabase(tmp_path / "test.db")
+    scan_id = db.start_scan(notes="search test")
+    db.save_result(
+        scan_id,
+        "example.net",
+        {
+            "spf_present": True,
+            "mx_present": True,
+            "dmarc_present": True,
+            "dkim_present": False,
+            "mta_sts_present": False,
+            "tls_rpt_present": False,
+        },
+        {
+            "severity": "HIGH",
+            "score": 55,
+            "grade": "D",
+            "violations": "R6_DKIM_NOT_FOUND",
+            "violation_count": 1,
+            "advice": "Configure DKIM",
+        },
+    )
+    db.complete_scan(scan_id, 1)
+
+    monkeypatch.setattr(dashboard, "get_database", lambda: db)
+    monkeypatch.setattr(dashboard, "HAS_DB", True)
+    monkeypatch.setattr(dashboard, "REPORTS", tmp_path)
+
+    client = TestClient(dashboard.app)
+    r = client.get("/api/search?q=example.net")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["count"] == 1
+    assert payload["results"][0]["domain"] == "example.net"
+
+
+def test_settings_reject_invalid_monitor_interval(monkeypatch):
+    monkeypatch.setenv("DASH_TOKEN", "")
+    client = TestClient(dashboard.app)
+
+    r = client.post(
+        "/api/settings",
+        content=json.dumps({"monitor_interval": "-1"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+    assert "monitor_interval must be one of" in r.text

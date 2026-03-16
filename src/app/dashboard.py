@@ -529,11 +529,30 @@ def api_search(
     max_score: int = Query(None, description="Maximum score"),
 ):
     """Search and filter scan results."""
-    csv_file, _ = _latest_pair()
-    if not csv_file:
-        return {"results": [], "count": 0}
+    rows = []
 
-    rows = load_csv(csv_file)
+    if HAS_DB:
+        try:
+            db = get_database()
+            latest_rows = db.get_latest_results(limit=500)
+            # Keep only the newest result per domain so search reflects
+            # the current platform state rather than every historical scan.
+            seen_domains = set()
+            for row in latest_rows:
+                domain_name = (row.get("domain") or "").lower()
+                if domain_name in seen_domains:
+                    continue
+                seen_domains.add(domain_name)
+                rows.append(row)
+        except Exception:
+            rows = []
+
+    if not rows:
+        csv_file, _ = _latest_pair()
+        if not csv_file:
+            return {"results": [], "count": 0, "total": 0}
+        rows = load_csv(csv_file)
+
     results = []
 
     for row in rows:
@@ -1004,9 +1023,17 @@ async def api_save_settings(request: Request):
         "cf_api_token", "cf_zone_id", "cf_account_id",
         "monitor_interval", "alert_email", "org_name", "clear_on_start",
     ]
+    allowed_intervals = {"6", "12", "24", "48", "168"}
     saved = []
     for key in allowed_keys:
         if key in body:
+            if key == "monitor_interval":
+                interval = str(body[key]).strip()
+                if interval not in allowed_intervals:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="monitor_interval must be one of: 6, 12, 24, 48, 168",
+                    )
             db.set_setting(key, str(body[key]))
             saved.append(key)
 
@@ -5383,7 +5410,7 @@ def settings_page():
             <!-- Monitoring -->
             <div class="settings-card">
                 <h3>🔄 Monitoring Schedule</h3>
-                <p class="card-desc">Saved scan interval preference for monitoring workflows. Managed-domain rescans are still manual in this version.</p>
+                <p class="card-desc">Automatic background rescans of managed domains with drift detection alerts.</p>
                 <div class="form-row">
                     <label for="monitorInterval">Scan Interval</label>
                     <select id="monitorInterval">
