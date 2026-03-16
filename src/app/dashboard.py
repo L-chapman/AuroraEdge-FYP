@@ -2043,89 +2043,6 @@ function showRefreshToast(message) {
     }
 }
 
-// Table filtering
-function filterTable() {
-    const query = document.getElementById('searchInput').value.toLowerCase();
-    const gradeFilter = document.getElementById('gradeFilter')?.value || '';
-    const severityFilter = document.getElementById('severityFilter')?.value || '';
-    
-    const rows = document.querySelectorAll('tbody tr');
-    let visibleCount = 0;
-    
-    rows.forEach(row => {
-        const domain = row.querySelector('.domain-cell')?.textContent.toLowerCase() || '';
-        const grade = row.dataset.grade || '';
-        const severity = row.dataset.severity || '';
-        
-        let show = true;
-        if (query && !domain.includes(query)) show = false;
-        if (gradeFilter && grade !== gradeFilter) show = false;
-        if (severityFilter && severity !== severityFilter) show = false;
-        
-        row.style.display = show ? '' : 'none';
-        if (show) visibleCount++;
-    });
-    
-    // Update counter
-    const counter = document.getElementById('resultCount');
-    if (counter) counter.textContent = `Showing ${visibleCount} of ${rows.length}`;
-}
-
-// Table sorting
-let currentSort = { col: null, asc: true };
-
-function sortTable(colIndex) {
-    const table = document.querySelector('table');
-    const tbody = table.querySelector('tbody');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    const headers = table.querySelectorAll('th');
-    
-    // Determine sort order
-    if (currentSort.col === colIndex) {
-        currentSort.asc = !currentSort.asc;
-    } else {
-        currentSort.col = colIndex;
-        currentSort.asc = true;
-    }
-    
-    // Update header classes
-    headers.forEach((h, i) => {
-        h.classList.remove('sorted', 'asc');
-        if (i === colIndex) {
-            h.classList.add('sorted');
-            if (currentSort.asc) h.classList.add('asc');
-        }
-    });
-    
-    // Sort rows
-    const numericCols = [2]; // Score column
-    rows.sort((a, b) => {
-        const aVal = a.cells[colIndex]?.textContent.trim() || '';
-        const bVal = b.cells[colIndex]?.textContent.trim() || '';
-        
-        let result;
-        if (numericCols.includes(colIndex)) {
-            result = parseFloat(aVal) - parseFloat(bVal);
-        } else {
-            result = aVal.localeCompare(bVal);
-        }
-        
-        return currentSort.asc ? result : -result;
-    });
-    
-    rows.forEach(row => tbody.appendChild(row));
-}
-
-// Toggle auto-refresh
-function toggleAutoRefresh() {
-    autoRefreshEnabled = !autoRefreshEnabled;
-    const btn = document.getElementById('autoRefreshBtn');
-    if (btn) {
-        btn.textContent = autoRefreshEnabled ? '⏸ Pause' : '▶ Resume';
-        btn.classList.toggle('paused', !autoRefreshEnabled);
-    }
-}
-
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     // Try SSE first
@@ -4057,19 +3974,7 @@ microsoft.com
             </div>
         </div>
         
-        <footer>
-            <div style="margin-bottom: 16px;">
-                <strong style="font-size: 1.1rem; color: var(--text-primary);">AuroraEdge</strong>
-                <span style="color: var(--accent);"> · </span>
-                <span>Automated Email Authentication & Cyber Defence System</span>
-            </div>
-            <p><strong>Final Year Project</strong> · Leon Chapman (50030738)</p>
-            <p style="margin-top: 8px;">Belfast Metropolitan College · BSc Cybersecurity &amp; Networking Infrastructure · 2025/2026</p>
-            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
-                <a href="/">Dashboard</a> · 
-                <a href="/test">Scan Domains</a>
-            </div>
-        </footer>
+        {_footer_html()}
     </div>
     
     {_test_js()}

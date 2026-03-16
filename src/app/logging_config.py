@@ -121,7 +121,7 @@ def setup_logging(level: str = None, json_format: bool = False) -> None:
         json_format: Use JSON structured logging for files
 
     Usage:
-        from src.app.logging_config import setup_logging
+        from app.logging_config import setup_logging
         setup_logging(level="DEBUG")
     """
     level = level or LOG_LEVEL
