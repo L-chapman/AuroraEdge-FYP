@@ -28,6 +28,7 @@ npm-debug.log*
 # Env & secrets
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 *.crt
