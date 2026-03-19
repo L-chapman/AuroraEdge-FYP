@@ -60,6 +60,6 @@ protonmail.com
 tutanota.com
 fastmail.com
 
-# Small/Medium Businesses for variety
-auroraedge.co.uk
+# Demo & Test Domains
+auroraedge.co.uk  # Pre-configured demo domain - scan freely even without Cloudflare
 example.com

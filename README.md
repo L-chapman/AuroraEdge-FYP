@@ -146,6 +146,31 @@ python -m pytest tests/ -v
 
 ---
 
+## Demo Domain (No Cloudflare Required)
+
+If you do not have your own domain or Cloudflare account, you can still test
+the full system using the pre-configured demo domain **`auroraedge.co.uk`**.
+
+**What you can do without Cloudflare credentials:**
+
+- Scan `auroraedge.co.uk` and view the full security assessment
+- View grades, scores, violations, and remediation recommendations
+- Generate DNS record suggestions via the Generator page
+- Use the CLI: `python -m app.cli --domain auroraedge.co.uk --remediation`
+- Scan any other public domain (e.g. `google.com`, `bbc.co.uk`)
+
+**What requires Cloudflare credentials (auto-fix demo):**
+
+- Automated DNS remediation via the "Auto-Fix DNS" button
+- Adding domains to My Domains with auto-defence
+- MTA-STS Worker deployment
+
+> The demo domain is highlighted with a ⭐ button on the Scan page.
+> Your Cloudflare credentials are **never** shared — they stay in your local
+> database and are masked in the Settings page API.
+
+---
+
 ## What It Checks
 
 | Check | Standard | What It Means |
@@ -192,7 +217,7 @@ AuroraEdge_FYP/
 │   ├── logging_config.py   # Structured JSON logging
 │   └── main.py             # CLI entry point
 │
-├── tests/                  ← 393 automated tests
+├── tests/                  ← 397 automated tests
 ├── docs/                   ← Stage READMEs, weekly logs, guides
 ├── reports/archive/        ← Historical scan results
 ├── scripts/

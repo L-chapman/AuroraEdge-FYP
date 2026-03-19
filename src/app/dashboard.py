@@ -14,6 +14,7 @@ Reference: FastAPI is used for its async support and automatic OpenAPI documenta
 
 import os
 import re
+import sys
 import csv
 import json
 import asyncio
@@ -26,6 +27,19 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse
+
+# ---------------------------------------------------------------------------
+# Route uvicorn logs to stdout so PowerShell doesn't treat them as errors.
+# Uvicorn writes INFO messages to stderr by default, which triggers
+# NativeCommandError in PowerShell terminals.
+# ---------------------------------------------------------------------------
+_stdout_handler = logging.StreamHandler(sys.stdout)
+_stdout_handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+for _uv_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    _uv_log = logging.getLogger(_uv_logger_name)
+    _uv_log.handlers.clear()
+    _uv_log.addHandler(_stdout_handler)
+    _uv_log.propagate = False
 
 # ---------------------------------------------------------------------------
 # Domain input sanitisation

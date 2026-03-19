@@ -318,13 +318,16 @@ def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
         return (False, "", 0, "")
     url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
     try:
-        r = requests.get(url, timeout=HTTP_TIMEOUT)
+        r = requests.get(url, timeout=HTTP_TIMEOUT, stream=True)
         if r.status_code != 200:
             return (False, "", 0, "")
+        # Limit response size to 10 KB to prevent resource exhaustion
+        body = r.content[:10_240].decode("utf-8", errors="ignore")
+        r.close()
         mode = ""
         max_age = 0
         first = ""
-        for i, line in enumerate(r.text.splitlines()):
+        for i, line in enumerate(body.splitlines()):
             if i == 0:
                 first = line.strip()
             s = line.strip()
