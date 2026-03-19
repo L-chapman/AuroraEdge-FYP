@@ -26,7 +26,7 @@ police.uk
 bbc.co.uk
 channel4.com
 
-# Major Tech Companies
+# Tech Companies
 google.com
 microsoft.com
 amazon.co.uk

@@ -599,6 +599,9 @@ def api_stats():
 @app.get("/api/explanations/severity/{severity}")
 def api_severity_explanation(severity: str):
     """Get explanation for a severity level."""
+    valid = {"OK", "INFO", "WARN", "HIGH", "CRITICAL"}
+    if severity.upper() not in valid:
+        raise HTTPException(status_code=404, detail=f"Unknown severity: {severity}")
     return get_severity_explanation(severity)
 
 
@@ -3638,7 +3641,9 @@ async def api_scan(request: Request):
     if db and scan_id:
         db.complete_scan(scan_id, len(results))
 
-    return {"status": "success", "count": len(results), "results": results}
+    ok = [r for r in results if "error" not in r]
+    status = "success" if ok else "error"
+    return {"status": status, "count": len(results), "results": results}
 
 
 @app.post("/api/apply-fix", dependencies=[Depends(require_token)])
