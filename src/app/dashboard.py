@@ -1076,6 +1076,8 @@ def _apply_cf_settings(db):
     token = db.get_setting("cf_api_token")
     zone = db.get_setting("cf_zone_id")
     account_id = db.get_setting("cf_account_id")
+    api_key = db.get_setting("cf_api_key")
+    email = db.get_setting("cf_email")
     if token:
         dns_mod.CF_API_TOKEN = token
         os.environ["CF_API_TOKEN"] = token
@@ -1085,6 +1087,12 @@ def _apply_cf_settings(db):
     if account_id:
         dns_mod.CF_ACCOUNT_ID = account_id
         os.environ["CF_ACCOUNT_ID"] = account_id
+    if api_key:
+        dns_mod.CF_API_KEY = api_key
+        os.environ["CF_API_KEY"] = api_key
+    if email:
+        dns_mod.CF_EMAIL = email
+        os.environ["CF_EMAIL"] = email
 
 
 def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:

@@ -40,6 +40,8 @@ CF_API_BASE = "https://api.cloudflare.com/client/v4"
 CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "")
 CF_ZONE_ID = os.environ.get("CF_ZONE_ID", "")
 CF_ACCOUNT_ID = os.environ.get("CF_ACCOUNT_ID", "")
+CF_API_KEY = os.environ.get("CF_API_KEY", "")
+CF_EMAIL = os.environ.get("CF_EMAIL", "")
 
 # Audit log path (rotated, max 2 MB, 3 backups)
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +81,9 @@ class CloudflareDNS:
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json",
         }
+        # Global API Key + Email (fallback for operations that need broader perms)
+        self.api_key = CF_API_KEY
+        self.email = CF_EMAIL
         # Cached zone name — populated by validate_connection()
         self.zone_name: Optional[str] = None
 
@@ -775,29 +780,31 @@ class CloudflareDNS:
         policy_content = f"version: STSv1\\nmode: enforce\\n{mx_lines}\\nmax_age: 86400"
 
         # Worker script that serves the MTA-STS policy
+        # Uses Service Worker (classic) syntax for application/javascript upload
         worker_script = f"""
 // AuroraEdge MTA-STS Policy Worker for {domain}
 // Auto-deployed by AuroraEdge DNS Auto-Fix
 // Serves /.well-known/mta-sts.txt for MTA-STS compliance
 
-export default {{
-  async fetch(request) {{
-    const url = new URL(request.url);
-    if (url.pathname === '/.well-known/mta-sts.txt') {{
-      const policy = "{policy_content}\\n";
-      return new Response(policy, {{
-        status: 200,
-        headers: {{
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'public, max-age=86400',
-          'X-AuroraEdge': 'mta-sts-worker',
-        }},
-      }});
-    }}
-    // Return 404 for any other path
-    return new Response('Not Found', {{ status: 404 }});
-  }},
-}};
+addEventListener('fetch', function(event) {{
+  event.respondWith(handleRequest(event.request));
+}});
+
+async function handleRequest(request) {{
+  var url = new URL(request.url);
+  if (url.pathname === '/.well-known/mta-sts.txt') {{
+    var policy = "{policy_content}\\n";
+    return new Response(policy, {{
+      status: 200,
+      headers: {{
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'public, max-age=86400',
+        'X-AuroraEdge': 'mta-sts-worker',
+      }},
+    }});
+  }}
+  return new Response('Not Found', {{ status: 404 }});
+}}
 """.strip()
 
         # Sanitise the worker name (only lowercase alphanumeric and hyphens)
@@ -838,7 +845,7 @@ export default {{
                     "Content-Type": "application/javascript",
                 },
                 data=worker_script,
-                timeout=15,
+                timeout=30,
             )
             result = resp.json()
             if result.get("success"):
@@ -854,40 +861,88 @@ export default {{
             steps_failed.append(f"Worker upload error: {e}")
             return False, f"Worker upload error: {e}"
 
-        # Step 3: Create Worker route on the zone
-        route_url = f"{CF_API_BASE}/zones/{self.zone_id}/workers/routes"
+        # Step 3: Bind Worker to the mta-sts subdomain
+        # Try: A) API Token route → B) Global API Key route → C) Custom Domains
         route_pattern = f"mta-sts.{domain}/*"
+        route_bound = False
+
+        # -- Attempt A: Zone-level Workers Routes (API Token) --
+        route_url = f"{CF_API_BASE}/zones/{self.zone_id}/workers/routes"
         route_data = {"pattern": route_pattern, "script": worker_name}
-
         try:
-            # Check if route already exists
-            resp = requests.get(
-                route_url,
-                headers=self.headers,
-                timeout=10,
-            )
+            resp = requests.get(route_url, headers=self.headers, timeout=10)
             route_result = resp.json()
-            existing_routes = route_result.get("result", []) if route_result.get("success") else []
-            route_exists = any(r.get("pattern") == route_pattern for r in existing_routes)
-
-            if route_exists:
+            existing_routes = (
+                route_result.get("result", []) if route_result.get("success") else []
+            )
+            if any(r.get("pattern") == route_pattern for r in existing_routes):
                 steps_done.append(f"Worker route already exists: {route_pattern}")
+                route_bound = True
             else:
                 resp = requests.post(
-                    route_url,
-                    headers=self.headers,
-                    json=route_data,
-                    timeout=10,
+                    route_url, headers=self.headers, json=route_data, timeout=10
                 )
                 result = resp.json()
                 if result.get("success"):
                     steps_done.append(f"Worker route created: {route_pattern}")
+                    route_bound = True
+        except Exception:
+            pass
+
+        # -- Attempt B: Global API Key (broader permissions) --
+        if not route_bound and self.api_key and self.email:
+            gk_headers = {
+                "X-Auth-Email": self.email,
+                "X-Auth-Key": self.api_key,
+                "Content-Type": "application/json",
+            }
+            try:
+                # Check existing routes with global key
+                resp = requests.get(route_url, headers=gk_headers, timeout=10)
+                route_result = resp.json()
+                existing_routes = (
+                    route_result.get("result", []) if route_result.get("success") else []
+                )
+                if any(r.get("pattern") == route_pattern for r in existing_routes):
+                    steps_done.append(f"Worker route already exists: {route_pattern}")
+                    route_bound = True
+                else:
+                    resp = requests.post(
+                        route_url, headers=gk_headers, json=route_data, timeout=10
+                    )
+                    result = resp.json()
+                    if result.get("success"):
+                        steps_done.append(f"Worker route created (global key): {route_pattern}")
+                        route_bound = True
+            except Exception:
+                pass
+
+        # -- Attempt C: Account-level Custom Domains (last resort) --
+        if not route_bound:
+            cd_hostname = f"mta-sts.{domain}"
+            cd_url = f"{CF_API_BASE}/accounts/{account_id}/workers/domains"
+            cd_data = {
+                "hostname": cd_hostname,
+                "service": worker_name,
+                "environment": "production",
+                "zone_id": self.zone_id,
+            }
+            try:
+                resp = requests.put(
+                    cd_url,
+                    headers=self.headers,
+                    json=cd_data,
+                    timeout=15,
+                )
+                result = resp.json()
+                if result.get("success"):
+                    steps_done.append(f"Worker custom domain bound: {cd_hostname}")
+                    route_bound = True
                 else:
                     error = self._extract_error(result)
-                    steps_failed.append(f"Worker route failed: {error}")
-                    # Non-fatal — DNS + Worker are in place, route may need manual setup
-        except Exception as e:
-            steps_failed.append(f"Worker route error: {e}")
+                    steps_failed.append(f"Worker route/domain binding failed: {error}")
+            except Exception as e:
+                steps_failed.append(f"Worker domain binding error: {e}")
 
         # Log everything
         self._log_audit(
