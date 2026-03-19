@@ -42,11 +42,11 @@ echo [OK] Found %PY% %PY_VER%
 REM ── Create / repair virtual environment ────────────────────────────
 echo [*] Setting up environment...
 if not exist ".venv\Scripts\activate.bat" (
-    echo [*] Creating virtual environment (first run - may take a moment^)...
+    echo [*] Creating virtual environment - first run, may take a moment...
     %PY% -m venv .venv
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
-        echo         Make sure the 'venv' module is installed (it ships with Python).
+        echo         Make sure the 'venv' module is installed. It ships with Python.
         pause
         exit /b 1
     )
