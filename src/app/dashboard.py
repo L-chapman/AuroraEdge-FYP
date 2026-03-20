@@ -1028,6 +1028,10 @@ def api_get_settings():
         token = settings["cf_api_token"]
         settings["cf_api_token_masked"] = token[:8] + "..." + token[-4:] if len(token) > 12 else "***"
         del settings["cf_api_token"]
+    if "cf_api_key" in settings and settings["cf_api_key"]:
+        api_key = settings["cf_api_key"]
+        settings["cf_api_key_masked"] = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
+        del settings["cf_api_key"]
     return {"settings": settings}
 
 
@@ -1047,6 +1051,7 @@ async def api_save_settings(request: Request):
     db = get_database()
     allowed_keys = [
         "cf_api_token", "cf_zone_id", "cf_account_id",
+        "cf_api_key", "cf_email",
         "monitor_interval", "alert_email", "org_name", "clear_on_start",
     ]
     allowed_intervals = {"6", "12", "24", "48", "168"}
@@ -1064,7 +1069,7 @@ async def api_save_settings(request: Request):
             saved.append(key)
 
     # If CF credentials provided, update the live dns_fix module
-    if "cf_api_token" in body or "cf_zone_id" in body:
+    if any(k in body for k in ("cf_api_token", "cf_zone_id", "cf_account_id", "cf_api_key", "cf_email")):
         _apply_cf_settings(db)
 
     return {"ok": True, "saved": saved}
@@ -5177,9 +5182,16 @@ def settings_page():
         t = settings["cf_api_token"]
         cf_token_display = t[:8] + "..." + t[-4:] if len(t) > 12 else "***"
         cf_token_set = True
+    cf_api_key_display = ""
+    cf_api_key_set = False
+    if settings.get("cf_api_key"):
+        k = settings["cf_api_key"]
+        cf_api_key_display = k[:8] + "..." + k[-4:] if len(k) > 12 else "***"
+        cf_api_key_set = True
 
     zone_id = settings.get("cf_zone_id", "")
     account_id = settings.get("cf_account_id", "")
+    cf_email = settings.get("cf_email", "")
     interval = settings.get("monitor_interval", "24")
     org_name = settings.get("org_name", "")
     alert_email = settings.get("alert_email", "")
@@ -5472,7 +5484,7 @@ def settings_page():
                 <h3>☁️ Cloudflare Integration {cf_badge}</h3>
                 <p class="card-desc">
                     Connect your Cloudflare account to enable one-click DNS auto-fix.
-                    Enter your API token, Zone ID, and (optionally) Account ID below.
+                    Enter your API token, Zone ID, and optionally Account ID, Global API Key, and account email below.
                     Your credentials are stored locally and never leave this server.
                 </p>
 
@@ -5533,6 +5545,21 @@ def settings_page():
                             <input type="text" id="cfAccount" value="{account_id}" placeholder="Auto-detected when you test the connection" autocomplete="off">
                         </div>
                         <small>Found on the same Overview page as Zone ID. Usually auto-detected.</small>
+                    </div>
+                    <div class="form-row" style="margin-bottom:0;">
+                        <label for="cfApiKey">Global API Key <span style="color:var(--text-muted);font-weight:400;font-size:0.8rem;">(optional fallback)</span></label>
+                        <div class="input-group">
+                            <input type="password" id="cfApiKey" placeholder="{"Key saved — enter new value to change" if cf_api_key_set else "Only needed if Worker routes fail with your token"}" autocomplete="off">
+                        </div>
+                        {"<div class='current-value'>Current: <code style=\"color:var(--accent);\">" + cf_api_key_display + "</code></div>" if cf_api_key_display else ""}
+                        <small>Optional. Used only when your API token cannot create Cloudflare Worker routes.</small>
+                    </div>
+                    <div class="form-row" style="margin-bottom:0;">
+                        <label for="cfEmail">Cloudflare Account Email <span style="color:var(--text-muted);font-weight:400;font-size:0.8rem;">(optional fallback)</span></label>
+                        <div class="input-group">
+                            <input type="email" id="cfEmail" value="{cf_email}" placeholder="Email used with the optional Global API Key" autocomplete="off">
+                        </div>
+                        <small>Only needed if you also use the optional Global API Key.</small>
                     </div>
                 </div>
                 <div class="btn-row" style="margin-top:16px;">
@@ -5638,13 +5665,18 @@ def settings_page():
             org_name: document.getElementById('orgName').value,
             cf_zone_id: document.getElementById('cfZone').value,
             cf_account_id: document.getElementById('cfAccount').value,
+            cf_email: document.getElementById('cfEmail').value,
             monitor_interval: document.getElementById('monitorInterval').value,
             alert_email: document.getElementById('alertEmail').value,
             clear_on_start: document.getElementById('clearOnStart').checked ? 'true' : 'false',
         }};
         const tokenInput = document.getElementById('cfToken');
+        const apiKeyInput = document.getElementById('cfApiKey');
         if (tokenInput.value) {{
             data.cf_api_token = tokenInput.value;
+        }}
+        if (apiKeyInput.value) {{
+            data.cf_api_key = apiKeyInput.value;
         }}
         try {{
             const res = await fetch('/api/settings', {{
@@ -5659,6 +5691,10 @@ def settings_page():
             if (tokenInput.value) {{
                 tokenInput.value = '';
                 tokenInput.placeholder = 'Token saved — enter new value to change';
+            }}
+            if (apiKeyInput.value) {{
+                apiKeyInput.value = '';
+                apiKeyInput.placeholder = 'Key saved — enter new value to change';
             }}
         }} catch(e) {{
             alert('Error saving settings: ' + e.message);
