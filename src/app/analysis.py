@@ -36,7 +36,8 @@ except ImportError:
 
 # Project paths
 ROOT = Path(__file__).resolve().parents[2]
-REPORTS = ROOT / "reports"
+REPORTS_ROOT = ROOT / "reports"
+REPORTS = REPORTS_ROOT / "indexed"
 FIGURES = ROOT / "docs" / "figures"
 
 
@@ -47,9 +48,11 @@ def ensure_figures_dir():
 
 def load_latest_csv() -> List[Dict]:
     """Load the most recent CSV report."""
-    csvs = sorted(
-        REPORTS.glob("*_results_*.csv"), key=lambda p: p.name, reverse=True
-    )
+    csvs = sorted(REPORTS.glob("*_results_*.csv"), key=lambda p: p.name, reverse=True)
+    if not csvs:
+        csvs = sorted(
+            REPORTS_ROOT.glob("*_results_*.csv"), key=lambda p: p.name, reverse=True
+        )
     if not csvs:
         return []
 

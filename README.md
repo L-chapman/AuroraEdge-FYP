@@ -8,40 +8,40 @@ Academic Year 2025/2026
 
 ---
 
-## What Is It?
+## What It Does
 
 Email attacks like phishing and spoofing are still one of the biggest problems in cybersecurity. Systems like SPF, DKIM, and DMARC exist to protect email domains, but most small businesses either don't set them up correctly or don't know how to maintain them.
 
-AuroraEdge Security is an automated cyber defence system that solves this. It:
+AuroraEdge Security is an automated cyber defence system built to make this easier. It:
 
 - **Detects** misconfigurations across SPF, DKIM, DMARC, MTA-STS, and TLS-RPT
 - **Scores** each domain's security posture (0–100, letter grades A+ to F)
-- **Defends** by automatically fixing DNS records via Cloudflare API
+- **Defends** by automatically fixing supported DNS records through Cloudflare
 - **Monitors** domains continuously and alerts on security drift
 - **Reports** with step-by-step remediation advice
 
-The goal is to give small organisations enterprise-grade email defence without needing them to understand the technical details.
+The goal is to give small organisations strong email protection without expecting them to be DNS experts.
 
-If you have Cloudflare credentials, AuroraEdge can **automatically fix** DNS records for you — no manual DNS editing required.
+If you have Cloudflare credentials, AuroraEdge can **automatically fix** supported DNS records for you, so there is far less manual DNS editing to do.
 
 ---
 
-## How to Run It
+## Start Here
 
-### Double-click `START.bat`
+### Easiest Option: Double-click `START.bat`
 
-That's it. It will:
+That is all most people need to do. It will:
 1. Create a Python virtual environment
 2. Install all dependencies
-3. Open the dashboard in your browser at **http://127.0.0.1:8080**
+3. Open the Test Hub in your browser automatically
 
-> **Requires:** Python 3.10+ ([download](https://www.python.org/downloads/)) and an internet connection.
+> **You only need:** Python 3.10+ ([download](https://www.python.org/downloads/)) and an internet connection.
 
 ---
 
 ## Using the Dashboard
 
-Once the server is running, open **http://127.0.0.1:8080** in your browser.
+Once the server is running, the browser should open automatically. If it does not, open **http://127.0.0.1:8080/test** in your browser.
 
 ### Pages
 
@@ -53,13 +53,13 @@ Once the server is running, open **http://127.0.0.1:8080** in your browser.
 | **Generator** | `/generator` | DNS record generator wizard — build SPF, DMARC, MTA-STS records |
 | **Settings** | `/settings` | Cloudflare credentials, monitoring intervals, export/import |
 
-### Try a Scan
+### If You Only Want To Try It Quickly
 
-1. Go to **http://127.0.0.1:8080/test**
-2. Type a domain (e.g. `google.com`, `belfastmet.ac.uk`, `example.com`)
+1. Open **http://127.0.0.1:8080/test**
+2. Type a domain such as `google.com`, `bbc.co.uk`, or `example.com`
 3. Click **Scan Domain**
-4. See the security grade, score, and what needs defending
-5. Results auto-save to the Dashboard
+4. Read the grade, score, and plain-English advice
+5. Your result is saved automatically to the Dashboard
 
 ### Sample Domains to Try
 
@@ -72,45 +72,56 @@ Once the server is running, open **http://127.0.0.1:8080** in your browser.
 
 ### Live Auto-Fix Demo
 
-The domain **`auroraedge.co.uk`** is pre-configured as the live demo domain.
-It has **intentional weaknesses** — SPF set to softfail (`~all`), DMARC at
-`p=quarantine` with only 50% coverage (`pct=50`), and no MTA-STS policy —
-so the automated remediation engine has real issues to detect and fix.
+The domain **`auroraedge.co.uk`** is the live demo domain used for testing and marking.
+It is safe to scan even if you do not own a domain yourself.
+
+At different points in the demo, this domain may be left in a weaker state on purpose so the auto-fix flow can be shown clearly. If it has already been fixed, you can still scan it and see a real working setup.
 
 **Quick walkthrough:**
 
 1. Open the **Scan** page (`/test`).
-2. Click the **⭐ auroraedge.co.uk (Auto-Fix Demo)** quick-domain button and press **Scan Domain**.
-3. Observe the low security grade (D) and the violations listed (SPF softfail, DMARC quarantine at 50%, MTA-STS missing, etc.).
-4. Click **🔧 Auto-Fix DNS** on the scan results — the system will harden/create DNS records via the Cloudflare API in real time.
-5. Press **🔄 Rescan** and watch the grade improve as each record is now corrected.
-6. The system performs a **post-fix verification scan** and shows the grade change (e.g. D → B).
+2. Click the **auroraedge.co.uk** quick-domain button or type the domain yourself.
+3. Press **Scan Domain**.
+4. Read the grade and the issues found.
+5. If Cloudflare credentials are already set up on that machine, click **Auto-Fix DNS**.
+6. Press **Rescan** to confirm the change.
 
-> **Note:** Only `auroraedge.co.uk` supports auto-fix because it is the Cloudflare-managed zone whose credentials are stored in Settings. You can scan any other domain freely, but auto-fix will only work for domains within this zone.
+> **Important:** You can scan any public domain. Auto-fix only works for domains you own, control, or have explicit permission to manage in Cloudflare.
 
-**To reset the demo** (re-break the records for a fresh demonstration):
+**To reset the demo** for another live walkthrough:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python scripts/demo_prep.py          # delete DMARC & TLS-RPT records
-python scripts/demo_prep.py --restore  # put them back if needed
+python scripts/demo_prep.py             # weaken selected demo records
+python scripts/demo_prep.py --restore   # put them back if needed
 ```
 
 ---
 
-## Automated DNS Remediation (Cloudflare)
+## Automated DNS Fixing (Cloudflare)
 
-AuroraEdge's cyber defence capability goes beyond scanning — it can **automatically fix** SPF, DMARC, TLS-RPT, and MTA-STS DNS records when Cloudflare credentials are provided. This is the "automated" part of the project title.
+AuroraEdge does more than scan. When Cloudflare credentials are provided, it can automatically fix supported DNS records.
+
+Supported automatic fixes include:
+
+- SPF
+- DMARC
+- TLS-RPT
+- MTA-STS DNS
+- MTA-STS HTTPS policy hosting through a Cloudflare Worker
+- DKIM for known providers where the selector pattern can be detected safely
 
 1. Go to **Settings** (`/settings`)
-2. Enter your Cloudflare API Token (Zone:DNS:Edit scope) and Zone ID
+2. Enter your Cloudflare API Token and Zone ID
 3. Add a domain in **My Domains** (`/domains`)
 4. The system scans, auto-fixes supported records, and begins continuous monitoring
-5. All remediations logged to `logs/dns_audit.log` and visible as Dashboard Alerts
+5. All changes are logged to `logs/dns_audit.log` and shown as alerts in the dashboard
+
+If Worker route creation is blocked by token permissions, you can also add an optional Cloudflare **Global API Key** and **account email** in Settings for that specific route step.
 
 ---
 
-## Command Line (Alternative)
+## Command Line (Optional)
 
 If you prefer the terminal over the web UI:
 
@@ -142,7 +153,9 @@ $env:PYTHONPATH = "$PWD\src"
 python -m pytest tests/ -v
 ```
 
-**Result:** 397 tests passing across functional, security, stress, and backend QA suites
+**Current result:** 397 tests passing across functional, security, stress, and backend QA test suites.
+
+Proof-of-testing files are kept in `reports/indexed/` so the main project stays tidy.
 
 ---
 
@@ -159,15 +172,25 @@ the full system using the pre-configured demo domain **`auroraedge.co.uk`**.
 - Use the CLI: `python -m app.cli --domain auroraedge.co.uk --remediation`
 - Scan any other public domain (e.g. `google.com`, `bbc.co.uk`)
 
-**What requires Cloudflare credentials (auto-fix demo):**
+**What still needs Cloudflare credentials:**
 
-- Automated DNS remediation via the "Auto-Fix DNS" button
-- Adding domains to My Domains with auto-defence
-- MTA-STS Worker deployment
+- Automatic DNS fixing from the **Auto-Fix DNS** button
+- Adding domains to **My Domains** with automatic defence
+- Cloudflare Worker deployment for MTA-STS policy hosting
 
-> The demo domain is highlighted with a ⭐ button on the Scan page.
-> Your Cloudflare credentials are **never** shared — they stay in your local
-> database and are masked in the Settings page API.
+> The demo domain is there so a marker or user can still test the platform properly without needing to buy or manage a domain first.
+
+### Why BIMI Is Not Auto-Fixed
+
+BIMI is mainly a branding extra, not a core email authentication control like SPF, DKIM, or DMARC.
+
+It also needs assets outside normal DNS fixing, such as:
+
+- a brand logo in the correct SVG format
+- in some cases a Verified Mark Certificate (VMC)
+- brand approval and presentation decisions
+
+Because of that, AuroraEdge reports BIMI if it is missing, but it does not try to auto-fix it. That is the right trade-off: protect mail first, branding second.
 
 ---
 
@@ -219,7 +242,9 @@ AuroraEdge_FYP/
 │
 ├── tests/                  ← 397 automated tests
 ├── docs/                   ← Stage READMEs, weekly logs, guides
-├── reports/archive/        ← Historical scan results
+├── reports/
+│   ├── indexed/            ← Current proof-of-testing outputs
+│   └── archive/            ← Older historical scan results
 ├── scripts/
 │   ├── demo.ps1            # Interactive demo for evaluators
 │   ├── demo_prep.py        # Weaken/restore DNS for demo flow
@@ -314,6 +339,7 @@ AuroraEdge_FYP/
 | `docs/VERIFICATION_REPORT.md` | System verification report |
 | `docs/weekly/` | Weekly development logs |
 | `docs/PRIVACY_AND_ETHICS.md` | GDPR, CMA 1990, legal compliance |
+| `docs/Stage_*_README.md` | Development stage snapshots for project history |
 
 ---
 

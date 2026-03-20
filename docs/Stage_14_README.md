@@ -56,10 +56,10 @@ Auto-fix is intentionally constrained for ethical and professional practice. The
 - **Safety controls:** Only apply to domains you own or have explicit permission to manage. Cloudflare tokens must be scoped to **Zone:DNS:Edit** for a single zone. Once configured, auto-fix runs automatically for managed domains (no per-fix prompt).
 - **Operational risk:** Changing SPF/DMARC/TLS-RPT can affect deliverability and enforcement. This is why remediation is limited to a small subset and is designed to be **auditable**.
 - **Rollback & audit:** All DNS changes are logged for an audit trail (`logs/dns_audit.log`) and the monitoring system records automation events as Alerts.
-- **Why DKIM is not auto-fixed:** DKIM requires **private key generation, selector alignment, and mail server signing configuration**. Automating DNS alone can create a false sense of security and may break existing signing setups, so DKIM is reported but not automatically remediated.
+- **DKIM scope:** AuroraEdge can auto-configure DKIM for supported providers where the selector pattern is known safely. If the provider cannot be identified, AuroraEdge reports the issue and gives manual guidance instead of guessing.
 
 Additional limitation:
-- **MTA-STS** requires both a DNS TXT record and an HTTPS policy file at `https://mta-sts.<domain>/.well-known/mta-sts.txt`. AuroraEdge can publish the DNS TXT record automatically, but hosting the policy file is outside DNS-only automation.
+- **BIMI** is not auto-fixed. It is mainly a branding layer rather than a core protection control, and it also needs extra assets such as a logo and sometimes a VMC.
 
 ### Demo Script
 

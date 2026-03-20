@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide covers advanced integrations for AuroraEdge:
+This guide covers the more advanced integrations in AuroraEdge:
 1. **Cloudflare DNS Auto-Fix** - Automatic DNS record remediation
 2. **OpenDMARC Integration** - DMARC validation and reporting
 3. **Postfix Mail Server** - Email authentication setup
@@ -11,13 +11,15 @@ This guide covers advanced integrations for AuroraEdge:
 
 ## 1. Cloudflare DNS Auto-Fix Integration
 
-AuroraEdge can automatically fix DNS records using the Cloudflare API.
+AuroraEdge can automatically fix supported DNS records using the Cloudflare API.
 
 ### Prerequisites
 
 - Cloudflare account with your domain
 - API token with **DNS Edit** permissions
 - Zone ID for your domain
+- Account ID if you want Cloudflare Worker deployment for MTA-STS
+- Optional Global API Key and account email if your API token cannot create Worker routes
 
 ### Getting Cloudflare Credentials
 
@@ -44,18 +46,23 @@ Set environment variables before running AuroraEdge:
 ```powershell
 $env:CF_API_TOKEN = "your_api_token_here"
 $env:CF_ZONE_ID = "your_zone_id_here"
+$env:CF_ACCOUNT_ID = "your_account_id_here"
+$env:CF_API_KEY = "your_global_api_key_here"   # optional fallback
+$env:CF_EMAIL = "you@example.com"              # optional fallback
 ```
 
 **Windows (Command Prompt):**
 ```cmd
 set CF_API_TOKEN=your_api_token_here
 set CF_ZONE_ID=your_zone_id_here
+set CF_ACCOUNT_ID=your_account_id_here
 ```
 
 **Linux/macOS:**
 ```bash
 export CF_API_TOKEN="your_api_token_here"
 export CF_ZONE_ID="your_zone_id_here"
+export CF_ACCOUNT_ID="your_account_id_here"
 ```
 
 ### Using the DNS Auto-Fix Module
@@ -92,6 +99,8 @@ cf.fix_tls_rpt("example.com", rua="tlsrpt@example.com")
 | DMARC | `fix_dmarc()` | Creates/updates _dmarc TXT record |
 | TLS-RPT | `fix_tls_rpt()` | Creates/updates _smtp._tls TXT record |
 | MTA-STS DNS | `fix_mta_sts_dns()` | Creates _mta-sts TXT record |
+| MTA-STS HTTPS | `deploy_mta_sts_worker()` | Publishes the HTTPS policy through Cloudflare Workers |
+| DKIM | `fix_dkim()` | Auto-configures DKIM for supported providers |
 
 ### Security Notes
 
@@ -111,10 +120,10 @@ cf.fix_tls_rpt("example.com", rua="tlsrpt@example.com")
 - **Scoped permissions:** Use the minimum Cloudflare token scope (Zone:DNS:Edit) and a single zone.
 - **Mail-flow risk:** Incorrect DNS changes can disrupt email delivery; treat automation as a controlled operational change and document it.
 - **Rollback & audit trail:** Every change is logged, enabling rollback to a previous record value if problems occur.
-- **Why DKIM is not auto-fixed:** DKIM requires private key management and mail server signing configuration; automating DNS alone can break signing or create false assurance. DKIM is therefore reported but not automatically remediated.
+- **DKIM scope:** AuroraEdge can auto-configure DKIM only for providers it can identify safely from MX patterns. If the provider is unknown, AuroraEdge gives manual guidance instead of guessing.
 
 Additional limitation:
-- **MTA-STS** requires both the DNS TXT record and an HTTPS policy file at `https://mta-sts.<domain>/.well-known/mta-sts.txt`. AuroraEdge can publish the DNS TXT automatically, but policy hosting is outside DNS-only automation.
+- **BIMI** is intentionally not auto-fixed. It is mainly a branding feature and needs logo/VMC assets that sit outside safe DNS-only automation.
 
 ---
 

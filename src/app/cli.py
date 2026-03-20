@@ -511,8 +511,8 @@ Reference: This tool checks SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
     parser.add_argument("--domains", help="Path to text file with one domain per line")
     parser.add_argument(
         "--outdir",
-        default="reports",
-        help="Output folder for reports (default: reports)",
+        default="reports/indexed",
+        help="Output folder for reports (default: reports/indexed)",
     )
     parser.add_argument(
         "--starttls",

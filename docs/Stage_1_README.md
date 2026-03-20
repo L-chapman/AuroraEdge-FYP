@@ -1,6 +1,6 @@
 ﻿# Stage 1 — DNS Scanner Skeleton (Granny pace)
 
-Checks **SPF, MX, DMARC** for one or more domains and writes results to `reports/`.
+Checks **SPF, MX, DMARC** for one or more domains and writes results to `reports/indexed/`.
 
 ## 1) Install dependencies
 ```powershell

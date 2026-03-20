@@ -279,7 +279,8 @@ async def _custom_http_exception(request: Request, exc: StarletteHTTPException):
 
 # Project root and reports directory
 ROOT = Path(__file__).resolve().parents[2]
-REPORTS = ROOT / "reports"
+REPORTS_ROOT = ROOT / "reports"
+REPORTS = REPORTS_ROOT / "indexed"
 STATE = ROOT / "state"
 
 
@@ -317,13 +318,12 @@ def require_token(req: Request):
 
 def list_csvs() -> List[Path]:
     """List all CSV report files, newest first."""
-    if not REPORTS.exists():
-        return []
-    files = sorted(
-        REPORTS.glob("*_results_*.csv"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    files: List[Path] = []
+    if REPORTS.exists():
+        files.extend(REPORTS.glob("*_results_*.csv"))
+    if REPORTS_ROOT.exists():
+        files.extend(REPORTS_ROOT.glob("*_results_*.csv"))
+    files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
     return files
 
 
@@ -792,6 +792,8 @@ def download_file(filename: str):
     # Sanitize filename
     safe_name = Path(filename).name
     file_path = REPORTS / safe_name
+    if not file_path.exists():
+        file_path = REPORTS_ROOT / safe_name
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")

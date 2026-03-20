@@ -44,7 +44,7 @@ Primary evaluator guidance lives in:
 - **Persistent monitoring data**: `src/app/database.py` (SQLite history) + `README.md` feature list
 - **Fix capability (DNS remediation)**: `src/app/dns_fix.py` (Cloudflare DNS TXT create/update + audit log)
 
-**Alignment:** *Mostly met* (see gaps in Section 4 regarding “automatic fix” integration workflow and DKIM).
+**Alignment:** *Met strongly* (with supported auto-fix scope explained in Section 4).
 
 ---
 
@@ -64,7 +64,7 @@ Primary evaluator guidance lives in:
 **Spec:** “Design a simple, secure system that can automatically manage DNS records and generate reports.”
 
 **Evidence:**
-- **Reports**: `src/app/cli.py` generates `reports/*.csv` and `reports/*.md` (see `README.md` + `docs/TESTING_GUIDE.md`).
+- **Reports**: `src/app/cli.py` generates `reports/indexed/*.csv` and `reports/indexed/*.md` (see `README.md` + `docs/TESTING_GUIDE.md`).
 - **DNS management**: `src/app/dns_fix.py` Cloudflare TXT create/update; `docs/INTEGRATION_GUIDE.md` explains token + zone configuration.
 - **Security controls for DNS changes**:
   - Token and zone ID are read from environment (`CF_API_TOKEN`, `CF_ZONE_ID`).
@@ -96,8 +96,8 @@ Primary evaluator guidance lives in:
 
 **Alignment:** *Met (DNS-only scope)*.
 - AuroraEdge can automatically remediate supported DNS records via Cloudflare.
-- DKIM is intentionally not auto-fixed because it requires MTA signing configuration and key management.
-- MTA-STS policy hosting requires HTTPS; AuroraEdge can publish the DNS TXT record but policy file hosting remains a deployment responsibility.
+- DKIM can be auto-configured for supported providers when the MX pattern safely identifies the provider.
+- MTA-STS can be completed through Cloudflare, including HTTPS policy hosting with a Worker.
 
 #### Objective 4: Security measures (HTTPS, auth tokens, basic logging)
 **Evidence:**
@@ -179,9 +179,9 @@ Addendum (Feb 2026):
 - *Feature matrix:* `generate_comparison_report()` still available for quick feature comparison.
 
 **G5 — DKIM scope clarification** RESOLVED
-- *What exists:* Detailed DKIM limitations documentation in `docs/INTEGRATION_GUIDE.md` Section 8.
-- *Explains:* What AuroraEdge does (selector discovery), what it doesn't do (key generation, MTA config), why auto-fix is limited, and recommended approach.
-- *Academic framing:* Suggested dissertation text provided.
+- *What exists:* Provider-aware DKIM auto-configuration for supported providers, plus manual guidance when the provider cannot be identified safely.
+- *Explains:* AuroraEdge only auto-fixes DKIM where the selector pattern is known. It does not guess.
+- *Academic framing:* Keep claims scoped to supported-provider automation, not universal DKIM automation.
 
 ---
 
@@ -213,7 +213,7 @@ A dissertation-ready lab protocol you can write up (and optionally execute):
 - **Evaluator usage**: `README.md`, `docs/TESTING_GUIDE.md`
 - **Core scanner**: `src/app/scanner.py`
 - **Rules + score**: `src/app/rules.py` (`evaluate`, `generate_remediation`)
-- **CLI reports**: `src/app/cli.py` → `reports/*.csv`, `reports/*.md`
+- **CLI reports**: `src/app/cli.py` → `reports/indexed/*.csv`, `reports/indexed/*.md`
 - **Dashboard endpoints**: `README.md` “API Endpoints” + `src/app/dashboard.py`
 - **Auto-fix + comparison**: `src/app/dns_fix.py` (`CloudflareDNS`, `generate_comparison_report`)
 - **Integration/lab stack**: `docs/INTEGRATION_GUIDE.md`

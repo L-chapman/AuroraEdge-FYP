@@ -101,8 +101,9 @@ echo.
 echo     Press Ctrl+C in this window to stop the server.
 echo.
 
-REM ── Open browser after a short delay so server can bind ────────────
-start "" cmd /c "timeout /t 2 /nobreak >nul & start http://127.0.0.1:%PORT%"
+REM ── Open browser when the app is actually ready ────────────────────
+start "" powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
+ "$url = 'http://127.0.0.1:%PORT%/health'; $open = 'http://127.0.0.1:%PORT%/test'; for ($i = 0; $i -lt 45; $i++) { try { Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 ^| Out-Null; Start-Process $open; break } catch { Start-Sleep -Seconds 1 } }"
 
 REM ── Launch server (blocks until Ctrl+C) ────────────────────────────
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port %PORT%

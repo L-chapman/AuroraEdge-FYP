@@ -61,5 +61,5 @@ tutanota.com
 fastmail.com
 
 # Demo & Test Domains
-auroraedge.co.uk  # Pre-configured demo domain - scan freely even without Cloudflare
+auroraedge.co.uk  # Demo domain - safe to scan even if you do not have Cloudflare
 example.com

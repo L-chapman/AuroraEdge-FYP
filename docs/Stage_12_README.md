@@ -11,7 +11,7 @@ Located in `src/app/dashboard.py`:
 - **Dark theme** with CSS custom properties for theming
 - **Gradient header** with AuroraEdge branding
 - **Card-based layout** for statistics and results
-- **Grade badges** with color coding (A+=emerald, B=amber, F=red)
+- **Grade badges** with colour coding (A+=emerald, B=amber, F=red)
 - **Responsive grid** for mobile compatibility
 
 ### CSS Custom Properties

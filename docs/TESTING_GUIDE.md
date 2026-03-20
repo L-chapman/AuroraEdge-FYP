@@ -1,21 +1,32 @@
 # AuroraEdge Testing Guide
 
-## For Lecturers and Evaluators
+## For Lecturers, Markers, and Other Test Users
 
-AuroraEdge is an automated email authentication and cyber defence system for small organisations. This guide shows the quickest ways to test it.
+AuroraEdge is an automated email authentication and cyber defence system for small organisations. This guide keeps the testing steps simple and practical.
 
 ---
 
 ## Quick Start
 
-### Option A: Interactive Demo (Recommended)
+If you only want the simplest route, use **Option A**.
+
+### Option A: Double-click Start (Recommended)
+```powershell
+cd "g:\My Drive\College\AuroraEdge_FYP"
+.\START.bat
+```
+Then open: **http://127.0.0.1:8080/test**
+
+This is the same route opened automatically by `START.bat`.
+
+### Option B: Interactive Demo Script
 ```powershell
 cd "g:\My Drive\College\AuroraEdge_FYP"
 .\scripts\demo.ps1
 ```
-This launches a simple menu with the main testing options.
+This opens a simple guided menu with the main testing options.
 
-### Option B: Web Dashboard
+### Option C: Start the Web Dashboard Manually
 ```powershell
 cd "g:\My Drive\College\AuroraEdge_FYP"
 .\.venv\Scripts\Activate.ps1
@@ -51,6 +62,8 @@ python -m app.cli --domain bbc.co.uk --remediation
 python -m app.cli --domain belfast.ac.uk --remediation
 ```
 
+If you do not own a domain, use `auroraedge.co.uk` as the demo domain.
+
 ---
 
 ## Dashboard Testing
@@ -83,6 +96,7 @@ The Test Hub (`/test`) allows you to:
 - **Quick Examples**: Click on suggested domains (Google, Microsoft, etc.)
 - **Results**: See grades, scores, and check status
 - **Remediation Recommendations**: View suggested fixes
+- **Auto-Fix**: If Cloudflare settings are entered, supported fixes can be applied from the page
 
 ---
 
@@ -136,8 +150,10 @@ Expected: **397/397 tests passing**
 ## Output Files
 
 After scanning, reports are saved to:
-- `reports/auroraedge_results_YYYYMMDD_HHMMSS.csv` - Spreadsheet format
-- `reports/auroraedge_results_YYYYMMDD_HHMMSS.md` - Markdown report
+- `reports/indexed/auroraedge_results_YYYYMMDD_HHMMSS.csv` - spreadsheet format
+- `reports/indexed/auroraedge_results_YYYYMMDD_HHMMSS.md` - Markdown report
+
+This keeps the proof-of-testing in one clear place.
 
 Database is stored at:
 - `state/auroraedge.db` - SQLite database with scan history
@@ -178,14 +194,17 @@ python -m app.cli --domain google.com
 | Database | Check `state/auroraedge.db` | Persistent scan history |
 | Unit Tests | `pytest tests/ -v` | 397/397 passing |
 
-### Optional (Owned Domain Only): Automatic DNS Remediation
-If you have a Cloudflare-managed test domain and explicit permission, you can evaluate zero-touch remediation:
+### Optional (Owned Domain Only): Automatic DNS Fixing
+If you have a Cloudflare-managed test domain and explicit permission, you can test the automatic fixing safely:
 
 1. In `/settings`, set Cloudflare API Token + Zone ID (token scoped to a single zone).
 2. In `/domains`, add the domain.
 3. Confirm DNS changes are recorded in `logs/dns_audit.log` and that monitoring alerts are created.
 
-Important: DKIM is intentionally not auto-fixed (requires mail-system key management). MTA-STS requires both DNS and HTTPS policy hosting; the DNS TXT is auto-applied, but the policy file still needs hosting.
+Important notes:
+- DKIM can be auto-configured for some known providers where AuroraEdge can detect the right selector pattern safely.
+- MTA-STS can now be completed fully through Cloudflare, including the HTTPS policy file served by a Worker.
+- BIMI is reported, but not auto-fixed. It is mainly branding, not core protection, and it needs logo/VMC assets outside normal DNS fixing.
 
 ---
 

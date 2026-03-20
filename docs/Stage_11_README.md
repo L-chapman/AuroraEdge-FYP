@@ -1,7 +1,7 @@
 # Stage 11 - Analysis Module + Matplotlib Figures
 
 ## Overview
-Week 15 deliverable: Implemented statistical analysis and visualization capabilities for scan results, producing academic-quality charts and figures.
+Week 15 deliverable: Implemented statistical analysis and visualisation capabilities for scan results, producing academic-quality charts and figures.
 
 ## Features
 
@@ -59,7 +59,7 @@ fig.savefig("docs/figures/score_histogram.png", dpi=300)
 
 ### Figure Styling
 Charts use a consistent academic style:
-- Professional color palette
+- Professional colour palette
 - Clear axis labels with units
 - Appropriate legends
 - Publication-quality DPI (300)

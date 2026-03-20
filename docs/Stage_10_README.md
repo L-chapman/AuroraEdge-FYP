@@ -8,7 +8,7 @@ Week 14 deliverable: Implemented an intelligent remediation engine that generate
 Located in `src/app/rules.py`:
 
 ### Remediation Generation
-The `generate_remediation()` function analyzes scan results and produces specific fix recommendations:
+The `generate_remediation()` function analyses scan results and produces specific fix recommendations:
 
 ```python
 from app.rules import generate_remediation
@@ -39,8 +39,8 @@ recommendations = generate_remediation(scan)
 
 ### Covered Issues
 1. **Missing SPF** - Provides example record with include mechanism
-2. **Excessive SPF Lookups** - Explains flattening and recommends optimization
-3. **Missing DMARC** - Generates starter policy with monitoring
+2. **Excessive SPF Lookups** - Explains flattening and recommends optimisation
+3. **Missing DMARC** - Generates a starter policy with monitoring
 4. **DMARC p=none** - Recommends quarantine/reject upgrade path
 5. **Missing DKIM** - Explains key generation and selector setup
 6. **Missing MTA-STS** - Provides policy file and DNS record examples
