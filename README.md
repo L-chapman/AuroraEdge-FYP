@@ -26,6 +26,120 @@ If you have Cloudflare credentials, AuroraEdge can **automatically fix** support
 
 ---
 
+## Installation Guide
+
+### Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+- **Python 3.10+** — [Download here](https://www.python.org/downloads/). On Windows, tick **"Add Python to PATH"** during installation.
+- **Git** — [Download here](https://git-scm.com/downloads).
+- An **internet connection** — required for cloning, installing dependencies, and DNS lookups at runtime.
+- **(Optional)** A Cloudflare account with an API token if you want to use the auto-fix features.
+
+---
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/L-chapman/AuroraEdge-FYP.git
+cd AuroraEdge-FYP
+```
+
+---
+
+### Quick Start (Windows)
+
+The simplest approach on Windows is to double-click **`START.bat`**. It automatically:
+
+1. Creates a Python virtual environment (`.venv`)
+2. Installs all dependencies from `requirements.txt`
+3. Starts the web dashboard and opens it in the browser
+
+No further steps are needed for most Windows users.
+
+---
+
+### Manual Setup (All Platforms)
+
+For macOS/Linux users, or anyone who prefers manual control:
+
+**Create and activate a virtual environment:**
+
+```bash
+# Create
+python -m venv .venv
+
+# Activate (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Activate (macOS / Linux)
+source .venv/bin/activate
+```
+
+**Install dependencies:**
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+**Set the Python path:**
+
+```bash
+# Windows PowerShell
+$env:PYTHONPATH = "$PWD\src"
+
+# macOS / Linux
+export PYTHONPATH="$(pwd)/src"
+```
+
+**Create required directories (if they don't already exist):**
+
+```bash
+# macOS / Linux
+mkdir -p reports state logs
+
+# Windows PowerShell
+New-Item -ItemType Directory -Force reports, state, logs
+```
+
+**(Optional) Configure environment variables:**
+
+Copy `.env.example` to `.env` and update the values as needed — especially the Cloudflare credentials if you plan to use auto-fix:
+
+```bash
+cp .env.example .env
+```
+
+---
+
+### Verify the Installation
+
+Run the built-in system check:
+
+```bash
+python verify_system.py
+```
+
+Optionally, run the full test suite to confirm everything is working:
+
+```bash
+python -m pytest tests/ -v
+```
+
+---
+
+### Launch the Dashboard
+
+```bash
+python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
+```
+
+Then open **http://127.0.0.1:8080/test** in your browser.
+
+---
+
 ## Start Here
 
 ### Easiest Option: Double-click `START.bat`
