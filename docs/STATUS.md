@@ -51,9 +51,15 @@
 
 ---
 
-## Current Status: Final Build (Feb 2026)
+## Current Status: Final Submission Snapshot (Apr 2026)
 
-### Test Results: 397/397 Passing
+- Exact automated test result reconfirmed on 2026-04-14 with `python -m pytest -q`: **397 passed**.
+- `src/app/dashboard.py` currently exposes **36 route handlers**.
+- Current supported auto-fix scope: SPF, DMARC, TLS-RPT, MTA-STS DNS, MTA-STS Worker deployment, and provider-aware DKIM for supported providers.
+- `scripts/create_submission_zip.ps1` builds a clean assessment ZIP that excludes local environments, Git metadata, caches, runtime state, logs, and `reports/archive/`.
+- Historical milestone sections below keep their original counts for context. The authoritative final test count is the one above.
+
+### Test Results: 397 Passed
 
 **Functional Tests (39):**
 ```
@@ -127,7 +133,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Feature expansion**: Remediations expanded from 5 to all 17 rules, `is_valid_domain()` exported, `_extract_error()` helper, `_ensure_ownership()` guard, context manager for DB, rotating audit log
 - **Code quality**: Dead imports removed, `print()` replaced with logging, `csv.writer` replacing manual CSV, accurate JSON log timestamps, domain validation regex
 - **38 new backend QA tests** covering every fix above
-- **397/397 tests passing** after final verification updates
+- **397 passed** after final verification updates
 
 ### January 2026 Validation Updates (2026-01-08)
 - Fixed all deprecated `datetime.utcnow()` calls (21 occurrences)
@@ -178,7 +184,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Managed Domains (continuous monitoring):** Add domains for scheduled rescans.
 - **Settings UI + persistence:** Store Cloudflare API Token + Zone ID, monitoring interval, and related config in SQLite settings.
 - **Alerts:** Create alerts for grade drops/improvements, scan errors, and automatic remediation events.
-- **Zero-touch Cloudflare remediation:** When Cloudflare credentials are configured, the system can automatically apply supported DNS fixes (SPF/DMARC/TLS-RPT/MTA-STS DNS) during onboarding and monitoring.
+- **Zero-touch Cloudflare remediation:** When Cloudflare credentials are configured, the system can automatically apply supported DNS fixes (SPF/DMARC/TLS-RPT/MTA-STS DNS, provider-aware DKIM where supported, and the MTA-STS Worker path) during onboarding and monitoring.
 - **Policy hardening improvements:** DMARC can be upgraded automatically to `p=reject` where applicable; SPF can be hardened from `~all` to `-all`.
 - **Audit trail:** All DNS changes are appended to `logs/dns_audit.log`.
 
@@ -226,7 +232,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Dashboard API integration:** POST /api/rescan tested end-to-end with mocked scanner — response shape, violation propagation, remediation population
 - **Explanation system:** All 18 rule IDs and 5 severity levels have complete why/fix/example/rfc entries
 - **Key finding:** R15 correctly treats unknown sp= values (e.g. "banana") as weaker than any known parent policy — secure default behaviour verified
-- **397/397 tests passing**
+- **397 passed**
 
 ---
 
@@ -255,6 +261,6 @@ python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 
 ### Run Tests
 ```powershell
-python -m pytest tests/ -v
+python -m pytest -q
 ```
 

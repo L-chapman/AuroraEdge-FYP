@@ -1,6 +1,6 @@
 # AuroraEdge — Privacy, Legal & Ethics Policy
 
-*Version 3.2 — March 2026*
+*Version 3.3 — April 2026*
 *Final Year Project — Leon Chapman*
 
 ---
@@ -169,8 +169,8 @@ AuroraEdge can automatically modify DNS records via Cloudflare. Safeguards inclu
 
 1. **Domain ownership verification** — Cloudflare zone lookup confirms the domain belongs to the configured zone before any modification
 2. **Audit logging** — Every DNS change is recorded in `logs/dns_audit.log` with timestamp, record type, old value, and new value
-3. **Scope limitation** — Only DNS TXT/CNAME records are modified; no MX, A, or AAAA changes
-4. **DKIM exclusion** — DKIM is intentionally not auto-fixed because it requires private key management and mail server configuration
+3. **Scope limitation** — Automation is limited to supported DNS changes (TXT, CNAME, and the proxied A record used for the MTA-STS Worker path); it does not touch MX records or arbitrary infrastructure changes
+4. **DKIM scope guard** — DKIM is only auto-configured for providers AuroraEdge can identify safely. If the provider is unknown, the tool stops and gives manual guidance instead of guessing
 5. **Rollback capability** — Audit log preserves previous record values for manual rollback
 6. **Operator control** — Auto-fix requires explicit Cloudflare credential configuration; without credentials, no modifications occur
 

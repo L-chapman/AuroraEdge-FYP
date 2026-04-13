@@ -1,20 +1,4 @@
-"""
-AuroraEdge DNS Auto-Fix Module
-Cloudflare API integration for automatic DNS record remediation.
-
-This module provides:
-- Cloudflare API connectivity
-- DNS record validation and creation
-- Automatic SPF, DMARC, DKIM record fixes
-- MTA-STS and TLS-RPT setup
-- MTA-STS policy hosting via Cloudflare Workers
-- Email provider auto-detection from MX records
-- DKIM auto-provisioning (CNAME for Microsoft 365, TXT for others)
-- Audit logging for all changes
-
-Reference: Cloudflare API v4 - https://api.cloudflare.com/
-Security: Requires API token with DNS edit + Workers edit permissions
-"""
+"""Cloudflare-backed DNS fixing and audit logging for AuroraEdge."""
 
 import os
 import json
@@ -24,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-# Optional requests for sync requests
+# Optional requests import for Cloudflare API calls
 try:
     import requests
 
@@ -56,24 +40,10 @@ _audit_logger.setLevel(logging.INFO)
 
 
 class CloudflareDNS:
-    """
-    Cloudflare DNS management for automatic record fixes.
-
-    Usage:
-        cf = CloudflareDNS(api_token="xxx", zone_id="yyy")
-        cf.validate_connection()
-        cf.fix_spf("example.com", ["include:_spf.google.com"])
-        cf.fix_dmarc("example.com", policy="reject", rua="dmarc@example.com")
-    """
+    """Small Cloudflare client used by the auto-fix workflow."""
 
     def __init__(self, api_token: str = None, zone_id: str = None):
-        """
-        Initialize Cloudflare API client.
-
-        Args:
-            api_token: Cloudflare API token (or set CF_API_TOKEN env var)
-            zone_id: Cloudflare zone ID (or set CF_ZONE_ID env var)
-        """
+        """Initialise the Cloudflare client."""
         self.api_token = api_token or CF_API_TOKEN
         self.zone_id = zone_id or CF_ZONE_ID
         self.base_url = f"{CF_API_BASE}/zones/{self.zone_id}/dns_records"
@@ -81,10 +51,10 @@ class CloudflareDNS:
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json",
         }
-        # Global API Key + Email (fallback for operations that need broader perms)
+        # Global API Key + email fallback for operations that need broader perms
         self.api_key = CF_API_KEY
         self.email = CF_EMAIL
-        # Cached zone name — populated by validate_connection()
+        # Cached zone name, filled after validate_connection()
         self.zone_name: Optional[str] = None
 
         # Ensure logs directory exists

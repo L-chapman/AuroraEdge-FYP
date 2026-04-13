@@ -1,20 +1,4 @@
-﻿"""
-AuroraEdge CLI Module
-Command-line interface for the email authentication and defence system.
-
-This module provides:
-- Single domain scanning
-- Batch domain scanning from file
-- CSV and Markdown report generation
-- Rich console output with colour-coded severity
-- Database persistence for historical tracking
-- Remediation recommendations
-
-Usage:
-    python -m app.cli --domain example.com
-    python -m app.cli --domains domains.txt
-    python -m app.cli --domains domains.txt --starttls
-"""
+﻿"""Command-line scanner and report writer for AuroraEdge."""
 
 import argparse
 import csv as csv_mod
@@ -177,7 +161,7 @@ def scan_domains(
             db = get_database()
             scan_id = db.start_scan(notes=f"CLI scan of {len(targets)} domain(s)")
         except Exception as e:
-            logger.warning(f"Could not initialize database: {e}")
+            logger.warning(f"Could not initialise database: {e}")
             db = None
 
     if HAS_RICH:
@@ -502,8 +486,8 @@ Examples:
   python -m app.cli --domains domains.txt
   python -m app.cli --domains domains.txt --starttls --remediation
 
-Reference: This tool checks SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
-           MTA-STS (RFC 8461), and TLS-RPT (RFC 8460) configurations.
+Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
+        MTA-STS (RFC 8461), and TLS-RPT (RFC 8460).
         """,
     )
 

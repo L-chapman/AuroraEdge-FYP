@@ -1,14 +1,4 @@
-"""
-AuroraEdge Logging Configuration
-Centralized logging setup for all application modules.
-
-Features:
-- Console and file logging
-- Rotating log files (max 5MB, 3 backups)
-- Separate logs for scanner, dashboard, and audit
-- JSON structured logging option
-- Color-coded console output
-"""
+"""Shared logging helpers for the AuroraEdge app."""
 
 import os
 import sys
@@ -35,10 +25,7 @@ LOG_LEVEL = os.environ.get("AURORAEDGE_LOG_LEVEL", "INFO").upper()
 
 
 class ColoredFormatter(logging.Formatter):
-    """
-    Custom formatter with color-coded output for console.
-    Works on Windows with colorama or in terminals supporting ANSI.
-    """
+    """Console formatter with colour output."""
 
     COLORS = {
         "DEBUG": "\033[36m",  # Cyan
@@ -57,9 +44,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 class JSONFormatter(logging.Formatter):
-    """
-    Structured JSON formatter for log aggregation and analysis.
-    """
+    """Structured JSON formatter for log files."""
 
     def format(self, record):
         log_entry = {
@@ -137,7 +122,7 @@ def setup_logging(level: str = None, json_format: bool = False) -> None:
     if json_format:
         file_formatter = JSONFormatter()
 
-    # Console formatter with colors
+    # Console formatter with colours
     console_formatter = ColoredFormatter(
         "%(asctime)s | %(name)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"
     )
@@ -169,7 +154,7 @@ def setup_logging(level: str = None, json_format: bool = False) -> None:
     configure_module_loggers(file_formatter, numeric_level)
 
     # Log startup message
-    root_logger.info(f"Logging initialized at {level} level")
+    root_logger.info("Logging initialised at %s level", level)
     root_logger.debug(f"Log directory: {LOG_DIR}")
 
 
@@ -203,7 +188,7 @@ def get_logger(name: str) -> logging.Logger:
         name: Module name (will be prefixed with 'auroraedge.')
 
     Returns:
-        Configured Logger instance
+        Configured logger instance
 
     Usage:
         logger = get_logger("scanner")
@@ -300,6 +285,6 @@ def log_audit_event(action: str, user: str = "system", **kwargs) -> None:
     logger.info(msg)
 
 
-# Auto-initialize logging when imported
+# Auto-initialise logging when imported
 if not logging.getLogger().handlers:
     setup_logging()

@@ -1,16 +1,4 @@
-﻿"""
-AuroraEdge Analysis Module
-Generate statistics and visualisations for academic reporting.
-
-This module provides:
-- Score distribution analysis
-- Violation frequency analysis
-- Grade distribution charts
-- Trend analysis over time
-- Export to various formats for dissertation inclusion
-
-Reference: Uses matplotlib for chart generation suitable for academic papers.
-"""
+﻿"""Statistics and chart helpers used in the AuroraEdge reports."""
 
 import csv
 import logging

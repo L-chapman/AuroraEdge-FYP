@@ -35,6 +35,13 @@ This repository includes:
 - A demo workflow for lecturers and evaluators
 - A large automated test suite
 
+For final assessment, keep the intent of the main documents separate:
+
+- `README.md` for quick setup and day-one use
+- `docs/TESTING_GUIDE.md` for marking and validation steps
+- `docs/ARCHITECTURE.md` for the design view
+- `docs/FINAL_RELEASE_NOTES.md` for the final release snapshot and evidence set
+
 ---
 
 ## At A Glance
@@ -94,7 +101,7 @@ In practice, that means AuroraEdge can support four kinds of users from the same
 | **Run the web app manually** | Developer path | Activate `.venv`, set `PYTHONPATH`, run Uvicorn |
 | **Use only the terminal** | CLI path | `python -m app.cli ...` |
 | **Confirm the environment is healthy** | Verification path | `python verify_system.py` |
-| **Run the full automated test suite** | Validation path | `python -m pytest tests/ -v` |
+| **Run the full automated test suite** | Validation path | `python -m pytest -q` |
 
 Important note:
 
@@ -236,7 +243,7 @@ You only need to do the full dependency install on first run or after dependency
 Use this if you want full control over the environment.
 
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -334,7 +341,7 @@ Use the CLI if you prefer working from the terminal.
 ### Prepare the shell first
 
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
 ```
@@ -404,7 +411,7 @@ It checks imports, scanning, rules, remediation generation, and logging.
 ```powershell
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
-python -m pytest tests/ -v
+python -m pytest -q
 ```
 
 The repository includes tests for:
@@ -557,6 +564,8 @@ AuroraEdge_FYP/
 ├── logs/
 ├── reports/
 ├── scripts/
+│   ├── create_submission_zip.ps1
+│   └── demo.ps1
 ├── src/
 │   └── app/
 │       ├── analysis.py
@@ -571,6 +580,18 @@ AuroraEdge_FYP/
 ├── state/
 └── tests/
 ```
+
+---
+
+## Final Submission ZIP
+
+Use the packaging script when you need a clean assessment copy.
+
+```powershell
+.\scripts\create_submission_zip.ps1
+```
+
+It builds `dist\AuroraEdge_FYP_submission.zip` and excludes local-only items such as `.venv`, `.git`, `.git (1)`, `.pytest_cache`, `.vscode`, `__pycache__`, runtime database files, logs, and `reports/archive/`.
 
 ---
 
@@ -624,12 +645,14 @@ Use these documents depending on what you need:
 |----------|---------|
 | `docs/INDEX.md` | Central map of the maintained documentation set |
 | `docs/TESTING_GUIDE.md` | Practical step-by-step testing guide |
+| `docs/ARCHITECTURE.md` | System structure, diagram, and design decisions |
 | `docs/FYP_SPEC.md` | Project specification |
 | `docs/STATUS.md` | Build status, timeline, and test breakdown |
 | `docs/ACADEMIC_NOTEBOOK.md` | Design decisions and rationale |
 | `docs/INTEGRATION_GUIDE.md` | Cloudflare, OpenDMARC, and Postfix integration details |
 | `docs/PRIVACY_AND_ETHICS.md` | Legal, privacy, and ethical constraints |
 | `docs/VERIFICATION_REPORT.md` | Verification evidence |
+| `docs/FINAL_RELEASE_NOTES.md` | Final release summary, evidence selection, and known limitations |
 | `docs/progress/` | Historical project progress records |
 | `docs/Stage_*_README.md` | Historical development snapshots by stage |
 

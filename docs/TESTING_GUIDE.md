@@ -27,7 +27,7 @@ If you only want the simplest route, use **Option A**.
 
 ### Option A: Double-click Start (Recommended)
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\START.bat
 ```
 Then open: **http://127.0.0.1:8080/test**
@@ -36,14 +36,14 @@ This is the same route opened automatically by `START.bat`.
 
 ### Option B: Interactive Demo Script
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\scripts\demo.ps1
 ```
 This opens a simple guided menu with the main testing options.
 
 ### Option C: Start the Web Dashboard Manually
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
@@ -56,7 +56,7 @@ Then open: **http://127.0.0.1:8080/test**
 
 ### Single Domain Scan
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
 python -m app.cli --domain google.com
@@ -87,7 +87,7 @@ If you do not own a domain, use `auroraedge.co.uk` as the demo domain.
 
 ### 1. Start the Dashboard
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 .\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
 $env:DASH_TOKEN = ""  # Disable auth for testing
@@ -155,11 +155,13 @@ Small websites without email security
 
 ## Run Unit Tests
 ```powershell
-cd "g:\My Drive\College\AuroraEdge_FYP"
+cd "<project-folder>"
 $env:PYTHONPATH = "$PWD\src"
-python -m pytest tests/ -v
+python -m pytest -q
 ```
-Expected: **397/397 tests passing**
+Expected: **397 passed**
+
+That exact count was rechecked on 2026-04-14.
 
 
 ---
@@ -209,7 +211,7 @@ python -m app.cli --domain google.com
 | Interactive Test | Open `/test` in browser | Form to scan any domain |
 | Real-time Updates | Run scan while dashboard open | Dashboard auto-refreshes |
 | Database | Check `state/auroraedge.db` | Persistent scan history |
-| Unit Tests | `pytest tests/ -v` | 397/397 passing |
+| Unit Tests | `pytest -q` | 397 passed |
 
 ### Optional (Owned Domain Only): Automatic DNS Fixing
 If you have a Cloudflare-managed test domain and explicit permission, you can test the automatic fixing safely:

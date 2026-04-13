@@ -1,19 +1,9 @@
 <#
-.SYNOPSIS
-    AuroraEdge Interactive Demo Script
-    For easy testing by lecturers and evaluators
-
-.DESCRIPTION
-    This script provides a friendly menu-driven interface to test
-    all features of the AuroraEdge Security cyber defence system.
-
-.AUTHOR
-    Leon Chapman (50030738)
-    Belfast Met - Cybersecurity & Networking Infrastructure
-    Final Year Project 2025/2026
+AuroraEdge demo script for local testing.
+Use this after START.bat if you want a simple menu instead of typing commands.
 #>
 
-# Set console encoding and colors
+# Set console encoding and colours
 $Host.UI.RawUI.WindowTitle = "AuroraEdge Demo"
 $ErrorActionPreference = "Stop"
 
@@ -23,7 +13,7 @@ $SrcDir = Join-Path $ProjectRoot "src"
 $ReportsDir = Join-Path $ProjectRoot "reports"
 $DomainsFile = Join-Path $ProjectRoot "domains.txt"
 
-# Ensure PYTHONPATH is set
+# Keep PYTHONPATH ready for the app modules
 $env:PYTHONPATH = $SrcDir
 
 function Write-Header {
@@ -209,7 +199,7 @@ function Run-QuickDemo {
     Write-Info "Running quick demo scan of 5 well-known domains..."
     Write-Host ""
     
-    # Create temp file with demo domains
+    # Make a temporary file with demo domains
     $tempFile = [System.IO.Path]::GetTempFileName()
     @"
 # AuroraEdge Quick Demo - 5 Well-Known Domains
@@ -241,7 +231,7 @@ function Launch-Dashboard {
     Write-Host "  Press Ctrl+C to stop the server." -ForegroundColor DarkGray
     Write-Host ""
     
-    # Open browser after a short delay
+    # Open the browser after a short delay
     Start-Job -ScriptBlock {
         Start-Sleep -Seconds 2
         Start-Process "http://127.0.0.1:8080"
@@ -340,7 +330,7 @@ function Run-UnitTests {
     Write-Host ""
     
     Set-Location $ProjectRoot
-    python -m pytest tests/ -v --tb=short
+    python -m pytest -q
     
     Write-Host ""
 }

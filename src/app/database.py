@@ -1,15 +1,4 @@
-"""
-AuroraEdge Database Module
-SQLite storage for persistent scan history and trend analysis.
-
-This module provides:
-- Scan result persistence
-- Historical trend queries
-- Domain tracking over time
-- Export capabilities
-
-Reference: SQLite is chosen for simplicity and portability (no server required).
-"""
+"""SQLite storage for scans, settings, alerts, and history."""
 
 import sqlite3
 import json
@@ -30,12 +19,7 @@ class AuroraDatabase:
     """SQLite database for AuroraEdge scan results."""
 
     def __init__(self, db_path: Optional[Path] = None):
-        """
-        Initialize database connection.
-
-        Args:
-            db_path: Path to SQLite database file. Defaults to state/auroraedge.db
-        """
+        """Initialise the database connection."""
         self.db_path = db_path or DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
@@ -226,7 +210,7 @@ class AuroraDatabase:
         )
 
         self.conn.commit()
-        logger.info("Database initialized at %s", self.db_path)
+        logger.info("Database initialised at %s", self.db_path)
 
     def start_scan(
         self, source_file: Optional[str] = None, notes: Optional[str] = None

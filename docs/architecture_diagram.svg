@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="700" viewBox="0 0 1100 700" role="img" aria-labelledby="title desc">
+  <title id="title">AuroraEdge architecture diagram</title>
+  <desc id="desc">A system diagram showing input, dashboard and CLI, scanner, rules engine, database, Cloudflare remediation, and logs and reports.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2b4c7e" />
+    </marker>
+    <style>
+      .bg { fill: #f5f7fb; }
+      .panel { fill: #ffffff; stroke: #2b4c7e; stroke-width: 2; rx: 18; ry: 18; }
+      .accent { fill: #e8f1fb; stroke: #2b4c7e; stroke-width: 2; rx: 18; ry: 18; }
+      .warn { fill: #fdf3e6; stroke: #b56b1d; stroke-width: 2; rx: 18; ry: 18; }
+      .text { font-family: Segoe UI, Arial, sans-serif; fill: #17263c; font-size: 22px; font-weight: 700; }
+      .small { font-family: Segoe UI, Arial, sans-serif; fill: #24364f; font-size: 16px; }
+      .line { stroke: #2b4c7e; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dash { stroke-dasharray: 10 8; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1100" height="700" />
+
+  <rect class="panel" x="60" y="90" width="180" height="110" />
+  <text class="text" x="150" y="135" text-anchor="middle">Input</text>
+  <text class="small" x="150" y="165" text-anchor="middle">User, domain list,</text>
+  <text class="small" x="150" y="188" text-anchor="middle">settings, demo flow</text>
+
+  <rect class="panel" x="320" y="60" width="220" height="120" />
+  <text class="text" x="430" y="108" text-anchor="middle">Dashboard</text>
+  <text class="small" x="430" y="138" text-anchor="middle">FastAPI pages, APIs,</text>
+  <text class="small" x="430" y="161" text-anchor="middle">test hub, managed domains</text>
+
+  <rect class="panel" x="320" y="220" width="220" height="120" />
+  <text class="text" x="430" y="268" text-anchor="middle">CLI</text>
+  <text class="small" x="430" y="298" text-anchor="middle">Single and batch scans,</text>
+  <text class="small" x="430" y="321" text-anchor="middle">reports, remediation output</text>
+
+  <rect class="accent" x="620" y="70" width="220" height="120" />
+  <text class="text" x="730" y="118" text-anchor="middle">Scanner</text>
+  <text class="small" x="730" y="148" text-anchor="middle">DNS, HTTPS, STARTTLS,</text>
+  <text class="small" x="730" y="171" text-anchor="middle">DKIM, MX, blacklist checks</text>
+
+  <rect class="accent" x="620" y="250" width="220" height="120" />
+  <text class="text" x="730" y="298" text-anchor="middle">Rules Engine</text>
+  <text class="small" x="730" y="328" text-anchor="middle">Violations, severity,</text>
+  <text class="small" x="730" y="351" text-anchor="middle">score, grade, remediation</text>
+
+  <rect class="panel" x="900" y="70" width="160" height="120" />
+  <text class="text" x="980" y="118" text-anchor="middle">Database</text>
+  <text class="small" x="980" y="148" text-anchor="middle">SQLite history,</text>
+  <text class="small" x="980" y="171" text-anchor="middle">settings, alerts</text>
+
+  <rect class="warn" x="900" y="250" width="160" height="140" />
+  <text class="text" x="980" y="300" text-anchor="middle">Cloudflare</text>
+  <text class="small" x="980" y="330" text-anchor="middle">Supported DNS fixes,</text>
+  <text class="small" x="980" y="353" text-anchor="middle">DKIM setup,</text>
+  <text class="small" x="980" y="376" text-anchor="middle">MTA-STS Worker path</text>
+
+  <rect class="panel" x="620" y="470" width="220" height="120" />
+  <text class="text" x="730" y="518" text-anchor="middle">Reports And Logs</text>
+  <text class="small" x="730" y="548" text-anchor="middle">CSV, Markdown, runtime logs,</text>
+  <text class="small" x="730" y="571" text-anchor="middle">DNS audit trail</text>
+
+  <rect class="panel" x="900" y="470" width="160" height="120" />
+  <text class="text" x="980" y="518" text-anchor="middle">Evidence</text>
+  <text class="small" x="980" y="548" text-anchor="middle">Docs, figures,</text>
+  <text class="small" x="980" y="571" text-anchor="middle">verification set</text>
+
+  <path class="line" d="M240 145 L320 120" />
+  <path class="line" d="M240 145 L320 280" />
+  <path class="line" d="M540 120 L620 130" />
+  <path class="line" d="M540 280 L620 310" />
+  <path class="line" d="M730 190 L730 250" />
+  <path class="line" d="M840 130 L900 130" />
+  <path class="line" d="M840 310 L900 320" />
+  <path class="line" d="M730 370 L730 470" />
+  <path class="line" d="M840 530 L900 530" />
+  <path class="line dash" d="M980 190 L980 250" />
+  <path class="line dash" d="M980 390 L980 470" />
+
+  <text class="small" x="70" y="640">AuroraEdge flow: input - interface - scanning - evaluation - storage - supported remediation - evidence output.</text>
+</svg>

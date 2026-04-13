@@ -1,6 +1,6 @@
-# AuroraEdge Security — Spec Verification Report (Updated Feb 2026)
+# AuroraEdge Security — Spec Verification Report (Updated Apr 2026)
 
-*Date:* 2026-02-19
+*Date:* 2026-04-14
 
 This report verifies the AuroraEdge repository against the **final project spec** in `docs/FYP_SPEC.md`. It aims to be clear for dissertation/assessment: traceability to implementation, evidence pointers, and a short gap analysis.
 
@@ -9,6 +9,12 @@ This report verifies the AuroraEdge repository against the **final project spec*
 - AuroraEdge meets the core scan, score, report, and dashboard objectives strongly.
 - Cloudflare-backed DNS auto-fix is implemented for the supported remediation scope.
 - The remaining caveats are mainly about deployment framing, methodology write-up clarity, and scope wording rather than missing core functionality.
+
+Release-readiness addendum (2026-04-14):
+- The full automated suite was rerun with `python -m pytest -q` and finished at **397 passed**.
+- `verify_system.py` now accepts `--domain` and `--offline` so it is less fragile for marking.
+- `docs/ARCHITECTURE.md`, `docs/architecture_diagram.svg`, and `docs/FINAL_RELEASE_NOTES.md` now cover the design and final release evidence explicitly.
+- `scripts/create_submission_zip.ps1` creates a clean assessment ZIP without local environment and cache folders.
 
 Use this report when you need fast traceability from the written spec to the repository evidence.
 
@@ -24,7 +30,7 @@ AuroraEdge is an **automated email authentication and cyber defence system** imp
 - **Dashboard**: `src/app/dashboard.py` — FastAPI web UI (dashboard + interactive Test Hub), protected via `DASH_TOKEN` when set.
 - **Persistence**: `src/app/database.py` — SQLite scan history + managed domains + settings + alerts (`state/auroraedge.db`).
 - **Analysis**: `src/app/analysis.py` — dataset analysis and dissertation figures (matplotlib).
-- **DNS Auto-fix module**: `src/app/dns_fix.py` — Cloudflare API client to create/update TXT records + audit logging.
+- **DNS Auto-fix module**: `src/app/dns_fix.py` — Cloudflare API client for supported TXT/CNAME/A changes, provider-aware DKIM setup, MTA-STS Worker deployment, and audit logging.
 
 Platform extensions added post-Jan 2026:
 - **Managed domains + monitoring**: scheduled rescans for onboarded domains with drift detection.
@@ -73,7 +79,7 @@ Primary evaluator guidance lives in:
 
 **Evidence:**
 - **Reports**: `src/app/cli.py` generates `reports/indexed/*.csv` and `reports/indexed/*.md` (see `README.md` + `docs/TESTING_GUIDE.md`).
-- **DNS management**: `src/app/dns_fix.py` Cloudflare TXT create/update; `docs/INTEGRATION_GUIDE.md` explains token + zone configuration.
+- **DNS management**: `src/app/dns_fix.py` supports TXT/CNAME/A updates for the approved auto-fix path; `docs/INTEGRATION_GUIDE.md` explains token + zone configuration.
 - **Security controls for DNS changes**:
   - Token and zone ID are read from environment (`CF_API_TOKEN`, `CF_ZONE_ID`).
   - In the platform workflow, Cloudflare credentials can also be stored in SQLite settings for scheduled automation.
@@ -219,12 +225,15 @@ A dissertation-ready lab protocol you can write up (and optionally execute):
 
 - **Spec text**: `docs/FYP_SPEC.md`
 - **Evaluator usage**: `README.md`, `docs/TESTING_GUIDE.md`
+- **Architecture overview**: `docs/ARCHITECTURE.md` and `docs/architecture_diagram.svg`
+- **Release snapshot**: `docs/FINAL_RELEASE_NOTES.md`
 - **Core scanner**: `src/app/scanner.py`
 - **Rules + score**: `src/app/rules.py` (`evaluate`, `generate_remediation`)
 - **CLI reports**: `src/app/cli.py` → `reports/indexed/*.csv`, `reports/indexed/*.md`
 - **Dashboard endpoints**: `README.md` “API Endpoints” + `src/app/dashboard.py`
 - **Auto-fix + comparison**: `src/app/dns_fix.py` (`CloudflareDNS`, `generate_comparison_report`)
 - **Integration/lab stack**: `docs/INTEGRATION_GUIDE.md`
+- **Smoke test**: `verify_system.py` (`--domain`, `--offline`)
 - **Dataset analysis**: `docs/SCAN_ANALYSIS.md` and `docs/figures/`
 
 ---

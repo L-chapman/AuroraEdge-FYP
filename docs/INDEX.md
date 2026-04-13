@@ -12,10 +12,12 @@ Use it when you want to know which document to read first, which files are activ
 |-------------------|-----------------|
 | Run the project quickly | `README.md` |
 | Test the dashboard and CLI | `docs/TESTING_GUIDE.md` |
+| Understand the module layout and design choices | `docs/ARCHITECTURE.md` |
 | Configure Cloudflare auto-fix or optional lab integrations | `docs/INTEGRATION_GUIDE.md` |
 | Understand the original project brief | `docs/FYP_SPEC.md` |
 | Check build status and test coverage | `docs/STATUS.md` |
 | Review final alignment against the spec | `docs/VERIFICATION_REPORT.md` |
+| Review the final release snapshot and selected evidence | `docs/FINAL_RELEASE_NOTES.md` |
 
 ---
 
@@ -25,6 +27,7 @@ Use it when you want to know which document to read first, which files are activ
 |----------|---------|
 | `README.md` | Main project overview, setup routes, usage paths, troubleshooting, and documentation map |
 | `docs/TESTING_GUIDE.md` | Practical testing steps for lecturers, markers, and evaluators |
+| `docs/ARCHITECTURE.md` | System diagram, module boundaries, and design rationale |
 | `docs/INTEGRATION_GUIDE.md` | Optional integrations, Cloudflare auto-fix setup, external mail-lab guidance, HTTPS deployment, and comparison methodology |
 
 ---
@@ -36,6 +39,7 @@ Use it when you want to know which document to read first, which files are activ
 | `docs/FYP_SPEC.md` | Original project specification and objectives |
 | `docs/VERIFICATION_REPORT.md` | Traceability and evidence against the project spec |
 | `docs/STATUS.md` | Development timeline, platform status, and test breakdown |
+| `docs/FINAL_RELEASE_NOTES.md` | Final release summary, selected evidence files, packaging notes, and known limitations |
 | `docs/ACADEMIC_NOTEBOOK.md` | Design rationale and project thinking |
 | `docs/COMPETITOR_ANALYSIS.md` | Competitor comparison and feature-gap assessment |
 | `docs/STRENGTHS_AND_WEAKNESSES.md` | Critical evaluation of the platform |

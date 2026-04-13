@@ -38,7 +38,7 @@ SEVERITY_EXPLANATIONS = {
     },
     "INFO": {
         "title": "Recommendation",
-        "description": "An optimization opportunity to strengthen your email security.",
+        "description": "An optimisation opportunity to strengthen your email security.",
         "impact": "Implementing this would improve your security score and follow industry best practices.",
         "urgency": "Consider addressing in next maintenance window",
         "color": "#3b82f6",
@@ -62,7 +62,7 @@ RULE_EXPLANATIONS = {
     },
     "R2_SPF_MISSING": {
         "why": "SPF (Sender Policy Framework) tells receiving servers which IPs are allowed to send email on your behalf. Without SPF, anyone can send emails pretending to be from your domain.",
-        "fix": "Add a TXT record at your domain root listing authorized sending sources.",
+        "fix": "Add a TXT record at your domain root listing authorised sending sources.",
         "example": "v=spf1 include:_spf.google.com ~all",
         "rfc": "RFC 7208",
     },
@@ -74,12 +74,12 @@ RULE_EXPLANATIONS = {
     },
     "R3B_SPF_PERMISSIVE": {
         "why": "Using +all or ?all in SPF means any server can send email as your domain. This completely negates SPF protection.",
-        "fix": "Change to ~all (softfail) or preferably -all (hardfail) to restrict unauthorized senders.",
+        "fix": "Change to ~all (softfail) or preferably -all (hardfail) to restrict unauthorised senders.",
         "example": "v=spf1 include:_spf.google.com -all",
         "rfc": "RFC 7208",
     },
     "R3C_SPF_SOFTFAIL": {
-        "why": "SPF ~all (softfail) marks unauthorized emails as suspicious but doesn't reject them. This is less strict than -all (hardfail).",
+        "why": "SPF ~all (softfail) marks unauthorised emails as suspicious but doesn't reject them. This is less strict than -all (hardfail).",
         "fix": "Consider changing from ~all to -all for stricter enforcement, but only after testing thoroughly.",
         "example": "v=spf1 include:_spf.google.com -all",
         "rfc": "RFC 7208",
@@ -205,7 +205,7 @@ def rule_mx_missing(r: Dict) -> Tuple[str, str, str]:
 
 
 def rule_spf_missing(r: Dict) -> Tuple[str, str, str]:
-    """R2: SPF prevents unauthorized senders (RFC 7208)."""
+    """R2: SPF prevents unauthorised senders (RFC 7208)."""
     return (
         ("R2_SPF_MISSING", "HIGH", "SPF record not published - enables spoofing")
         if not r.get("spf_present", False)

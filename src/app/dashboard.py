@@ -1,16 +1,4 @@
-"""
-AuroraEdge Security – Automated Email Authentication & Cyber Defence System.
-
-This module provides the web-based defence dashboard including:
-- Real-time monitoring with SSE
-- Automated domain scanning and threat assessment
-- Interactive security analysis with remediation
-- Automated DNS remediation via Cloudflare
-- Historical scan tracking and drift alerts
-- Token-based authentication
-
-Reference: FastAPI is used for its async support and automatic OpenAPI documentation.
-"""
+"""FastAPI dashboard and API routes for AuroraEdge."""
 
 import os
 import re
@@ -28,11 +16,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse
 
-# ---------------------------------------------------------------------------
-# Route uvicorn logs to stdout so PowerShell doesn't treat them as errors.
-# Uvicorn writes INFO messages to stderr by default, which triggers
-# NativeCommandError in PowerShell terminals.
-# ---------------------------------------------------------------------------
+# Keep uvicorn INFO logs on stdout so PowerShell does not treat them as errors.
 _stdout_handler = logging.StreamHandler(sys.stdout)
 _stdout_handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
 for _uv_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
@@ -2038,7 +2022,7 @@ let autoRefreshEnabled = true;
 let lastUpdateTime = Date.now();
 let lastKnownFile = document.querySelector('[data-file]')?.dataset.file || '';
 
-// Initialize EventSource for real-time updates
+// Set up EventSource for real-time updates
 function initSSE() {
     if (typeof EventSource === 'undefined') {
         console.warn('SSE not supported, falling back to polling');
@@ -2109,7 +2093,7 @@ function showRefreshToast(message) {
     }
 }
 
-// Initialize on page load
+// Set up the page when it loads
 document.addEventListener('DOMContentLoaded', () => {
     // Try SSE first
     initSSE();
@@ -3527,7 +3511,7 @@ Reference: ${data.rfc || 'See email security RFCs'}
     }
 }
 
-// Initialize quick domains
+// Set up quick-domain buttons
 document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('quickDomains');
     if (container) {
@@ -5151,7 +5135,7 @@ def generator_page():
         }});
     }}
 
-    // Initialize
+    // Fill the generator with the default values
     genSPF(); genDMARC(); genSTS(); genTLSRPT(); genBIMI();
     </script>
 </body>
