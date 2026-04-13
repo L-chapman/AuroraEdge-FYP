@@ -105,49 +105,75 @@ Important note:
 
 ## Getting The Project Files
 
-This project can be used in more than one distribution model. Choose the one that matches how you received it.
+Choose whichever option suits you best. All three end up with the same project folder.
 
-### Option 1: You Already Have A Folder Copy
+---
+
+### Option 1: Download ZIP From GitHub (Easiest — No Software Needed)
+
+This is the simplest approach. You do **not** need Git or any command-line tools.
+
+1. Open the GitHub repository in your browser:
+
+   **<https://github.com/L-chapman/AuroraEdge-FYP>**
+
+2. Click the green **Code** button near the top-right of the page.
+3. In the dropdown menu, click **Download ZIP**.
+4. Save the ZIP file to your computer and extract (unzip) it.
+5. Open the extracted folder (it will be called `AuroraEdge-FYP-master`).
+6. Double-click **`START.bat`** to set up and launch the project.
+
+That is it. `START.bat` handles everything else automatically.
+
+---
+
+### Option 2: Clone With Git (Copy-Paste Commands)
+
+Use this if you have [Git](https://git-scm.com/downloads) installed. If you are not sure, try Option 1 instead.
+
+Open **PowerShell** or **Command Prompt** and paste these commands one at a time:
+
+```powershell
+git clone https://github.com/L-chapman/AuroraEdge-FYP.git
+```
+
+```powershell
+cd AuroraEdge-FYP
+```
+
+```powershell
+.\START.bat
+```
+
+That will download the project, enter the folder, and launch the setup.
+
+> **Tip:** If Git asks you to log in, you can use your GitHub username and a [Personal Access Token](https://github.com/settings/tokens) as the password. If the repository is private, you need to be added as a collaborator first.
+
+---
+
+### Option 3: You Already Have A Folder Copy
 
 If the project was shared with you through Google Drive, OneDrive, email, USB, or a ZIP extract, you do **not** need Git.
 
 1. Place the project folder somewhere convenient.
 2. Open the folder.
-3. Run `START.bat`.
+3. Double-click **`START.bat`**.
 
-If the folder was copied from another machine and the included `.venv` is unusable, `START.bat` will rebuild it automatically. If you ever need to do that manually, delete `.venv` and run `START.bat` again.
+If the folder was copied from another machine and the included `.venv` is unusable, `START.bat` will rebuild it automatically. If you ever need to do that manually, delete the `.venv` folder and run `START.bat` again.
 
-That is enough for most evaluators and test users.
-
-### Option 2: Download A ZIP Or Shared-Drive Copy
-
-1. Download the latest project archive or sync the shared folder.
-2. Extract it if needed.
-3. Open the extracted folder.
-4. Run `START.bat`.
-
-### Option 3: Clone With Git
-
-Use this if the project is hosted in a Git repository and you have the repository URL.
-
-```powershell
-git clone <repository-url> AuroraEdge_FYP
-cd AuroraEdge_FYP
-```
-
-Then continue with the setup steps below.
+---
 
 ### How To Update Your Copy Later
 
-#### If your copy is just a normal folder
+#### If you downloaded a ZIP or received a folder copy
 
-Use one of these approaches:
+1. Download or receive the new version.
+2. Replace the old folder with the new one (or copy the new files over).
+3. Run `START.bat` again so the environment can refresh dependencies if needed.
 
-1. Replace the folder with the latest ZIP or shared-drive version.
-2. Copy the newer files over the old folder.
-3. Re-run `START.bat` so the environment can refresh dependencies if needed.
+#### If you cloned with Git
 
-#### If your copy is a real Git clone
+Open PowerShell inside the project folder and run:
 
 ```powershell
 git pull
@@ -161,7 +187,7 @@ python -m pip install -r requirements.txt
 
 #### If `git pull` says `not a git repository`
 
-That means your copy is a normal folder, not a Git checkout. Use the folder-copy update method instead of Git commands.
+That means your copy is a normal folder, not a Git clone. Use the ZIP/folder-copy update method above instead.
 
 ---
 
