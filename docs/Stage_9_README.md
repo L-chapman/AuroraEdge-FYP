@@ -1,7 +1,7 @@
 # Stage 9 - SQLite Database + Persistent Scan History
 
 ## Overview
-Week 13 deliverable: Implemented SQLite database persistence for storing scan results, enabling historical tracking and trend analysis.
+Stage 9 deliverable: Implemented SQLite database persistence for storing scan results, enabling historical tracking and trend analysis.
 
 ## Database Schema
 

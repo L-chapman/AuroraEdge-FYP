@@ -1,6 +1,6 @@
-# Week 5-8: Core Scanner Development
+# Core Scanner Development Progress Record
 
-## Week 5 (30 Sep - 06 Oct 2025)
+## Stage 1 - DNS Scanner Skeleton (30 Sep - 06 Oct 2025)
 **Stage 1**: DNS Scanner Skeleton
 
 ### Implemented
@@ -40,7 +40,7 @@ Basic scanner functional. Outputs generated in `reports/`.
 
 ---
 
-## Week 6 (07-13 Oct 2025)
+## Stage 2 - SPF Recursion & DMARC Strength (07-13 Oct 2025)
 **Stage 2**: SPF Recursion & DMARC Strength
 
 ### Implemented
@@ -85,7 +85,7 @@ def _count_spf_mechanisms(record: str, domain: str,
 
 ---
 
-## Week 7 (14-20 Oct 2025)
+## Stage 3 - DKIM Discovery (14-20 Oct 2025)
 **Stage 3**: DKIM Discovery
 
 ### Implemented
@@ -124,7 +124,7 @@ def discover_dkim(domain: str) -> dict:
 
 ---
 
-## Week 8 (21-27 Oct 2025)
+## Stage 4 - Rules Engine (21-27 Oct 2025)
 **Stage 4**: Rules Engine
 
 ### Implemented

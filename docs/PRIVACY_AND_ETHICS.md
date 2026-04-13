@@ -9,6 +9,15 @@
 
 AuroraEdge is an **academic prototype** for automated email authentication analysis and cyber defence. It scans publicly available DNS records and HTTPS policies to assess email security posture. This document defines the legal, ethical, and data-handling framework governing its use.
 
+## Quick Answers
+
+| Question | Short answer |
+|----------|--------------|
+| Does AuroraEdge scan private mailboxes or content? | No. It queries public DNS, HTTPS, and SMTP posture signals only. |
+| Where is data stored? | Locally in SQLite, report files, and logs on the operator's machine. |
+| Can AuroraEdge change third-party domains? | No. Auto-fix requires the operator's Cloudflare credentials and zone ownership alignment. |
+| Is this meant for production by default? | No. It is an academic prototype with local-first defaults and documented deployment caveats. |
+
 ---
 
 ## 2. Data Collection — What We Collect

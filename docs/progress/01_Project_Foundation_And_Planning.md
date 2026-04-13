@@ -1,6 +1,6 @@
-# Week 1-4: Research & Planning Phase
+# Project Foundation & Planning Progress Record
 
-## Week 1 (02-08 September 2025)
+## Project Initiation (02-08 September 2025)
 **Focus**: Project Initiation
 
 ### Activities
@@ -22,7 +22,7 @@
 
 ---
 
-## Week 2 (09-15 September 2025)
+## Requirements Analysis (09-15 September 2025)
 **Focus**: Requirements Analysis
 
 ### Functional Requirements
@@ -50,7 +50,7 @@
 
 ---
 
-## Week 3 (16-22 September 2025)
+## System Design (16-22 September 2025)
 **Focus**: System Design
 
 ### Architecture Overview
@@ -85,7 +85,7 @@
 
 ---
 
-## Week 4 (23-29 September 2025)
+## Project Setup (23-29 September 2025)
 **Focus**: Project Setup
 
 ### Repository Structure Created
@@ -125,4 +125,4 @@ AuroraEdge_FYP/
 - Ensures code quality and test coverage
 
 ### Outcome
-Project foundation complete. Ready to begin core development in Week 5.
+Project foundation complete. Ready to begin the core development phase.

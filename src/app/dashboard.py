@@ -3382,7 +3382,7 @@ async function autoFixFromScan(domain) {
         const zone = (cfData.zone_name || '').toLowerCase();
         const dom = domain.toLowerCase();
         if (zone && dom !== zone && !dom.endsWith('.' + zone)) {
-            showToast('Cannot auto-fix "' + domain + '"\nYour Cloudflare zone is "' + zone + '". You can only auto-fix domains within that zone.\nGo to Settings to change your Cloudflare credentials.', 'error', 10000);
+            showToast('Cannot auto-fix "' + domain + '"\\nYour Cloudflare zone is "' + zone + '". You can only auto-fix domains within that zone.\\nGo to Settings to change your Cloudflare credentials.', 'error', 10000);
             return;
         }
         const res = await fetch('/api/apply-fix', {

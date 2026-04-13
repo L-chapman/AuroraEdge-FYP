@@ -2,10 +2,25 @@
 
 ## Overview
 
-This guide covers the more advanced integrations in AuroraEdge:
-1. **Cloudflare DNS Auto-Fix** - Automatic DNS record remediation
-2. **OpenDMARC Integration** - DMARC validation and reporting
-3. **Postfix Mail Server** - Email authentication setup
+This guide covers the optional integrations and deployment extras around AuroraEdge.
+
+You do **not** need everything in this document to run the project locally. For normal local setup, use `README.md` or `docs/TESTING_GUIDE.md` first.
+
+### Quick Navigation
+
+| If you want to... | Read this section |
+|-------------------|------------------|
+| Configure Cloudflare auto-fix | **1. Cloudflare DNS Auto-Fix Integration** |
+| Build a mail lab with OpenDMARC | **2. OpenDMARC Integration** |
+| Configure Postfix in a lab environment | **3. Postfix Mail Server Setup** |
+| Publish MTA-STS or TLS-RPT records manually | **4. MTA-STS Configuration** and **5. TLS-RPT Configuration** |
+| Deploy AuroraEdge behind HTTPS | **6. HTTPS Deployment for Production** |
+| Write up comparison methodology for the dissertation | **7. Empirical Tool Comparison Methodology** |
+| Clarify DKIM auto-fix boundaries | **8. DKIM Limitations and Scope** |
+
+### Scope Note
+
+Sections 2 and 3 describe optional external mail-lab integrations. They are not started by AuroraEdge itself and are not required for normal dashboard or CLI use.
 
 ---
 
@@ -70,7 +85,7 @@ export CF_ACCOUNT_ID="your_account_id_here"
 ```python
 from app.dns_fix import CloudflareDNS
 
-# Initialize client
+# Initialise client
 cf = CloudflareDNS()
 
 # Validate connection

@@ -1,7 +1,7 @@
 # Stage 11 - Analysis Module + Matplotlib Figures
 
 ## Overview
-Week 15 deliverable: Implemented statistical analysis and visualisation capabilities for scan results, producing academic-quality charts and figures.
+Stage 11 deliverable: Implemented statistical analysis and visualisation capabilities for scan results, producing academic-quality charts and figures.
 
 ## Features
 

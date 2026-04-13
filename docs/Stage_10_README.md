@@ -1,7 +1,7 @@
 # Stage 10 - Remediation Recommendations Engine
 
 ## Overview
-Week 14 deliverable: Implemented an intelligent remediation engine that generates actionable recommendations for fixing email security misconfigurations.
+Stage 10 deliverable: Implemented an intelligent remediation engine that generates actionable recommendations for fixing email security misconfigurations.
 
 ## Features
 

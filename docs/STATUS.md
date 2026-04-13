@@ -1,6 +1,12 @@
 ﻿# AuroraEdge Development Status Log
 
-## Project Timeline (24 Weeks)
+## How To Use This Log
+
+- Use this file for the full development timeline, platform status, and test coverage breakdown.
+- Use `README.md` and `docs/TESTING_GUIDE.md` for setup and evaluation steps.
+- Treat the sections below as project evidence rather than first-time user guidance.
+
+## Project Timeline (September 2025 - February 2026)
 **Student**: Leon Chapman (50030738)  
 **Start**: 02 September 2025  
 **End**: 16 February 2026  
@@ -9,39 +15,39 @@
 
 ## Development Log
 
-### Phase 1: Research & Planning (Weeks 1-4)
-[2025-09-02] W01 • Research • Project proposal and literature review
-[2025-09-09] W02 • Analysis • Requirements analysis and technology selection
-[2025-09-16] W03 • Design • System architecture and module design
-[2025-09-23] W04 • Setup • Repository structure and CI/CD pipeline
+### Phase 1: Research & Planning
+[2025-09-02] Project Initiation • Research • Project proposal and literature review
+[2025-09-09] Requirements Analysis • Analysis • Requirements analysis and technology selection
+[2025-09-16] System Design • Design • System architecture and module design
+[2025-09-23] Project Setup • Setup • Repository structure and CI/CD pipeline
 
-### Phase 2: Core Development (Weeks 5-12)
-[2025-09-30] W05 • DNS Scanner Skeleton - SPF/MX/DMARC lookup
-[2025-10-07] W06 • SPF recursion counting + DMARC strength analysis
-[2025-10-14] W07 • DKIM selector discovery + key type detection
-[2025-10-21] W08 • Rules engine + Rich console output
-[2025-10-28] W09 • MTA-STS + TLS-RPT transport security checks
-[2025-11-04] W10 • pytest test suite with offline mocks (13 tests)
-[2025-11-11] W11 • Dashboard v1 (FastAPI) + token authentication
-[2025-11-18] W12 • Scoring system (0-100) + letter grades (A+ to F)
+### Phase 2: Core Development
+[2025-09-30] Stage 1 • DNS Scanner Skeleton • SPF/MX/DMARC lookup
+[2025-10-07] Stage 2 • SPF Recursion & DMARC Strength • SPF recursion counting + DMARC strength analysis
+[2025-10-14] Stage 3 • DKIM Discovery • DKIM selector discovery + key type detection
+[2025-10-21] Stage 4 • Rules Engine • Rules engine + Rich console output
+[2025-10-28] Stage 5 • Transport Security • MTA-STS + TLS-RPT transport security checks
+[2025-11-04] Stage 6 • Testing Framework • pytest test suite with offline mocks (13 tests)
+[2025-11-11] Stage 7 • Dashboard v1 • FastAPI + token authentication
+[2025-11-18] Stage 8 • Scoring System • Scoring system (0-100) + letter grades (A+ to F)
 
-### Phase 3: Enhancement & Integration (Weeks 13-18)
-[2025-11-25] W13 • SQLite database + persistent scan history
-[2025-12-02] W14 • Remediation recommendations engine
-[2025-12-09] W15 • Analysis module + matplotlib figures
-[2025-12-16] W16 • Dashboard v2 - UI redesign
-[2025-12-23] W17 • Real-time SSE updates + auto-refresh
-[2025-12-30] W18 • Interactive Test Hub + demo script
+### Phase 3: Enhancement & Integration
+[2025-11-25] Stage 9 • Database Persistence • SQLite database + persistent scan history
+[2025-12-02] Stage 10 • Remediation Engine • Remediation recommendations engine
+[2025-12-09] Stage 11 • Analysis Module • Analysis module + matplotlib figures
+[2025-12-16] Stage 12 • Dashboard v2 • UI redesign
+[2025-12-23] Stage 13 • Real-time Updates • SSE updates + auto-refresh
+[2025-12-30] Stage 14 • Interactive Test Hub • Interactive Test Hub + demo script
 
-### Phase 4: Testing & Documentation (Weeks 19-22)
-[2026-01-06] W19 • Testing • Stress testing with 50+ domain dataset
-[2026-01-13] W20 • Polish • Bug fixes and code refactoring
-[2026-01-20] W21 • Docs • Technical and user documentation
-[2026-01-27] W22 • Writing • Dissertation draft and figures
+### Phase 4: Testing & Documentation
+[2026-01-06] Comprehensive Testing • Testing • Stress testing with 50+ domain dataset
+[2026-01-13] Polish and Refactoring • Polish • Bug fixes and code refactoring
+[2026-01-20] Documentation Completion • Docs • Technical and user documentation
+[2026-01-27] Academic Writing • Writing • Dissertation draft and figures
 
-### Phase 5: Submission (Weeks 23-24)
-[2026-02-03] W23 • Review • Final review and supervisor feedback
-[2026-02-10] W24 • Submit • Final submission and demonstration
+### Phase 5: Submission
+[2026-02-03] Final Review • Review • Final review and supervisor feedback
+[2026-02-10] Submission • Submit • Final submission and demonstration
 
 ---
 
@@ -91,7 +97,7 @@ TestStateSafety             (2)  — concurrent writes, add-remove cycle
 TestSingleRuleMisconfig    (61)  — every rule (R1–R15) broken individually, correct severity + score
 TestRuleFunctions          (55)  — direct unit tests for every rule_*() function
 TestDomainValidation       (15)  — valid/invalid domain regex edge cases
-TestGradeBoundaries        (12)  — parametrized boundary values for A+/A/B/C/D/F
+TestGradeBoundaries        (12)  — parameterised boundary values for A+/A/B/C/D/F
 TestEdgeCasesSafety        (11)  — empty/None/wrong-type inputs, case insensitivity, unknown keys
 TestComplexMisconfigs       (8)  — multi-rule combos: brand-new domain, spoofing-open, all-weak
 TestScannerMisconfigs       (8)  — monkeypatched DNS: no-SPF, +all, sp=none, DKIM test, RBL
@@ -123,7 +129,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **38 new backend QA tests** covering every fix above
 - **397/397 tests passing** after final verification updates
 
-### Week 19 Updates (2026-01-08)
+### January 2026 Validation Updates (2026-01-08)
 - Fixed all deprecated `datetime.utcnow()` calls (21 occurrences)
 - Updated to timezone-aware `datetime.now(timezone.utc)` per Python 3.12 standards
 - Added comprehensive benchmark test suite (`test_benchmark.py`)
@@ -177,7 +183,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Audit trail:** All DNS changes are appended to `logs/dns_audit.log`.
 
 ### Security Hardening (Feb 2026)
-- **Domain input validation:** `_sanitize_domain()` helper rejects HTML, SQL, and non-domain input via strict regex. Applied to all domain-accepting endpoints.
+- **Domain input validation:** The `_sanitize_domain()` helper performs strict validation and rejects HTML, SQL, and non-domain input across all domain-accepting endpoints.
 - **XSS prevention:** Domain names in JSON API responses are sanitised; invalid characters are rejected server-side so the frontend's `innerHTML` rendering is safe.
 - **Info-leak prevention:** SQLi payloads in history/scan path params are rejected before echoing, preventing database technology disclosure.
 - **Type-safety:** Non-string domain inputs (int, null, etc.) are coerced to string then validated — no more 500 errors on numeric input.
@@ -216,7 +222,7 @@ TestCLIImprovements     (2)  — csv.writer escaping, CRITICAL severity
 - **Edge cases & safety:** Empty dicts, None values, string/float type coercion, case insensitivity (REJECT/~ALL/ENFORCE), unknown enum values, extra unknown keys
 - **Scanner mock tests:** Monkeypatched DNS resolution for realistic scan scenarios — no-SPF/no-MX, SPF +all detection, DMARC sp=none, DKIM test mode, RBL blacklisted
 - **SPF recursion edge cases:** 8 scenarios covering nested includes, redirect, a/mx/ptr/exists mechanisms, ip4/ip6 (no lookup count)
-- **Domain validation:** 15 parametrized valid/invalid formats including IDN, hyphens, numeric TLDs, special chars
+- **Domain validation:** 15 parameterised valid/invalid formats including IDN, hyphens, numeric TLDs, special chars
 - **Dashboard API integration:** POST /api/rescan tested end-to-end with mocked scanner — response shape, violation propagation, remediation population
 - **Explanation system:** All 18 rule IDs and 5 severity levels have complete why/fix/example/rfc entries
 - **Key finding:** R15 correctly treats unknown sp= values (e.g. "banana") as weaker than any known parent policy — secure default behaviour verified

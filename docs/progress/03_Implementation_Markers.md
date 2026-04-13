@@ -1,4 +1,4 @@
-﻿# Week W06
+﻿# Implementation Markers Log
 
 ### Mark (2025-11-06 15:22:29Z)
 - Stage 2 • Substage 2.0 — SPF recursion & DMARC strength

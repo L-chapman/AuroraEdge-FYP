@@ -4,6 +4,17 @@
 
 AuroraEdge Security: Designing and Implementing an Automated Email Authentication and Cyber Defence System for Small Organisations
 
+## Document Purpose
+
+This is the original project specification for AuroraEdge.
+
+Use it to understand:
+
+- the initial problem statement
+- the formal aim and objectives
+- the intended methodology
+- the planned 24-week delivery timeline
+
 ---
 
 ## Introduction

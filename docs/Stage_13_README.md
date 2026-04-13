@@ -1,7 +1,7 @@
 # Stage 13 - Real-time SSE Updates + Auto-refresh
 
 ## Overview
-Week 17 deliverable: Implemented Server-Sent Events (SSE) for real-time dashboard updates without page refresh, plus periodic auto-refresh polling.
+Stage 13 deliverable: Implemented Server-Sent Events (SSE) for real-time dashboard updates without page refresh, plus periodic auto-refresh polling.
 
 ## Features
 

@@ -1,7 +1,7 @@
 # Stage 12 - Dashboard v2 UI Redesign
 
 ## Overview
-Week 16 deliverable: Complete visual redesign of the FastAPI dashboard with professional styling, responsive layout, and improved user experience.
+Stage 12 deliverable: Complete visual redesign of the FastAPI dashboard with professional styling, responsive layout, and improved user experience.
 
 ## Features
 

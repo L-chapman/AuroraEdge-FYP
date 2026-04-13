@@ -18,39 +18,39 @@ This notebook captures the academic rationale, design choices, and development l
 
 ## 3. Staged Development (What/Why)
 
-### Phase 1: Research & Planning (Weeks 1-4)
-- **Week 1**: Project proposal, literature review on email authentication standards
-- **Week 2**: Requirements analysis, technology stack selection (Python, FastAPI, SQLite)
-- **Week 3**: System architecture design, module breakdown
-- **Week 4**: Repository setup, CI/CD pipeline, development environment
+### Phase 1: Research & Planning
+- **Project Initiation**: Project proposal and literature review on email authentication standards
+- **Requirements Analysis**: Technology stack selection (Python, FastAPI, SQLite) and delivery requirements
+- **System Design**: System architecture design and module breakdown
+- **Project Setup**: Repository setup, CI/CD pipeline, and development environment
 
-### Phase 2: Core Development (Weeks 5-12)
-- **Stage 1** (W05): Basic SPF/MX/DMARC lookup. Why: validate DNS plumbing and output formats
-- **Stage 2** (W06): SPF recursion/counting + DMARC strength. Why: SPF 10-lookup RFC limit matters
-- **Stage 3** (W07): DKIM selector discovery. Why: Many orgs forget DKIM or leave test keys
-- **Stage 4** (W08): Rule engine + Rich console. Why: Operational definition of risk for analysis
-- **Stage 5** (W09): MTA-STS + TLS-RPT. Why: Transport-layer safety broadens coverage
-- **Stage 6** (W10): Offline tests (pytest). Why: Deterministic validation, academic rigor
-- **Stage 7** (W11): Dashboard v1 (FastAPI). Why: Usable view for non-technical stakeholders
-- **Stage 8** (W12): Scoring system (0-100). Why: Quantitative comparison across domains
+### Phase 2: Core Development
+- **Stage 1**: Basic SPF/MX/DMARC lookup. Why: validate DNS plumbing and output formats
+- **Stage 2**: SPF recursion/counting + DMARC strength. Why: SPF 10-lookup RFC limit matters
+- **Stage 3**: DKIM selector discovery. Why: Many orgs forget DKIM or leave test keys
+- **Stage 4**: Rule engine + Rich console. Why: Operational definition of risk for analysis
+- **Stage 5**: MTA-STS + TLS-RPT. Why: Transport-layer safety broadens coverage
+- **Stage 6**: Offline tests (pytest). Why: Deterministic validation, academic rigor
+- **Stage 7**: Dashboard v1 (FastAPI). Why: Usable view for non-technical stakeholders
+- **Stage 8**: Scoring system (0-100). Why: Quantitative comparison across domains
 
-### Phase 3: Enhancement & Integration (Weeks 13-18)
-- **Stage 9** (W13): SQLite database. Why: Persistent scan history for trend analysis
-- **Stage 10** (W14): Remediation engine. Why: Actionable recommendations for improvements
-- **Stage 11** (W15): Analysis module + charts. Why: Visual presentation for dissertation
-- **Stage 12** (W16): Dashboard v2 redesign. Why: Improved usability and presentation
-- **Stage 13** (W17): Real-time SSE updates. Why: Live dashboard without manual refresh
-- **Stage 14** (W18): Interactive Test Hub. Why: Easy evaluation by lecturers
+### Phase 3: Enhancement & Integration
+- **Stage 9**: SQLite database. Why: Persistent scan history for trend analysis
+- **Stage 10**: Remediation engine. Why: Actionable recommendations for improvements
+- **Stage 11**: Analysis module + charts. Why: Visual presentation for dissertation
+- **Stage 12**: Dashboard v2 redesign. Why: Improved usability and presentation
+- **Stage 13**: Real-time SSE updates. Why: Live dashboard without manual refresh
+- **Stage 14**: Interactive Test Hub. Why: Easy evaluation by lecturers
 
-### Phase 4: Testing & Documentation (Weeks 19-22)
-- **Week 19**: Stress testing with 50+ domain dataset
-- **Week 20**: Bug fixes and code polish
-- **Week 21**: Technical documentation completion
-- **Week 22**: Dissertation writing and figures
+### Phase 4: Testing & Documentation
+- **Comprehensive Testing**: Stress testing with 50+ domain dataset
+- **Polish and Refactoring**: Bug fixes and code polish
+- **Documentation Completion**: Technical documentation completion
+- **Academic Writing**: Dissertation writing and figures
 
-### Phase 5: Submission (Weeks 23-24)
-- **Week 23**: Final review and supervisor feedback
-- **Week 24**: Submission and demonstration preparation
+### Phase 5: Submission
+- **Final Review**: Supervisor feedback and final review
+- **Submission Preparation**: Submission and demonstration preparation
 
 ## 4. Design Decisions and Reasoning
 - Public-only data: No creds, only DNS TXT/MX and HTTPS policy fetch → lowers risk and simplifies ethics.

@@ -4,6 +4,21 @@
 
 AuroraEdge is an automated email authentication and cyber defence system for small organisations. This guide keeps the testing steps simple and practical.
 
+## Use This Guide
+
+| If you want to... | Start here |
+|-------------------|------------|
+| Get the project running quickly | Option A in **Quick Start** |
+| Use the guided menu demo | Option B in **Quick Start** |
+| Start the dashboard manually | Option C in **Quick Start** |
+| Test the CLI only | **CLI Testing** |
+| Verify optional Cloudflare auto-fix | **Optional (Owned Domain Only): Automatic DNS Fixing** |
+
+Important note:
+
+- `START.bat` is the best first path on Windows.
+- If the project folder was copied from another machine and the included `.venv` is invalid, `START.bat` will rebuild it automatically.
+
 ---
 
 ## Quick Start
@@ -57,6 +72,8 @@ python -m app.cli --domains domains.txt
 python -m app.cli --domain bbc.co.uk --remediation
 ```
 
+`--remediation` shows recommendations only. It does **not** apply DNS changes.
+
 ### Test Your Own Domain
 ```powershell
 python -m app.cli --domain belfast.ac.uk --remediation
@@ -106,7 +123,7 @@ AuroraEdge checks the following email security standards:
 
 | Check | Standard | Description |
 |-------|----------|-------------|
-| **SPF** | RFC 7208 | Sender Policy Framework - authorizes sending servers |
+| **SPF** | RFC 7208 | Sender Policy Framework - authorises sending servers |
 | **DKIM** | RFC 6376 | DomainKeys - cryptographic email signatures |
 | **DMARC** | RFC 7489 | Domain-based Message Authentication - policy enforcement |
 | **MTA-STS** | RFC 8461 | Mail Transfer Agent Strict Transport Security |

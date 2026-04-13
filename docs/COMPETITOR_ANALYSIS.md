@@ -2,6 +2,16 @@
 
 *Generated: 2026-02-26 | Research-based analysis for FYP academic comparison*
 
+## Executive Summary
+
+- AuroraEdge is strongest where it combines broad protocol coverage with self-hosted operation and Cloudflare-backed DNS remediation.
+- The largest competitive gap remains DMARC aggregate report processing, followed by SPF flattening, richer deliverability tooling, and historical visualisation.
+- Use **Section 2** for feature-frequency patterns, **Section 3** for priority gaps, **Section 4** for implementation direction, and **Section 6** for the final comparison matrix.
+
+Note:
+
+- Official vendor and product names keep their original spelling where needed.
+
 ---
 
 ## 1. Competitor Profiles
@@ -51,16 +61,16 @@
 - TLS reporting
 
 **Unique Features AuroraEdge Lacks:**
-- **DMARC aggregate report (RUA) ingestion & visualization** — receives, parses, and visualizes XML aggregate reports from ISPs
+- **DMARC aggregate report (RUA) ingestion & visualisation** — receives, parses, and visualises XML aggregate reports from ISPs
 - **DMARC forensic report (RUF) processing** — receives and displays per-message failure forensics
 - **XML-to-human converter** — transforms raw DMARC XML into readable format
 - **Automatic subdomain detection** — discovers subdomains sending mail from aggregate data
 - **Source identification & enrichment** — identifies sending sources (e.g., Mailchimp, SendGrid) from aggregate data
-- **Domain discovery** — finds all domains associated with an organization
+- **Domain discovery** — finds all domains associated with an organisation
 - **DMARC record wizard** — step-by-step guided record creation
 - **IP safelisting** — whitelist known-good sending IPs
 - **Alert Central** — configurable alerts for DMARC compliance changes
-- **Domain groups** — organize domains into logical groups
+- **Domain groups** — organise domains into logical groups
 - **Data history** — up to unlimited historical retention
 
 ---
@@ -70,7 +80,7 @@
 | Attribute | Detail |
 |-----------|--------|
 | **Type** | Enterprise SaaS |
-| **Target** | Enterprise organizations, brand protection teams |
+| **Target** | Enterprise organisations, brand protection teams |
 | **Pricing** | Free trial / Enterprise subscription (contact sales) |
 
 **Checks Performed:**
@@ -84,7 +94,7 @@
 - **Recommendation engine** — AI-driven suggestions for DMARC policy progression
 - **DMARC record setup wizard** — guided configuration
 - **Active monitoring service** — managed monitoring with expert alerts
-- **Brand impersonation detection** — identifies unauthorized use of domain
+- **Brand impersonation detection** — identifies unauthorised use of domain
 - **PDF executive reports** — management-ready compliance reports
 - **Managed services option** — expert-guided DMARC deployment
 
@@ -165,7 +175,7 @@
 - Blacklist checking
 
 **Unique Features AuroraEdge Lacks:**
-- **Live email testing** — send an actual email and get it analyzed
+- **Live email testing** — send an actual email and get it analysed
 - **Spam score calculation** — SpamAssassin-based scoring of email content
 - **Email content analysis** — checks HTML, text, links, images for spam signals
 - **Email header analysis** — parses and evaluates actual email headers
@@ -188,11 +198,11 @@
 
 **Unique Features AuroraEdge Lacks:**
 - **BIMI support** — validation and implementation of brand logos in email clients
-- **Automated SPF management** — dynamic SPF record flattening and optimization
+- **Automated SPF management** — dynamic SPF record flattening and optimisation
 - **Instant DMARC enforcement** — automated policy progression (none → quarantine → reject)
-- **Sender identity management** — centralized control of all authorized senders
+- **Sender identity management** — centralised control of all authorised senders
 - **DMARC-as-a-service** — fully managed deployment
-- **FedRAMP authorized** — US government compliance certification
+- **FedRAMP authorised** — US government compliance certification
 
 ---
 
@@ -215,10 +225,10 @@
 - IP/domain reputation checking
 
 **Unique Features AuroraEdge Lacks:**
-- **DMARC aggregate report (RUA) processing with GeoMaps** — geographic visualization of sending sources
+- **DMARC aggregate report (RUA) processing with GeoMaps** — geographic visualisation of sending sources
 - **DMARC failure reports (RUF)** — per-message forensic data
 - **BIMI checker and managed BIMI** — brand logo in inbox support
-- **Email header analyzer** — parse and diagnose real email headers
+- **Email header analyser** — parse and diagnose real email headers
 - **Phishing URL checker** — evaluate URLs for phishing indicators
 - **IP/domain reputation monitoring** — blacklist & reputation tracking
 - **EasySPF (SPF flattening)** — dynamic SPF macro flattening
@@ -250,17 +260,17 @@
 
 **Unique Features AuroraEdge Lacks:**
 - **Threat Intelligence engine** — real-time visibility into malicious sources abusing domains
-- **Threat Map** — geographic visualization of attack origins
+- **Threat Map** — geographic visualisation of attack origins
 - **AI-powered recommendations** — after 7-day learning phase, suggests optimal configurations
 - **Forensic reports with encryption** — RUF data encrypted with user's own keys
 - **PowerSPF (SPF flattening)** — one-click SPF lookup limit resolution
 - **BIMI hosting** — managed BIMI record and VMC certificate
 - **Report IP abuse** — one-click reporting of abusive IPs
 - **Power Take Down** — 24/7 SOC to take down abusive sources
-- **Live threat map** — real-time global attack visualization
+- **Live threat map** — real-time global attack visualisation
 - **Auto DNS publishing** — push DNS changes without manual updates
 - **Whitelabel platform** — MSPs can rebrand as their own
-- **Multi-lingual control panel** — internationalization
+- **Multi-lingual control panel** — internationalisation
 - **DNS timeline & security score history** — track score progression over time
 - **PDF compliance reports** — executive-ready reporting
 
@@ -294,7 +304,7 @@
 - **DNS change monitoring** — alerts when records change
 - **Security.txt validation** — checks for RFC 9116 security contact file
 - **Data enrichment** — geocoding, hostname lookup, WHOIS, abuse contact info
-- **Smart prioritization** — ranks issues by how widespread across sources
+- **Smart prioritisation** — ranks issues by how widespread across sources
 - **Custom ignore/block rules** — filter out noise from known-benign violations
 - **DMARC failure report encryption** — encrypted forensic report handling
 - **Hosted MTA-STS** — manages MTA-STS policy hosting
@@ -310,16 +320,16 @@ How many of the 10 competitors offer each feature that AuroraEdge **lacks**:
 | DMARC Aggregate Report (RUA) Ingestion | dmarcian, Mimecast, Postmark, EasyDMARC, PowerDMARC, URIports, Valimail | **7/10** |
 | DMARC Forensic Report (RUF) Processing | dmarcian, EasyDMARC, PowerDMARC, URIports | **4/10** |
 | BIMI Support | EasyDMARC, PowerDMARC, URIports, Valimail | **4/10** |
-| SPF Flattening / Macro Optimization | MXToolbox, EasyDMARC, PowerDMARC, Valimail | **4/10** |
+| SPF Flattening / Macro Optimisation | MXToolbox, EasyDMARC, PowerDMARC, Valimail | **4/10** |
 | Blacklist / IP Reputation Monitoring | MXToolbox, EasyDMARC, PowerDMARC, Mail-Tester | **4/10** |
 | Email Header Analysis | EasyDMARC, PowerDMARC, Mail-Tester | **3/10** |
 | DANE / DNSSEC Validation | Hardenize, URIports | **2/10** |
 | Certificate Monitoring / CT Logs | Hardenize, URIports | **2/10** |
 | DNS Change Monitoring | URIports, Hardenize | **2/10** |
-| Geographic Visualization (GeoMaps) | EasyDMARC, PowerDMARC | **2/10** |
+| Geographic Visualisation (GeoMaps) | EasyDMARC, PowerDMARC | **2/10** |
 | Threat Intelligence / Threat Maps | PowerDMARC | **1/10** |
 | AI-Powered Recommendations | PowerDMARC | **1/10** |
-| Live Email Testing (Send & Analyze) | Mail-Tester | **1/10** |
+| Live Email Testing (Send & Analyse) | Mail-Tester | **1/10** |
 | Spam Score Analysis | Mail-Tester | **1/10** |
 | Subdomain Discovery (from DNS/Reports) | dmarcian, EasyDMARC, Hardenize | **3/10** |
 | PDF Report Export | Mimecast, PowerDMARC | **2/10** |
@@ -331,7 +341,7 @@ How many of the 10 competitors offer each feature that AuroraEdge **lacks**:
 
 ---
 
-## 3. Prioritized Missing Features
+## 3. Prioritised Missing Features
 
 ### CRITICAL GAPS — Features most competitors have that AuroraEdge lacks
 
@@ -339,7 +349,7 @@ These are table-stakes features that **7 or more** competitors offer. Implementi
 
 | # | Feature | Difficulty | FYP Impact | Description |
 |---|---------|-----------|------------|-------------|
-| **C1** | **DMARC Aggregate Report (RUA) Parsing** | HIGH | VERY HIGH | Receive and parse DMARC XML aggregate reports. This is THE defining feature of DMARC monitoring platforms. Requires: (1) an email endpoint or API to receive reports, (2) XML parser for DMARC aggregate format, (3) data storage, (4) visualization dashboard. Could simulate with file upload of XML reports as MVP. |
+| **C1** | **DMARC Aggregate Report (RUA) Parsing** | HIGH | VERY HIGH | Receive and parse DMARC XML aggregate reports. This is THE defining feature of DMARC monitoring platforms. Requires: (1) an email endpoint or API to receive reports, (2) XML parser for DMARC aggregate format, (3) data storage, (4) visualisation dashboard. Could simulate with file upload of XML reports as MVP. |
 | **C2** | **BIMI Lookup & Validation** | LOW | MEDIUM | Check for BIMI DNS records (`default._bimi.domain`), validate SVG Tiny PS logo format, check VMC certificate. Simple DNS TXT lookup + validation logic. Very achievable. |
 | **C3** | **SPF Flattening / Lookup Counter** | MEDIUM | HIGH | Count SPF DNS lookups (10 max per RFC 7208), flag `permerror` risk, suggest flattened alternatives. Recursively resolve `include:`, `redirect=`, `a:`, `mx:` mechanisms and count. |
 | **C4** | **DMARC/SPF Record Generator Wizard** | LOW | MEDIUM | Interactive form to build valid DMARC/SPF/DKIM records with explanations. Pure frontend + validation logic. Several competitors offer this as a free tool. |
@@ -350,13 +360,13 @@ These are **technically impressive** features with strong FYP writeup value.
 
 | # | Feature | Difficulty | FYP Impact | Description |
 |---|---------|-----------|------------|-------------|
-| **D1** | **DMARC XML Report Upload & Visualization** | MEDIUM | VERY HIGH | Allow users to upload DMARC XML aggregate report files (`.xml` or `.xml.gz`) and render visual dashboards: pass/fail rates, source IPs, SPF/DKIM alignment. Doesn't require running an email server — just file upload. Demonstrates report parsing capability. |
-| **D2** | **Threat Map / GeoIP Visualization** | MEDIUM | HIGH | Map sending source IPs to geographic locations using free GeoIP databases (MaxMind GeoLite2). Display on an interactive map. Visually impressive for demos. |
-| **D3** | **Email Header Analyzer** | LOW-MEDIUM | HIGH | Paste raw email headers → parse and display: authentication results, hop-by-hop routing, SPF/DKIM/DMARC verdicts, delays per hop. Pure parsing logic, no external dependencies. |
+| **D1** | **DMARC XML Report Upload & Visualisation** | MEDIUM | VERY HIGH | Allow users to upload DMARC XML aggregate report files (`.xml` or `.xml.gz`) and render visual dashboards: pass/fail rates, source IPs, SPF/DKIM alignment. Doesn't require running an email server — just file upload. Demonstrates report parsing capability. |
+| **D2** | **Threat Map / GeoIP Visualisation** | MEDIUM | HIGH | Map sending source IPs to geographic locations using free GeoIP databases (MaxMind GeoLite2). Display on an interactive map. Visually impressive for demos. |
+| **D3** | **Email Header Analyser** | LOW-MEDIUM | HIGH | Paste raw email headers → parse and display: authentication results, hop-by-hop routing, SPF/DKIM/DMARC verdicts, delays per hop. Pure parsing logic, no external dependencies. |
 | **D4** | **DANE / DNSSEC Validation** | MEDIUM | HIGH | Check TLSA records for DANE, verify DNSSEC chain. Demonstrates understanding of DNS security beyond basic records. Uses `dns.resolver` with DNSSEC flags. |
-| **D5** | **Security Score Timeline** | LOW | HIGH | Store historical scores per domain and render a chart showing grade progression over time. Already have scan history — just need a chart visualization. |
+| **D5** | **Security Score Timeline** | LOW | HIGH | Store historical scores per domain and render a chart showing grade progression over time. Already have scan history — just need a chart visualisation. |
 | **D6** | **PDF Report Export** | LOW | MEDIUM | Generate downloadable PDF security reports using `reportlab` or `weasyprint`. Professional-looking output for FYP demo. |
-| **D7** | **AI/ML Policy Recommender** | MEDIUM-HIGH | VERY HIGH | Analyze scan results and recommend next steps (e.g., "your SPF is valid, DMARC is at p=none — recommend moving to p=quarantine"). Could use rule-based logic or a simple ML model. Mirrors PowerDMARC's AI feature. |
+| **D7** | **AI/ML Policy Recommender** | MEDIUM-HIGH | VERY HIGH | Analyse scan results and recommend next steps (e.g., "your SPF is valid, DMARC is at p=none — recommend moving to p=quarantine"). Could use rule-based logic or a simple ML model. Mirrors PowerDMARC's AI feature. |
 
 ### NICE-TO-HAVES — Useful but lower priority
 
@@ -394,7 +404,7 @@ These are **technically impressive** features with strong FYP writeup value.
 | Feature | Est. Effort | Why |
 |---------|-------------|-----|
 | **DMARC XML Upload & Parse (D1)** | 8–12 hours | THE feature that separates toys from real tools. Even a basic file-upload XML parser would be impressive. |
-| **Email Header Analyzer (D3)** | 4–6 hours | Pure parsing, no external deps. Paste headers → see auth results. Very useful for educational context. |
+| **Email Header Analyser (D3)** | 4–6 hours | Pure parsing, no external deps. Paste headers → see auth results. Very useful for educational context. |
 | **Threat GeoIP Map (D2)** | 6–8 hours | Use MaxMind GeoLite2 + Leaflet.js. Visually stunning for presentations. |
 | **Blacklist / RBL Check (N1)** | 3–4 hours | Simple DNSBL queries. MXToolbox's most popular feature. |
 | **DANE / DNSSEC Check (D4)** | 4–6 hours | Demonstrates advanced DNS security knowledge. Only 2 competitors do this. |
@@ -430,7 +440,7 @@ These are **technically impressive** features with strong FYP writeup value.
 ### After Implementing Tier 2 Features
 - DMARC report parsing makes AuroraEdge a genuine monitoring platform
 - Email header analysis brings diagnostic depth
-- GeoIP visualization provides enterprise-grade presentation
+- GeoIP visualisation provides enterprise-grade presentation
 - **Net result: AuroraEdge would be the most comprehensive open-source email security tool available**
 
 ---

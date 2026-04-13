@@ -1,7 +1,7 @@
 # Stage 14 - Interactive Test Hub + Demo Script
 
 ## Overview
-Week 18 deliverable: Created an interactive testing interface for live domain scanning and a comprehensive demo script for evaluators.
+Stage 14 deliverable: Created an interactive testing interface for live domain scanning and a comprehensive demo script for evaluators.
 
 ## Features
 
