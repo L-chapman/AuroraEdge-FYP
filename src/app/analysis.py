@@ -80,7 +80,7 @@ def calculate_statistics(rows: List[Dict]) -> Dict:
     # Severity distribution
     severity_counts = Counter(r.get("severity", "OK") for r in rows)
 
-    # Violation analysis
+    # Violation summary
     all_violations = []
     for r in rows:
         violations = r.get("violations", "")
@@ -183,7 +183,7 @@ def generate_check_presence_chart(
     pcts = stats.get("check_presence_pct", {})
     values = [pcts.get(k, 0) for k in check_keys]
 
-    # Color based on adoption rate
+    # Colour bars by adoption rate
     colors = []
     for v in values:
         if v >= 80:

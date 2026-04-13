@@ -130,7 +130,7 @@ def require_token(req: Request):
         if req.headers["Authorization"].split(" ")[1] == want:
             return
     
-    raise HTTPException(401, "Unauthorized")
+    raise HTTPException(401, "Unauthorised")
 ```
 
 ### Dashboard Features

@@ -159,9 +159,9 @@ cd "<project-folder>"
 $env:PYTHONPATH = "$PWD\src"
 python -m pytest -q
 ```
-Expected: **397 passed**
+Expected: **397 passed, 0 skipped**
 
-That exact count was rechecked on 2026-04-14.
+That exact result was rechecked on 2026-04-14.
 
 
 ---
@@ -211,7 +211,7 @@ python -m app.cli --domain google.com
 | Interactive Test | Open `/test` in browser | Form to scan any domain |
 | Real-time Updates | Run scan while dashboard open | Dashboard auto-refreshes |
 | Database | Check `state/auroraedge.db` | Persistent scan history |
-| Unit Tests | `pytest -q` | 397 passed |
+| Unit Tests | `pytest -q` | 397 passed, 0 skipped |
 
 ### Optional (Owned Domain Only): Automatic DNS Fixing
 If you have a Cloudflare-managed test domain and explicit permission, you can test the automatic fixing safely:

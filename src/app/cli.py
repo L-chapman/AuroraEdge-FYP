@@ -97,7 +97,7 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
 
     for domain, res, ev in rows:
         if ev.get("severity") == "OK":
-            continue  # Skip domains with no issues
+            continue  # Skip domains with no findings to show
 
         # Add domain to scan result for generate_fixes
         res_with_domain = {**res, "domain": domain}

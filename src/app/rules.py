@@ -25,7 +25,7 @@ SEVERITY_EXPLANATIONS = {
     "HIGH": {
         "title": "High Security Risk",
         "description": "A significant security gap that could allow email spoofing or other attacks.",
-        "impact": "Your domain lacks essential protections. Sophisticated attackers could exploit this to impersonate your organization.",
+        "impact": "Your domain lacks essential protections. Sophisticated attackers could exploit this to impersonate your organisation.",
         "urgency": "Fix within 24-48 hours",
         "color": "#ef4444",
     },

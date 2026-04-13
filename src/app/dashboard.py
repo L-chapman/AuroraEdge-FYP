@@ -297,7 +297,7 @@ def require_token(req: Request):
     if auth.startswith("Bearer ") and auth.split(" ", 1)[1] == want:
         return
 
-    raise HTTPException(status_code=401, detail="Unauthorized - valid token required")
+    raise HTTPException(status_code=401, detail="Unauthorised - valid token required")
 
 
 def list_csvs() -> List[Path]:

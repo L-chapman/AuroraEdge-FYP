@@ -4,7 +4,7 @@
 
 - Final application version in the current codebase: **3.1**
 - Dashboard/API route handlers: **36**
-- Final automated test result rechecked on **2026-04-14** with `python -m pytest -q`: **397 passed**
+- Final automated test result rechecked on **2026-04-14** with `python -m pytest -q`: **397 passed, 0 skipped**
 - Smoke-test script: `verify_system.py` now supports `--domain` and `--offline`
 - Clean submission ZIP script: `scripts/create_submission_zip.ps1`
 
@@ -76,6 +76,16 @@ The generated ZIP excludes:
 - `reports/archive/`
 
 This keeps the submission tidy and avoids shipping local machine artefacts.
+
+Submission package checklist:
+
+- `README.md` so a marker can start the project quickly
+- `docs/` so the design, testing, verification, and ethics material stays with the code
+- `scripts/` for the demo, lab script, and clean packaging workflow
+- `src/` for the full implementation
+- `tests/` so the final automated checks can be rerun
+- `reports/indexed/` so a small set of representative outputs is included
+- excludes local environments, Git internals, caches, logs, runtime state, and archive clutter
 
 ---
 

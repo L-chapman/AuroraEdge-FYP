@@ -11,7 +11,7 @@ This report verifies the AuroraEdge repository against the **final project spec*
 - The remaining caveats are mainly about deployment framing, methodology write-up clarity, and scope wording rather than missing core functionality.
 
 Release-readiness addendum (2026-04-14):
-- The full automated suite was rerun with `python -m pytest -q` and finished at **397 passed**.
+- The full automated suite was rerun with `python -m pytest -q` and finished at **397 passed, 0 skipped**.
 - `verify_system.py` now accepts `--domain` and `--offline` so it is less fragile for marking.
 - `docs/ARCHITECTURE.md`, `docs/architecture_diagram.svg`, and `docs/FINAL_RELEASE_NOTES.md` now cover the design and final release evidence explicitly.
 - `scripts/create_submission_zip.ps1` creates a clean assessment ZIP without local environment and cache folders.

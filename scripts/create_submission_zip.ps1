@@ -10,7 +10,7 @@ if ([string]::IsNullOrWhiteSpace($OutputZip)) {
 
 $OutputZip = [System.IO.Path]::GetFullPath($OutputZip)
 $DistDir = Split-Path -Parent $OutputZip
-$StagingDir = Join-Path $DistDir "AuroraEdge_FYP_submission"
+$PackageRoot = "AuroraEdge_FYP_submission"
 
 $ExcludedFolderNames = @(
     ".git",
@@ -34,6 +34,10 @@ $ExcludedRelativePaths = @(
 $ExcludedFileNames = @(
     "Thumbs.db",
     ".DS_Store"
+)
+
+$ExcludedExtensions = @(
+    ".zip"
 )
 
 function Get-RelativePathSafe {
@@ -74,6 +78,10 @@ function Test-ExcludedPath {
         return $true
     }
 
+    if ($ExcludedExtensions -contains ([System.IO.Path]::GetExtension($leaf).ToLowerInvariant())) {
+        return $true
+    }
+
     if ($leaf.EndsWith(".pyc") -or $leaf.EndsWith(".pyo")) {
         return $true
     }
@@ -81,38 +89,38 @@ function Test-ExcludedPath {
     return $false
 }
 
-if (Test-Path $StagingDir) {
-    Remove-Item -LiteralPath $StagingDir -Recurse -Force
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+if (Test-Path $OutputZip) {
+    Remove-Item -LiteralPath $OutputZip -Force
 }
 
-New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
 New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 
 $files = Get-ChildItem -LiteralPath $ProjectRoot -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object {
     -not (Test-ExcludedPath $_.FullName)
 }
 
-foreach ($file in $files) {
-    $relativePath = Get-RelativePathSafe -TargetPath $file.FullName
-    $destination = Join-Path $StagingDir $relativePath
-    $destinationDir = Split-Path -Parent $destination
-
-    if (-not (Test-Path $destinationDir)) {
-        New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+$zip = [System.IO.Compression.ZipFile]::Open($OutputZip, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in $files) {
+        $relativePath = Get-RelativePathSafe -TargetPath $file.FullName
+        $entryPath = ($PackageRoot + "/" + ($relativePath -replace "\\", "/")).TrimEnd("/")
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $zip,
+            $file.FullName,
+            $entryPath,
+            [System.IO.Compression.CompressionLevel]::Optimal
+        ) | Out-Null
     }
-
-    Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
 }
-
-if (Test-Path $OutputZip) {
-    Remove-Item -LiteralPath $OutputZip -Force
+finally {
+    $zip.Dispose()
 }
-
-Compress-Archive -Path (Join-Path $StagingDir "*") -DestinationPath $OutputZip -Force
-Remove-Item -LiteralPath $StagingDir -Recurse -Force
 
 Write-Host "Created clean submission ZIP:" -ForegroundColor Green
 Write-Host "  $OutputZip"
 Write-Host ""
 Write-Host "Excluded from the ZIP:" -ForegroundColor Cyan
-Write-Host "  .venv, .git, .git (1), .pytest_cache, .vscode, __pycache__, logs, state DB files, reports/archive"
+Write-Host "  .venv, .git, .git (1), .pytest_cache, .vscode, __pycache__, dist, logs, state DB files, reports/archive, nested zip files"
