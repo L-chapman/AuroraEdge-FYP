@@ -66,7 +66,12 @@ RECORDS_TO_WEAKEN = [
 ]
 
 RECORDS_TO_DELETE = [
-    {"type": "TXT", "name": f"_mta-sts.{DOMAIN}", "label": "MTA-STS"},
+    {
+        "type": "TXT",
+        "name": f"_mta-sts.{DOMAIN}",
+        "label": "MTA-STS",
+        "restore_value": f"v=STSv1; id=20260414000000",
+    },
 ]
 
 
@@ -198,6 +203,19 @@ def restore_records():
         for ex in existing:
             _delete_record(token, zone_id, ex["id"], rec["name"])
         if _create_record(token, zone_id, rec["name"], rec["strong_value"]):
+            changes += 1
+
+    for rec in RECORDS_TO_DELETE:
+        label = rec["label"]
+        restore_val = rec.get("restore_value", "")
+        if not restore_val:
+            continue
+        print(f"\n[{label}] Recreating {rec['name']} ...")
+        existing = _find_records(token, zone_id, rec["type"], rec["name"])
+        if existing:
+            print(f"  – Already exists, skipping")
+            continue
+        if _create_record(token, zone_id, rec["name"], restore_val):
             changes += 1
 
     print(f"\n{'=' * 55}")

@@ -3392,6 +3392,9 @@ async function autoFixFromScan(domain) {
         if (data.verification) {
             msg += (msg ? '\\n\\n' : '') + '🔍 Verification: ' + data.verification;
         }
+        if (data.cf_verified && data.cf_verified.length > 0) {
+            msg += (msg ? '\\n\\n' : '') + '☁️ Cloudflare API confirms:\\n' + data.cf_verified.map(v => '  • ' + v).join('\\n');
+        }
         if (data.pre_fix_grade && data.grade && data.pre_fix_grade !== data.grade) {
             msg += '\\n📈 Grade: ' + data.pre_fix_grade + ' → ' + data.grade + ' (Score: ' + data.pre_fix_score + ' → ' + data.score + ')';
         } else if (data.grade) {
@@ -3407,6 +3410,10 @@ async function autoFixFromScan(domain) {
         const hasFailures = (data.failed && data.failed.length > 0);
         const hasApplied = (data.applied && data.applied.length > 0);
         showToast(msg, hasFailures ? 'warning' : hasApplied ? 'success' : 'info', 15000);
+        // Auto-rescan after fixes to refresh displayed results
+        if (hasApplied) {
+            setTimeout(() => rescanDomain(domain), 5000);
+        }
     } catch(e) {
         showToast('Auto-fix error: ' + e.message, 'error', 8000);
     }
@@ -3774,9 +3781,35 @@ async def api_apply_fix(request: Request):
     # so we can report the *actual* improvement (or surface propagation lag).
     post_fix_eval = {}
     verification_note = ""
+    cf_verified = []  # records confirmed via Cloudflare API
     if applied_fixes:
         import time
         time.sleep(2)  # brief pause for Cloudflare edge propagation
+
+        # --- Cloudflare API verification (instant, no DNS cache) ---
+        try:
+            for fix in applied_fixes:
+                ft = fix.get("type", "")
+                if ft == "SPF":
+                    rec = cf.get_txt_record(domain)
+                    if rec and "-all" in rec.get("content", ""):
+                        cf_verified.append(f"SPF: {rec['content']}")
+                elif ft == "DMARC":
+                    rec = cf.get_txt_record(f"_dmarc.{domain}")
+                    if rec:
+                        cf_verified.append(f"DMARC: {rec['content']}")
+                elif ft == "MTA-STS":
+                    rec = cf.get_txt_record(f"_mta-sts.{domain}")
+                    if rec:
+                        cf_verified.append(f"MTA-STS DNS: {rec['content']}")
+                elif ft == "TLS-RPT":
+                    rec = cf.get_txt_record(f"_smtp._tls.{domain}")
+                    if rec:
+                        cf_verified.append(f"TLS-RPT: {rec['content']}")
+        except Exception:
+            pass
+
+        # --- DNS-based verification scan ---
         try:
             post_scan = scan_domain(domain, check_starttls=False)
             post_scan["domain"] = domain
@@ -3788,6 +3821,12 @@ async def api_apply_fix(request: Request):
                     f"Score improved from {pre_score} to {post_score} "
                     f"(Grade {pre_fix_eval.get('grade', '?')} → {post_fix_eval.get('grade', '?')}). "
                     "DNS changes verified."
+                )
+            elif post_score == pre_score and cf_verified:
+                verification_note = (
+                    "DNS changes confirmed on Cloudflare — "
+                    + "; ".join(cf_verified)
+                    + ". DNS resolvers may still show old values for up to 60 seconds."
                 )
             elif post_score == pre_score:
                 verification_note = (
@@ -3835,6 +3874,7 @@ async def api_apply_fix(request: Request):
         "pre_fix_grade": pre_fix_eval.get("grade", ""),
         "pre_fix_score": pre_fix_eval.get("score", 0),
         "verification": verification_note,
+        "cf_verified": cf_verified,
         "cloudflare_zone": msg,
     }
 
@@ -4349,6 +4389,8 @@ def domain_detail(domain: str):
                 msg += (msg ? '\\n\\n' : '') + '🔧 Manual steps still needed:\\n' + data.manual_actions.map(m => '  ⚠ ' + m.type + ': ' + m.description).join('\\n');
             if (data.verification)
                 msg += (msg ? '\\n\\n' : '') + '🔍 Verification: ' + data.verification;
+            if (data.cf_verified && data.cf_verified.length > 0)
+                msg += (msg ? '\\n\\n' : '') + '☁️ Cloudflare API confirms:\\n' + data.cf_verified.map(v => '  • ' + v).join('\\n');
             if (data.pre_fix_grade && data.grade && data.pre_fix_grade !== data.grade)
                 msg += '\\n📈 Grade: ' + data.pre_fix_grade + ' → ' + data.grade + ' (Score: ' + data.pre_fix_score + ' → ' + data.score + ')';
             else if (data.grade)
@@ -4361,6 +4403,10 @@ def domain_detail(domain: str):
                 msg = 'No issues found — domain looks good!';
             }}
             alert(msg);
+            // Reload the page to show updated results
+            if (data.applied && data.applied.length > 0) {{
+                setTimeout(() => location.reload(), 5000);
+            }}
         }} catch(e) {{
             alert('Error: ' + e.message);
         }}
@@ -4882,6 +4928,10 @@ def domains_page():
             if (data.verification) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--bg-secondary);border-left:3px solid var(--accent);">
                     🔍 <strong>Verification:</strong> ${{data.verification}}</div>`;
+            }}
+            if (data.cf_verified && data.cf_verified.length > 0) {{
+                html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--bg-secondary);border-left:3px solid var(--success);">
+                    ☁️ <strong>Cloudflare API confirms:</strong><br>${{data.cf_verified.map(v => '&nbsp;&nbsp;• ' + v).join('<br>')}}</div>`;
             }}
             if (data.pre_fix_grade && data.grade && data.pre_fix_grade !== data.grade) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--success-bg);text-align:center;">

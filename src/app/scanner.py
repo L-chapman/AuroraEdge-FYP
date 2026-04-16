@@ -312,10 +312,25 @@ def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
 
 
 def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
-    """Return (present, mode, max_age, raw_first_line)."""
-    # If `requests` isn't available, treat MTA-STS as not present.
-    if requests is None:
+    """Return (present, mode, max_age, raw_first_line).
+
+    MTA-STS requires BOTH a ``_mta-sts.{domain}`` TXT record (RFC 8461 §3.1)
+    AND a valid HTTPS policy at ``https://mta-sts.{domain}/.well-known/mta-sts.txt``.
+    We check the DNS TXT record first — if it is missing the protocol is
+    incomplete even when a Cloudflare Worker still serves the policy file.
+    """
+    # Step 1: Check DNS TXT record at _mta-sts.{domain}
+    txt_name = f"_mta-sts.{domain}"
+    txt_records = _txt(txt_name)
+    has_dns = any(t.lower().startswith("v=stsv1") for t in txt_records)
+
+    if not has_dns:
         return (False, "", 0, "")
+
+    # Step 2: Fetch the HTTPS policy file
+    if requests is None:
+        # DNS record present but cannot verify HTTPS — still mark present
+        return (True, "", 0, "")
     url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
     try:
         r = requests.get(url, timeout=HTTP_TIMEOUT, stream=True)

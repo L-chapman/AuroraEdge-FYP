@@ -591,6 +591,13 @@ class CloudflareDNS:
             self._log_audit(action, name, "A", old_value, ip, False, error)
             return False, f"Failed to {action.lower()} A record: {error}"
 
+    def _delete_a_record(self, name: str) -> None:
+        """Delete any A records matching *name* (best-effort, no error raised)."""
+        existing = self.get_a_record(name)
+        if existing:
+            url = f"{self.base_url}/{existing['id']}"
+            self._request("DELETE", url)
+
     # -----------------------------------------------------------------
     # DKIM Auto-Fix
     # -----------------------------------------------------------------
@@ -888,8 +895,14 @@ async function handleRequest(request) {{
                 pass
 
         # -- Attempt C: Account-level Custom Domains (last resort) --
+        # Custom Domains manages its own DNS, so remove the A record we
+        # created in Step 1 to avoid the "externally managed DNS" conflict.
         if not route_bound:
             cd_hostname = f"mta-sts.{domain}"
+            try:
+                self._delete_a_record(cd_hostname)
+            except Exception:
+                pass
             cd_url = f"{CF_API_BASE}/accounts/{account_id}/workers/domains"
             cd_data = {
                 "hostname": cd_hostname,
