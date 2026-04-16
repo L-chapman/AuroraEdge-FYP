@@ -13,6 +13,7 @@ $DistDir = Split-Path -Parent $OutputZip
 $PackageRoot = "AuroraEdge_FYP_submission"
 
 $ExcludedFolderNames = @(
+    ".github",
     ".git",
     ".git (1)",
     ".venv",
@@ -25,7 +26,6 @@ $ExcludedFolderNames = @(
 )
 
 $ExcludedRelativePaths = @(
-    "reports\archive",
     "state\auroraedge.db",
     "state\auroraedge.db-shm",
     "state\auroraedge.db-wal"
@@ -98,8 +98,26 @@ if (Test-Path $OutputZip) {
 
 New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
 
-$files = Get-ChildItem -LiteralPath $ProjectRoot -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object {
-    -not (Test-ExcludedPath $_.FullName)
+$files = @()
+
+if ((Test-Path (Join-Path $ProjectRoot ".git")) -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    $trackedPaths = & git -C $ProjectRoot ls-files
+    if ($LASTEXITCODE -eq 0 -and $trackedPaths) {
+        $files = @(
+            $trackedPaths |
+                ForEach-Object { Join-Path $ProjectRoot $_ } |
+                Where-Object {
+                    (Test-Path -LiteralPath $_ -PathType Leaf) -and -not (Test-ExcludedPath $_)
+                } |
+                ForEach-Object { Get-Item -LiteralPath $_ }
+        )
+    }
+}
+
+if (-not $files -or $files.Count -eq 0) {
+    $files = @(Get-ChildItem -LiteralPath $ProjectRoot -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object {
+        -not (Test-ExcludedPath $_.FullName)
+    })
 }
 
 $zip = [System.IO.Compression.ZipFile]::Open($OutputZip, [System.IO.Compression.ZipArchiveMode]::Create)
@@ -122,5 +140,7 @@ finally {
 Write-Host "Created clean submission ZIP:" -ForegroundColor Green
 Write-Host "  $OutputZip"
 Write-Host ""
+Write-Host "The ZIP follows the tracked project files when run from a Git checkout." -ForegroundColor DarkGray
+Write-Host ""
 Write-Host "Excluded from the ZIP:" -ForegroundColor Cyan
-Write-Host "  .venv, .git, .git (1), .pytest_cache, .vscode, __pycache__, dist, logs, state DB files, reports/archive, nested zip files"
+Write-Host "  .github, .venv, .git, .git (1), .pytest_cache, .vscode, __pycache__, dist, logs, state DB files, nested zip files"

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-demo_prep.py — Prepare auroraedge.co.uk for an Auto-Fix demonstration.
+demo_prep.py — Prepare auroraedge.co.uk for a controlled authorised Auto-Fix demonstration.
 
-This script talks directly to the Cloudflare API and **intentionally
-degrades** DNS records so that the AuroraEdge auto-fixer has something to
-repair during a live demo.
+This script talks directly to the Cloudflare API and puts the demo domain
+into a known weak state so that the AuroraEdge auto-fixer has something real
+to repair during a live demo.
 
 Actions
 -------
@@ -20,8 +20,8 @@ on the scan results page to let AuroraEdge repair everything automatically.
 
 Usage
 -----
-    python scripts/demo_prep.py            # break records
-    python scripts/demo_prep.py --restore  # put them back manually
+    python scripts/demo_prep.py            # reset to the demo state
+    python scripts/demo_prep.py --restore  # return to the normal strong state
 
 Credentials are read from the AuroraEdge SQLite database (state/auroraedge.db)
 so they stay consistent with the running server.
@@ -47,7 +47,7 @@ except ImportError:
 DOMAIN = "auroraedge.co.uk"
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
 
-# Records to break for the demo
+# Records used to reset the demo domain to the known weak state
 RECORDS_TO_WEAKEN = [
     {
         "type": "TXT",
@@ -152,15 +152,15 @@ def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def break_records():
-    """Weaken SPF/DMARC and remove MTA-STS to simulate a vulnerable domain."""
-    print(f"\n🔧 DEMO PREP — Weakening DNS records for {DOMAIN}")
+    """Reset SPF/DMARC and remove MTA-STS for the controlled demo state."""
+    print(f"\n🔧 DEMO RESET — Setting DNS records to the controlled demo state for {DOMAIN}")
     print("=" * 55)
 
     token, zone_id = _get_cf_creds()
     changes = 0
 
     for rec in RECORDS_TO_WEAKEN:
-        print(f"\n[{rec['label']}] Weakening {rec['name']} ...")
+        print(f"\n[{rec['label']}] Setting {rec['name']} to the demo state ...")
         existing = _find_records(token, zone_id, rec["type"], rec["name"])
         for ex in existing:
             _delete_record(token, zone_id, ex["id"], rec["name"])
@@ -168,7 +168,7 @@ def break_records():
             changes += 1
 
     for rec in RECORDS_TO_DELETE:
-        print(f"\n[{rec['label']}] Deleting {rec['name']} ...")
+        print(f"\n[{rec['label']}] Removing {rec['name']} for the demo state ...")
         matches = _find_records(token, zone_id, rec["type"], rec["name"])
         if not matches:
             print(f"  – Record not found (already removed)")
@@ -185,11 +185,11 @@ def break_records():
     print(f"  • MTA-STS → ❌ Missing")
     print(f"  • TLS-RPT → ✅ Present (unchanged)")
     print(f"  • DKIM    → ✅ Present (Google selector)")
-    print(f"\nYou can now scan {DOMAIN} and click 'Auto-Fix DNS'.\n")
+    print(f"\nYou can now scan {DOMAIN} and run the authorised Auto-Fix demo flow.\n")
 
 
 def restore_records():
-    """Restore records to their strong/fixed state."""
+    """Return the demo domain to its normal strong state."""
     print(f"\n🔄 RESTORE — Strengthening DNS records for {DOMAIN}")
     print("=" * 55)
 
@@ -225,12 +225,12 @@ def restore_records():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prepare auroraedge.co.uk DNS for AuroraEdge auto-fix demo"
+        description="Prepare auroraedge.co.uk DNS for the controlled AuroraEdge auto-fix demo"
     )
     parser.add_argument(
         "--restore",
         action="store_true",
-        help="Recreate the deleted records instead of breaking them",
+        help="Return the demo domain to the normal strong state",
     )
     args = parser.parse_args()
 

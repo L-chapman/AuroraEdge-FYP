@@ -525,6 +525,21 @@ $env:CF_EMAIL = "you@example.com"
 - MTA-STS Worker deployment may require broader Cloudflare permissions than basic DNS edit actions.
 - BIMI is reported but intentionally **not** auto-fixed because it depends on branding assets and, in many cases, a VMC.
 
+### Controlled demo reset workflow for `auroraedge.co.uk`
+
+For the authorised classroom demo, `auroraedge.co.uk` can be reset to a known weak state, fixed, and then restored again.
+
+```powershell
+python scripts/demo_prep.py
+python -m app.cli --domain auroraedge.co.uk --apply-fix --remediation
+python scripts/demo_prep.py --restore
+```
+
+- `python scripts/demo_prep.py` resets the demo domain to the controlled weak state used for repeat tests.
+- You can then scan `auroraedge.co.uk` in the dashboard or CLI and run **Auto-Fix DNS**.
+- `python scripts/demo_prep.py --restore` returns the domain to the normal strong state after the session.
+- This workflow is only for `auroraedge.co.uk` or another domain you own or are explicitly authorised to manage.
+
 ### Variable reference
 
 `.env.example` is included as a reference file showing the supported variable names. For the current codebase, the application reads these values from the active environment or from stored dashboard settings.
@@ -565,7 +580,8 @@ AuroraEdge_FYP/
 ├── reports/
 ├── scripts/
 │   ├── create_submission_zip.ps1
-│   └── demo.ps1
+│   ├── demo.ps1
+│   └── demo_prep.py
 ├── src/
 │   └── app/
 │       ├── analysis.py
@@ -591,7 +607,7 @@ Use the packaging script when you need a clean assessment copy.
 .\scripts\create_submission_zip.ps1
 ```
 
-It builds `dist\AuroraEdge_FYP_submission.zip` and excludes local-only items such as `.venv`, `.git`, `.git (1)`, `.pytest_cache`, `.vscode`, `__pycache__`, runtime database files, logs, and `reports/archive/`.
+When run from the Git checkout, it builds `dist\AuroraEdge_FYP_submission.zip` from the tracked project files so the clean ZIP stays aligned with the public repository. `.github/` is left out because it is only for repository automation, not for marking. If you package from a plain folder copy, the script also skips local-only items such as `.venv`, `.git`, `.git (1)`, `.pytest_cache`, `.vscode`, `__pycache__`, runtime database files, logs, and nested ZIP files.
 
 ---
 

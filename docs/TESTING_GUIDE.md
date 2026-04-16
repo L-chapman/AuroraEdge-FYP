@@ -12,7 +12,7 @@ AuroraEdge is an automated email authentication and cyber defence system for sma
 | Use the guided menu demo | Option B in **Quick Start** |
 | Start the dashboard manually | Option C in **Quick Start** |
 | Test the CLI only | **CLI Testing** |
-| Verify optional Cloudflare auto-fix | **Optional (Owned Domain Only): Automatic DNS Fixing** |
+| Verify optional Cloudflare auto-fix and the demo reset flow | **Optional (Owned Or Authorised Demo Domain Only): Automatic DNS Fixing** |
 
 Important note:
 
@@ -79,7 +79,7 @@ python -m app.cli --domain bbc.co.uk --remediation
 python -m app.cli --domain belfast.ac.uk --remediation
 ```
 
-If you do not own a domain, use `auroraedge.co.uk` as the demo domain.
+If you do not own a domain, use `auroraedge.co.uk` for the controlled authorised demo workflow.
 
 ---
 
@@ -213,12 +213,34 @@ python -m app.cli --domain google.com
 | Database | Check `state/auroraedge.db` | Persistent scan history |
 | Unit Tests | `pytest -q` | 397 passed, 0 skipped |
 
-### Optional (Owned Domain Only): Automatic DNS Fixing
+### Optional (Owned Or Authorised Demo Domain Only): Automatic DNS Fixing
 If you have a Cloudflare-managed test domain and explicit permission, you can test the automatic fixing safely:
 
 1. In `/settings`, set Cloudflare API Token + Zone ID (token scoped to a single zone).
 2. In `/domains`, add the domain.
 3. Confirm DNS changes are recorded in `logs/dns_audit.log` and that monitoring alerts are created.
+
+### Controlled demo reset workflow for `auroraedge.co.uk`
+
+For the authorised classroom demo, `auroraedge.co.uk` can be reset to the known weak state, fixed, and restored again.
+
+```powershell
+cd "<project-folder>"
+.\.venv\Scripts\Activate.ps1
+$env:PYTHONPATH = "$PWD\src"
+python scripts/demo_prep.py
+python -m app.cli --domain auroraedge.co.uk --apply-fix --remediation
+python scripts/demo_prep.py --restore
+```
+
+Use it like this:
+
+1. Run `python scripts/demo_prep.py` before the demo to place SPF, DMARC, and MTA-STS into the known weak state.
+2. Scan `auroraedge.co.uk` in the dashboard or CLI and show the lower grade.
+3. Apply **Auto-Fix DNS** and show the supported records being repaired.
+4. Run `python scripts/demo_prep.py --restore` after the session to return the domain to the normal strong state.
+
+This is a controlled authorised workflow for `auroraedge.co.uk`. Do not use it on domains you do not own or manage with permission.
 
 Important notes:
 - DKIM can be auto-configured for some known providers where AuroraEdge can detect the right selector pattern safely.

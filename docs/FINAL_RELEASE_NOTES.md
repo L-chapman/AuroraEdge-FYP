@@ -25,6 +25,7 @@ Stable release identifier:
 - Cloudflare-backed remediation for supported DNS fixes
 - Provider-aware DKIM auto-configuration for supported providers only
 - MTA-STS policy hosting through Cloudflare Workers
+- Controlled demo reset and restore workflow for `auroraedge.co.uk`
 - Audit logging for DNS changes
 - Large automated test suite and smoke-test verification path
 
@@ -49,9 +50,10 @@ These are the main files kept as final evidence for the dissertation and marking
 - `reports/indexed/auroraedge_results_20260319_151244.csv`
 - `reports/indexed/auroraedge_results_20260319_151244.md`
 - `verify_system.py`
+- `scripts/demo_prep.py`
 - `scripts/lab_experiment.py`
 
-`reports/archive/` is kept in the repository as project history, but it is excluded from the clean submission ZIP so the final assessment copy stays focused.
+`reports/archive/` is kept in the repository as project history and stays in the clean submission copy so the packaged project matches the tracked source files.
 
 ---
 
@@ -63,8 +65,11 @@ For the final assessment copy, use:
 .\scripts\create_submission_zip.ps1
 ```
 
+When run from the Git checkout, the generated ZIP follows the tracked project files so it stays aligned with the public repository. `.github/` is left out because it is only used for repository automation and is not needed for marking.
+
 The generated ZIP excludes:
 
+- `.github`
 - `.venv`
 - `.git`
 - `.git (1)`
@@ -73,7 +78,7 @@ The generated ZIP excludes:
 - `__pycache__`
 - runtime database files in `state/`
 - `logs/`
-- `reports/archive/`
+- nested ZIP files
 
 This keeps the submission tidy and avoids shipping local machine artefacts.
 
@@ -81,11 +86,23 @@ Submission package checklist:
 
 - `README.md` so a marker can start the project quickly
 - `docs/` so the design, testing, verification, and ethics material stays with the code
-- `scripts/` for the demo, lab script, and clean packaging workflow
+- `scripts/` for the demo menu, demo reset flow, lab script, and clean packaging workflow
 - `src/` for the full implementation
 - `tests/` so the final automated checks can be rerun
-- `reports/indexed/` so a small set of representative outputs is included
-- excludes local environments, Git internals, caches, logs, runtime state, and archive clutter
+- `reports/` so the representative outputs and stored evidence stay aligned with the repository
+- excludes local environments, Git internals, caches, logs, runtime state, and repository automation files
+
+---
+
+## Controlled Demo Workflow
+
+For the authorised classroom demo, `auroraedge.co.uk` can be cycled through a repeatable reset, fix, and restore flow.
+
+- `python scripts/demo_prep.py` resets SPF, DMARC, and MTA-STS to the known weak demo state.
+- AuroraEdge can then scan and apply the supported Cloudflare fixes from the dashboard or the CLI.
+- `python scripts/demo_prep.py --restore` returns the domain to the normal strong state after the demo.
+
+This workflow is only for `auroraedge.co.uk` or another domain you own or are explicitly authorised to manage.
 
 ---
 
