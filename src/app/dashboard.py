@@ -3984,14 +3984,21 @@ async def api_demo_reset(request: Request):
     cmd = [sys.executable, str(DEMO_RESET_SCRIPT)]
     if restore:
         cmd.append("--restore")
+    run_env = os.environ.copy()
+    # demo_prep.py prints emoji; force UTF-8 output so Windows cp1252 consoles do not crash.
+    run_env["PYTHONIOENCODING"] = "utf-8"
+    run_env["PYTHONUTF8"] = "1"
 
     try:
         proc = await asyncio.to_thread(
             subprocess.run,
             cmd,
             cwd=str(Path(__file__).resolve().parents[2]),
+            env=run_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
     except subprocess.TimeoutExpired:
