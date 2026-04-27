@@ -59,6 +59,13 @@
 - `scripts/create_submission_zip.ps1` builds a clean assessment ZIP that excludes local environments, Git metadata, caches, runtime state, logs, and `reports/archive/`.
 - Historical milestone sections below keep their original counts for context. The authoritative final test count is the one above.
 
+### Submission Robustness Updates (2026-04-27)
+- Hardened `START.bat` to reject false Python detections from Windows App Execution Aliases and require a usable `venv` module before continuing.
+- Added writable-path guard in `START.bat`: if launched from a read-only location, it copies to `%LOCALAPPDATA%\\AuroraEdge\\AuroraEdge_FYP_submission` and relaunches automatically.
+- Improved demo reset/restore UX on `/test` with explicit progress popup and staged rescans so score/grade updates are visible on first run.
+- Updated demo reset verification selection logic to use matching/latest scan snapshots for deterministic post-reset scoring.
+- Synced fixes to GitHub and revalidated runtime syntax for updated modules (`START.bat`, `dashboard.py`).
+
 ### Test Results: 397 Passed, 0 Skipped
 
 **Functional Tests (39):**

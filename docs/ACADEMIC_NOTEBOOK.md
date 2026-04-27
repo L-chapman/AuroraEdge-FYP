@@ -86,6 +86,13 @@ This notebook captures the academic rationale, design choices, and development l
 - **Test Hub**: Open `http://127.0.0.1:8080/test` in browser
 - **Tests**: `python -m pytest -q` (397 passed, 0 skipped; all offline)
 
+## 8.1 Submission Hardening Updates (Apr 2026)
+- `START.bat` now verifies a real Python interpreter before setup, preventing false-positive detection from Windows App Execution Aliases.
+- `START.bat` now handles read-only launch paths (e.g. ISO/CD style locations) by copying to a writable local path and relaunching automatically.
+- Virtual environment creation remains portable on synced drives via `%LOCALAPPDATA%\AuroraEdge\venv_submission` fallback.
+- Demo reset/restore in the Test Hub now includes explicit progress feedback and staged rescan refresh to reduce stale first-refresh scores.
+- Demo reset verification now returns a deterministic matching/latest scan result rather than a "worst/best snapshot", improving score consistency during live demonstrations.
+
 ## 9. Completed Stages (All Implemented)
 
 | Stage | Feature | Tests |
@@ -130,6 +137,8 @@ This notebook captures the academic rationale, design choices, and development l
 - Testing proof: 397 passed, 0 skipped in the final `pytest -q` run
 - Architecture diagram: scanner → rules → outputs → dashboard
 - Analysis figures: matplotlib charts in `docs/figures/`
+
+> Note: Sections below are retained historical draft notes from earlier stages and are preserved for traceability.
 
 ## 10. Draft Scoring Rubric (Stage 8)
 - Goal: Map rule hits to a 0–100 score (higher = better hygiene).

@@ -227,8 +227,10 @@ This is the simplest and recommended setup path.
 1. Open the project folder.
 2. Double-click `START.bat`.
 3. Wait while it:
-   - finds Python
+   - validates a real Python runtime (and ignores Microsoft Store app-alias stubs)
    - creates `.venv` if needed
+   - falls back to `%LOCALAPPDATA%\\AuroraEdge\\venv_submission` if `.venv` cannot be created in the project folder
+   - auto-relocates to a writable local folder if launched from read-only media (for example CD/ISO paths)
    - installs dependencies from `requirements.txt`
    - creates `reports/`, `state/`, and `logs/` if missing
    - selects an available port between `8080` and `8085`
@@ -538,6 +540,7 @@ python scripts/demo_prep.py --restore
 - `python scripts/demo_prep.py` resets the demo domain to the controlled weak state used for repeat tests.
 - You can then scan `auroraedge.co.uk` in the dashboard or CLI and run **Auto-Fix DNS**.
 - `python scripts/demo_prep.py --restore` returns the domain to the normal strong state after the session.
+- The `/test` page reset/restore buttons now show progress feedback and perform staged rescan refreshes so grade changes appear reliably after a single click.
 - This workflow is only for `auroraedge.co.uk` or another domain you own or are explicitly authorised to manage.
 
 ### Variable reference
@@ -643,10 +646,12 @@ Key examples include:
 | Problem | Fix |
 |---------|-----|
 | `Python not found` | Install Python 3.10+ and make sure it is available on `PATH` |
+| `Found python was` or other strange version text | Disable Windows App Execution Aliases for `python.exe`/`python3.exe`, then rerun `START.bat` |
 | `ModuleNotFoundError: app` | Set `PYTHONPATH` to the `src` folder before running CLI or Uvicorn |
 | PowerShell blocks `.ps1` activation | Run `Set-ExecutionPolicy -Scope Process Bypass` in that session |
 | Existing `.venv` fails with `not a valid application for this OS platform` | Delete `.venv` and rerun `START.bat`, or recreate the environment manually with `python -m venv .venv` |
 | Port `8080` is in use | Use another port manually or let `START.bat` choose a free port |
+| `PermissionError` under `D:\\` or another read-only path | Launch `START.bat` from a normal writable folder, or let it auto-copy/relaunch into `%LOCALAPPDATA%\\AuroraEdge\\AuroraEdge_FYP_submission` |
 | `git pull` fails with `not a git repository` | Your copy is a folder copy, not a Git clone |
 | Cloudflare auto-fix unavailable | Add valid Cloudflare credentials in Settings or through environment variables |
 | No report files appear | Run a scan first; report files are created after successful scan runs |
