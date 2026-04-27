@@ -1488,6 +1488,48 @@ function showToast(message, type, duration) {
     if (duration > 0) setTimeout(function(){ if (toast.parentNode) toast.remove(); }, duration);
     return toast;
 }
+
+/* ---------- global progress popup (indeterminate bar) ---------- */
+function showProgressPopup(title, message) {
+    var overlay = document.getElementById('globalProgressOverlay');
+    if (!overlay) {
+        var style = document.createElement('style');
+        style.textContent = `
+        @keyframes ae_progress_move {
+            0% { background-position: 0 0; }
+            100% { background-position: 80px 0; }
+        }`;
+        document.head.appendChild(style);
+
+        overlay = document.createElement('div');
+        overlay.id = 'globalProgressOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(5,8,20,0.75);backdrop-filter:blur(2px);z-index:10020;display:none;align-items:center;justify-content:center;padding:20px;';
+        overlay.innerHTML = `
+            <div style="width:min(520px,95vw);background:#171a2d;border:1px solid rgba(59,130,246,0.35);border-radius:12px;padding:18px 18px 16px;box-shadow:0 10px 30px rgba(0,0,0,0.45);">
+                <h3 id="globalProgressTitle" style="margin:0 0 8px;color:#e2e8f0;font-size:1.05rem;">Working…</h3>
+                <p id="globalProgressMessage" style="margin:0 0 12px;color:#94a3b8;font-size:0.92rem;">Please wait.</p>
+                <div style="height:12px;border-radius:8px;background:#0f172a;overflow:hidden;border:1px solid rgba(148,163,184,0.25);">
+                    <div style="height:100%;width:100%;background:repeating-linear-gradient(45deg,#3b82f6 0,#3b82f6 16px,#60a5fa 16px,#60a5fa 32px);background-size:80px 80px;animation:ae_progress_move 1.1s linear infinite;"></div>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+    var t = document.getElementById('globalProgressTitle');
+    var m = document.getElementById('globalProgressMessage');
+    if (t) t.textContent = title || 'Working…';
+    if (m) m.textContent = message || 'Please wait.';
+    overlay.style.display = 'flex';
+}
+
+function updateProgressPopup(message) {
+    var m = document.getElementById('globalProgressMessage');
+    if (m && message) m.textContent = message;
+}
+
+function hideProgressPopup() {
+    var overlay = document.getElementById('globalProgressOverlay');
+    if (overlay) overlay.style.display = 'none';
+}
 </script>
 """
 
@@ -3034,6 +3076,29 @@ def _test_js() -> str:
 <script>
 let isScanning = false;
 
+function showAutoFixOverlay(message) {
+    const overlay = document.getElementById('autoFixOverlay');
+    const text = document.getElementById('autoFixStatus');
+    const bar = document.getElementById('autoFixProgress');
+    if (overlay) overlay.style.display = 'flex';
+    if (text) text.textContent = message || 'Applying DNS fixes...';
+    if (bar) bar.style.width = '18%';
+}
+
+function updateAutoFixOverlay(message, pct) {
+    const text = document.getElementById('autoFixStatus');
+    const bar = document.getElementById('autoFixProgress');
+    if (text && message) text.textContent = message;
+    if (bar && typeof pct === 'number') bar.style.width = Math.max(10, Math.min(100, pct)) + '%';
+}
+
+function hideAutoFixOverlay() {
+    const overlay = document.getElementById('autoFixOverlay');
+    const bar = document.getElementById('autoFixProgress');
+    if (overlay) overlay.style.display = 'none';
+    if (bar) bar.style.width = '0%';
+}
+
 // Quick domain suggestions
 const quickDomains = [
     'google.com', 'microsoft.com', 'belfastmet.ac.uk', 'qub.ac.uk',
@@ -3388,10 +3453,14 @@ async function rescanDomain(domain) {
 async function autoFixFromScan(domain) {
     if (!confirm('Auto-Fix will attempt to create/update DNS records for ' + domain + ' via Cloudflare.\\n\\nThis requires Cloudflare API credentials configured in Settings.\\n\\nProceed?')) return;
     try {
+        showProgressPopup('Applying Auto-Fix DNS', 'Checking Cloudflare access for ' + domain + '...');
+        showAutoFixOverlay('Checking Cloudflare access for ' + domain + '...');
         // Test Cloudflare first and get zone name for ownership check
         const cfRes = await fetch('/api/settings/test-cloudflare');
         const cfData = await cfRes.json();
         if (!cfData.ok) {
+            hideProgressPopup();
+            hideAutoFixOverlay();
             showToast('Cloudflare is not configured. Go to Settings and add your API Token and Zone ID first.', 'error', 8000);
             return;
         }
@@ -3399,9 +3468,13 @@ async function autoFixFromScan(domain) {
         const zone = (cfData.zone_name || '').toLowerCase();
         const dom = domain.toLowerCase();
         if (zone && dom !== zone && !dom.endsWith('.' + zone)) {
+            hideProgressPopup();
+            hideAutoFixOverlay();
             showToast('Cannot auto-fix "' + domain + '"\\nYour Cloudflare zone is "' + zone + '". You can only auto-fix domains within that zone.\\nGo to Settings to change your Cloudflare credentials.', 'error', 10000);
             return;
         }
+        updateProgressPopup('Applying DNS fixes via Cloudflare API...');
+        updateAutoFixOverlay('Applying DNS fixes via Cloudflare API...', 55);
         const res = await fetch('/api/apply-fix', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3409,9 +3482,13 @@ async function autoFixFromScan(domain) {
         });
         const data = await res.json();
         if (!res.ok) {
+            hideProgressPopup();
+            hideAutoFixOverlay();
             showToast('Auto-Fix Blocked: ' + (data.detail || 'Unknown error.'), 'error', 8000);
             return;
         }
+        updateProgressPopup('Finalising verification and refreshing results...');
+        updateAutoFixOverlay('Finalising verification and refreshing results...', 92);
         let msg = '';
         if (data.applied && data.applied.length > 0) {
             msg += '✅ Fixes applied:\\n' + data.applied.map(f => '  ✓ ' + f.type + ': ' + f.message).join('\\n');
@@ -3442,12 +3519,17 @@ async function autoFixFromScan(domain) {
         }
         const hasFailures = (data.failed && data.failed.length > 0);
         const hasApplied = (data.applied && data.applied.length > 0);
+        hideProgressPopup();
+        updateAutoFixOverlay('Done.', 100);
+        setTimeout(() => hideAutoFixOverlay(), 500);
         showToast(msg, hasFailures ? 'warning' : hasApplied ? 'success' : 'info', 15000);
         // Auto-rescan after fixes to refresh displayed results
         if (hasApplied) {
             setTimeout(() => rescanDomain(domain), 5000);
         }
     } catch(e) {
+        hideProgressPopup();
+        hideAutoFixOverlay();
         showToast('Auto-fix error: ' + e.message, 'error', 8000);
     }
 }
@@ -4350,6 +4432,16 @@ microsoft.com
                 <p id="scanStatus">Scanning domains...</p>
             </div>
         </div>
+        <div class="scanning-overlay" id="autoFixOverlay" style="display:none;">
+            <div class="scanning-modal" style="max-width:560px;">
+                <div class="scanning-spinner"></div>
+                <p id="autoFixStatus">Applying DNS fixes...</p>
+                <div style="width:100%;background:rgba(255,255,255,0.12);border-radius:8px;overflow:hidden;margin-top:12px;height:14px;">
+                    <div id="autoFixProgress" style="height:100%;width:0%;background:linear-gradient(90deg,#f59e0b,#60a5fa);transition:width .35s ease;"></div>
+                </div>
+                <small style="display:block;margin-top:10px;color:#cbd5e1;">Please wait — this can take 10-60 seconds while DNS updates propagate.</small>
+            </div>
+        </div>
         
         {_footer_html()}
     </div>
@@ -4642,9 +4734,11 @@ def domain_detail(domain: str):
     async function fixDomain() {{
         if (!confirm('Auto-Fix will attempt to update DNS records for {domain} via Cloudflare.\\n\\nProceed?')) return;
         try {{
+            showProgressPopup('Applying Auto-Fix DNS', 'Checking Cloudflare access for {domain}...');
             const cfRes = await fetch('/api/settings/test-cloudflare');
             const cfData = await cfRes.json();
             if (!cfData.ok) {{
+                hideProgressPopup();
                 alert('Cloudflare is not configured.\\nGo to Settings to add your API Token and Zone ID.');
                 return;
             }}
@@ -4652,9 +4746,11 @@ def domain_detail(domain: str):
             const zone = (cfData.zone_name || '').toLowerCase();
             const dom = '{domain}'.toLowerCase();
             if (zone && dom !== zone && !dom.endsWith('.' + zone)) {{
+                hideProgressPopup();
                 alert('⛔ Cannot auto-fix "{domain}"\\n\\nYour Cloudflare zone is "' + zone + '".\\nYou can only auto-fix domains within that zone.\\n\\nGo to Settings if you need to change your Cloudflare credentials.');
                 return;
             }}
+            updateProgressPopup('Applying DNS fixes via Cloudflare API...');
             const res = await fetch('/api/apply-fix', {{
                 method: 'POST',
                 headers: {{'Content-Type': 'application/json'}},
@@ -4662,9 +4758,11 @@ def domain_detail(domain: str):
             }});
             const data = await res.json();
             if (!res.ok) {{
+                hideProgressPopup();
                 alert('⛔ Auto-Fix Blocked\\n\\n' + (data.detail || 'Unknown error.'));
                 return;
             }}
+            updateProgressPopup('Finalising verification and preparing summary...');
             let msg = '';
             if (data.applied && data.applied.length > 0)
                 msg += '✅ Fixes applied:\\n' + data.applied.map(f => '  ✓ ' + f.type + ': ' + f.message).join('\\n');
@@ -4687,12 +4785,14 @@ def domain_detail(domain: str):
             }} else if (!msg) {{
                 msg = 'No issues found — domain looks good!';
             }}
+            hideProgressPopup();
             alert(msg);
             // Reload the page to show updated results
             if (data.applied && data.applied.length > 0) {{
                 setTimeout(() => location.reload(), 5000);
             }}
         }} catch(e) {{
+            hideProgressPopup();
             alert('Error: ' + e.message);
         }}
     }}
@@ -5028,6 +5128,9 @@ def domains_page():
             <div class="fix-modal">
                 <h2 style="margin-bottom:16px;">🔧 Auto-Fix DNS Records</h2>
                 <p id="fixStatus" style="color:var(--text-secondary);margin-bottom:16px;">Analysing domain...</p>
+                <div style="width:100%;height:12px;border-radius:8px;background:#0f172a;overflow:hidden;border:1px solid rgba(148,163,184,0.25);margin:0 0 14px;">
+                    <div id="fixProgressBar" style="height:100%;width:8%;background:linear-gradient(90deg,#3b82f6,#60a5fa);transition:width .35s ease;"></div>
+                </div>
                 <div id="fixResults"></div>
                 <button class="btn btn-secondary" onclick="document.getElementById('fixOverlay').style.display='none'" style="margin-top:16px;">Close</button>
             </div>
@@ -5113,15 +5216,20 @@ def domains_page():
         const overlay = document.getElementById('fixOverlay');
         const status = document.getElementById('fixStatus');
         const results = document.getElementById('fixResults');
+        const progress = document.getElementById('fixProgressBar');
+        const setProgress = (v) => {{ if (progress) progress.style.width = Math.max(8, Math.min(100, v)) + '%'; }};
         overlay.style.display = 'flex';
         status.textContent = 'Checking Cloudflare access for ' + domain + '...';
         results.innerHTML = '';
+        setProgress(15);
 
         try {{
             // Check if Cloudflare is configured and get zone name
             const cfRes = await fetch('/api/settings/test-cloudflare');
             const cfData = await cfRes.json();
+            setProgress(35);
             if (!cfData.ok) {{
+                setProgress(100);
                 status.textContent = '⚠️ Cloudflare not connected';
                 results.innerHTML = `
                     <div style="background:var(--warning-bg);padding:16px;border-radius:8px;margin-top:12px;">
@@ -5138,6 +5246,7 @@ def domains_page():
             const zone = (cfData.zone_name || '').toLowerCase();
             const dom = domain.toLowerCase();
             if (zone && dom !== zone && !dom.endsWith('.' + zone)) {{
+                setProgress(100);
                 status.textContent = '⛔ Domain not in your Cloudflare zone';
                 results.innerHTML = `
                     <div style="background:var(--danger-bg);padding:16px;border-radius:8px;margin-top:12px;">
@@ -5156,6 +5265,7 @@ def domains_page():
             }}
 
             status.textContent = 'Scanning ' + domain + ' and applying fixes...';
+            setProgress(65);
 
             // Apply fixes
             const res = await fetch('/api/apply-fix', {{
@@ -5164,8 +5274,10 @@ def domains_page():
                 body: JSON.stringify({{domain: domain}})
             }});
             const data = await res.json();
+            setProgress(90);
 
             if (!res.ok) {{
+                setProgress(100);
                 // Server rejected the request (e.g. domain not in configured zone)
                 status.textContent = '⛔ Auto-Fix Blocked';
                 results.innerHTML = `
@@ -5226,6 +5338,7 @@ def domains_page():
                     📊 <strong>Grade: ${{data.grade}}</strong> | Score: ${{data.score}} | Issues: ${{data.violations || 0}}</div>`;
             }}
             html += '</div>';
+            setProgress(100);
 
             if (data.applied && data.applied.length > 0 && (!data.manual_actions || data.manual_actions.length === 0)) {{
                 status.textContent = '✅ All fixes applied successfully!';

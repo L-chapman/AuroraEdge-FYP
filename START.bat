@@ -151,9 +151,18 @@ if "!SKIP_INSTALL!"=="1" (
     echo [3/4] Dependencies already up to date.
 ) else (
     echo [3/4] Installing dependencies...
-    echo     This window may look quiet for a short time. That is normal.
-    "%VENV_PY%" -m pip install --quiet --upgrade pip 2>nul
-    "%VENV_PY%" -m pip install --quiet -r requirements.txt
+    echo     Live install output is shown below so you can see progress.
+    echo [*] Upgrading pip...
+    "%VENV_PY%" -m pip install --upgrade pip
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Pip upgrade failed.
+        echo         Check your internet connection and try again.
+        pause
+        exit /b 1
+    )
+    echo [*] Installing required packages from requirements.txt...
+    "%VENV_PY%" -m pip install --progress-bar on -r requirements.txt
     if errorlevel 1 (
         echo.
         echo [ERROR] Dependency install failed.
