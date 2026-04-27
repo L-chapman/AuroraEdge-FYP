@@ -4095,10 +4095,10 @@ async def api_demo_reset(request: Request):
                     )
                 # reset target: any clearly weakened/missing control is enough
                 return (
-                    spf_all != "-all"
-                    or dmarc_policy != "reject"
-                    or dmarc_pct < 100
-                    or not mta_present
+                    spf_all == "~all"
+                    and dmarc_policy == "quarantine"
+                    and dmarc_pct < 100
+                    and not mta_present
                 )
 
             chosen_scan = None
