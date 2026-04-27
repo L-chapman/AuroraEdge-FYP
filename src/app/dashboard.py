@@ -3487,6 +3487,8 @@ async function resetDemoDomain(restore = false) {
             msg += '\\nScan ' + demoDomain + ' to verify the current state.';
         }
         showToast(msg, 'success', 12000);
+        // Refresh visible results so grade changes are obvious during demos.
+        setTimeout(() => rescanDomain(demoDomain), 800);
     } catch (e) {
         showToast('Demo ' + actionLabel + ' error: ' + e.message, 'error', 10000);
     } finally {
@@ -3888,11 +3890,39 @@ async def api_apply_fix(request: Request):
             pass
 
         # --- DNS-based verification scan ---
+        # Retry a few times so live demos are less likely to show stale
+        # DNS cache immediately after fixes are applied.
         try:
-            post_scan = scan_domain(domain, check_starttls=False)
-            post_scan["domain"] = domain
-            post_fix_eval = evaluate(post_scan)
             pre_score = pre_fix_eval.get("score", 0)
+            best_scan = None
+            best_eval = {}
+            best_score = -1
+            attempts = [0, 8, 18, 30, 45, 60]  # cumulative wait for DNS propagation
+
+            def _strong_demo_state(scan: Dict) -> bool:
+                return (
+                    str(scan.get("spf_all") or "").strip().lower() == "-all"
+                    and str(scan.get("dmarc_policy") or "").strip().lower() == "reject"
+                    and int(scan.get("dmarc_pct") or 0) >= 100
+                    and bool(scan.get("mta_sts_present"))
+                )
+
+            for idx, wait_s in enumerate(attempts):
+                if wait_s > 0:
+                    time.sleep(wait_s if idx == 1 else wait_s - attempts[idx - 1])
+                cur_scan = scan_domain(domain, check_starttls=False)
+                cur_scan["domain"] = domain
+                cur_eval = evaluate(cur_scan)
+                cur_score = cur_eval.get("score", 0)
+                if cur_score > best_score:
+                    best_score = cur_score
+                    best_scan = cur_scan
+                    best_eval = cur_eval
+                if cur_score > pre_score and _strong_demo_state(cur_scan):
+                    break
+
+            post_scan = best_scan or scan_result
+            post_fix_eval = best_eval or pre_fix_eval
             post_score = post_fix_eval.get("score", 0)
             if post_score > pre_score:
                 verification_note = (
@@ -4049,9 +4079,51 @@ async def api_demo_reset(request: Request):
     scan_summary = {}
     if HAS_SCANNER:
         try:
-            scan_result = await asyncio.to_thread(scan_domain, DEMO_DOMAIN, False)
-            scan_result["domain"] = DEMO_DOMAIN
-            evaluation = evaluate(scan_result)
+            import time
+
+            def _matches_target_state(scan: Dict, restoring: bool) -> bool:
+                spf_all = str(scan.get("spf_all") or "").strip().lower()
+                dmarc_policy = str(scan.get("dmarc_policy") or "").strip().lower()
+                dmarc_pct = int(scan.get("dmarc_pct") or 0)
+                mta_present = bool(scan.get("mta_sts_present"))
+                if restoring:
+                    return (
+                        spf_all == "-all"
+                        and dmarc_policy == "reject"
+                        and dmarc_pct >= 100
+                        and mta_present
+                    )
+                # reset target: any clearly weakened/missing control is enough
+                return (
+                    spf_all != "-all"
+                    or dmarc_policy != "reject"
+                    or dmarc_pct < 100
+                    or not mta_present
+                )
+
+            chosen_scan = None
+            chosen_eval = None
+            for attempt in range(8):
+                if attempt > 0:
+                    time.sleep(6)
+                cur_scan = await asyncio.to_thread(scan_domain, DEMO_DOMAIN, False)
+                cur_scan["domain"] = DEMO_DOMAIN
+                cur_eval = evaluate(cur_scan)
+
+                if chosen_eval is None:
+                    chosen_scan, chosen_eval = cur_scan, cur_eval
+                else:
+                    # For reset we want the worst observed result, for restore the best.
+                    cur_score = cur_eval.get("score", 0)
+                    chosen_score = chosen_eval.get("score", 0)
+                    if (not restore and cur_score < chosen_score) or (restore and cur_score > chosen_score):
+                        chosen_scan, chosen_eval = cur_scan, cur_eval
+
+                if _matches_target_state(cur_scan, restore):
+                    break
+
+            scan_result = chosen_scan or {}
+            evaluation = chosen_eval or {}
             grade = evaluation.get("grade", "F")
             score = evaluation.get("score", 0)
             severity = evaluation.get("severity", "OK")

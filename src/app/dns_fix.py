@@ -801,9 +801,13 @@ async function handleRequest(request) {{
         if ok:
             steps_done.append(f"DNS A record: {a_name} (proxied)")
         else:
-            steps_failed.append(f"DNS A record failed: {msg}")
-            # DNS is critical — abort if it fails
-            return False, f"Failed to create DNS record for {a_name}: {msg}"
+            if "managed by Workers already exists on that host" in str(msg):
+                # Worker-managed host already has the required DNS wiring.
+                steps_done.append(f"DNS already managed by Workers: {a_name}")
+            else:
+                steps_failed.append(f"DNS A record failed: {msg}")
+                # DNS is critical — abort if it fails
+                return False, f"Failed to create DNS record for {a_name}: {msg}"
 
         # Step 2: Upload Worker script
         worker_url = (
