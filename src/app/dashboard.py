@@ -116,6 +116,30 @@ logger = logging.getLogger("auroraedge")
 DEMO_DOMAIN = "auroraedge.co.uk"
 DEMO_RESET_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "demo_prep.py"
 
+
+def _bootstrap_cf_settings_from_env(db) -> List[str]:
+    """
+    Seed Cloudflare settings from process environment when DB values are missing.
+    This keeps local demo copies working without committing secrets to files.
+    """
+    mapping = {
+        "cf_api_token": "CF_API_TOKEN",
+        "cf_zone_id": "CF_ZONE_ID",
+        "cf_account_id": "CF_ACCOUNT_ID",
+        "cf_api_key": "CF_API_KEY",
+        "cf_email": "CF_EMAIL",
+    }
+    seeded = []
+    for db_key, env_key in mapping.items():
+        existing = (db.get_setting(db_key, "") or "").strip()
+        if existing:
+            continue
+        env_val = (os.environ.get(env_key, "") or "").strip()
+        if env_val:
+            db.set_setting(db_key, env_val)
+            seeded.append(db_key)
+    return seeded
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Modern lifespan handler — runs startup logic, then yields control."""
@@ -127,6 +151,9 @@ async def lifespan(application: FastAPI):
     if HAS_DB:
         try:
             db = get_database()
+            seeded = _bootstrap_cf_settings_from_env(db)
+            if seeded:
+                logger.info("Loaded Cloudflare settings from environment: %s", ", ".join(seeded))
             clear = db.get_setting("clear_on_start", "true").lower() in ("true", "1", "yes")
             if clear:
                 db.clear_scan_data()
@@ -1067,6 +1094,7 @@ def _apply_cf_settings(db):
     """Push DB-stored CF credentials into the dns_fix module at runtime."""
     if not HAS_DNS_FIX:
         return
+    _bootstrap_cf_settings_from_env(db)
     import app.dns_fix as dns_mod
     token = db.get_setting("cf_api_token")
     zone = db.get_setting("cf_zone_id")
