@@ -8,6 +8,7 @@ import json
 import asyncio
 import logging
 import subprocess
+import sqlite3
 import concurrent.futures
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -129,14 +130,31 @@ def _bootstrap_cf_settings_from_env(db) -> List[str]:
         "cf_api_key": "CF_API_KEY",
         "cf_email": "CF_EMAIL",
     }
+    reference_db = Path(__file__).resolve().parents[3] / "AuroraEdge_FYP" / "state" / "auroraedge.db"
+    ref_values = {}
+    try:
+        if reference_db.exists():
+            conn = sqlite3.connect(str(reference_db))
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT key, value FROM settings WHERE key IN ('cf_api_token','cf_zone_id','cf_account_id','cf_api_key','cf_email')"
+            )
+            ref_values = dict(cur.fetchall())
+            conn.close()
+    except Exception:
+        ref_values = {}
+
     seeded = []
     for db_key, env_key in mapping.items():
         existing = (db.get_setting(db_key, "") or "").strip()
         if existing:
             continue
         env_val = (os.environ.get(env_key, "") or "").strip()
-        if env_val:
-            db.set_setting(db_key, env_val)
+        ref_val = (ref_values.get(db_key, "") or "").strip()
+        chosen = env_val or ref_val
+        if chosen:
+            db.set_setting(db_key, chosen)
+            os.environ[env_key] = chosen
             seeded.append(db_key)
     return seeded
 
