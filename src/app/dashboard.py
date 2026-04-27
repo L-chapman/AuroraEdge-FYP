@@ -3535,7 +3535,11 @@ async function autoFixFromScan(domain) {
 }
 
 async function resetDemoDomain(restore = false) {
-    const btn = document.getElementById('resetDemoBtn');
+    const btn = restore
+        ? document.getElementById('restoreDemoBtn')
+        : document.getElementById('resetDemoBtn');
+    const resetBtn = document.getElementById('resetDemoBtn');
+    const restoreBtn = document.getElementById('restoreDemoBtn');
     const original = btn ? btn.innerHTML : '';
     const actionLabel = restore ? 'restore' : 'reset';
     const confirmMsg = restore
@@ -3544,12 +3548,17 @@ async function resetDemoDomain(restore = false) {
 
     if (!confirm(confirmMsg)) return;
 
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = restore ? '⏳ Restoring Demo…' : '⏳ Resetting Demo…';
-    }
+    if (resetBtn) resetBtn.disabled = true;
+    if (restoreBtn) restoreBtn.disabled = true;
+    if (btn) btn.innerHTML = restore ? '⏳ Restoring Demo…' : '⏳ Resetting Demo…';
+
+    showProgressPopup(
+        restore ? 'Restoring Demo DNS' : 'Resetting Demo DNS',
+        'Applying Cloudflare changes and validating DNS state...'
+    );
 
     try {
+        updateProgressPopup('Submitting demo ' + actionLabel + ' request...');
         const res = await fetch('/api/demo/reset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3557,28 +3566,84 @@ async function resetDemoDomain(restore = false) {
         });
         const data = await res.json();
         if (!res.ok) {
+            hideProgressPopup();
             showToast('Demo ' + actionLabel + ' failed: ' + (data.detail || 'Unknown error.'), 'error', 10000);
             return;
         }
 
+        updateProgressPopup('Server-side verification complete. Refreshing live score...');
         addQuickDomain(demoDomain);
+        const expectedScore = (data.scan && typeof data.scan.score === 'number') ? data.scan.score : null;
+        const refreshed = await refreshDemoResultUntilStable(demoDomain, restore, expectedScore);
+
         let msg = data.message || ('Demo ' + actionLabel + ' complete.');
-        if (data.scan && data.scan.grade) {
+        if (refreshed && refreshed.evaluation) {
+            msg += '\\nCurrent grade: ' + (refreshed.evaluation.grade || 'F') + ' (' + (refreshed.evaluation.score || 0) + '/100, ' + (refreshed.evaluation.severity || 'OK') + ')';
+        } else if (data.scan && data.scan.grade) {
             msg += '\\nCurrent grade: ' + data.scan.grade + ' (' + data.scan.score + '/100, ' + data.scan.severity + ')';
         } else {
             msg += '\\nScan ' + demoDomain + ' to verify the current state.';
         }
+        hideProgressPopup();
         showToast(msg, 'success', 12000);
-        // Refresh visible results so grade changes are obvious during demos.
-        setTimeout(() => rescanDomain(demoDomain), 800);
     } catch (e) {
+        hideProgressPopup();
         showToast('Demo ' + actionLabel + ' error: ' + e.message, 'error', 10000);
     } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = original;
+        if (resetBtn) resetBtn.disabled = false;
+        if (restoreBtn) restoreBtn.disabled = false;
+        if (btn) btn.innerHTML = original;
+    }
+}
+
+function sleepMs(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function refreshDemoResultUntilStable(domain, restore, expectedScore) {
+    const waits = [0, 2500, 4500, 7000, 10000];
+    let best = null;
+
+    for (let i = 0; i < waits.length; i++) {
+        if (waits[i] > 0) await sleepMs(waits[i]);
+        updateProgressPopup('Refreshing DNS scan (' + (i + 1) + '/' + waits.length + ')...');
+
+        try {
+            const res = await fetch('/api/rescan/' + encodeURIComponent(domain), { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data || !data.evaluation) continue;
+
+            const current = {
+                domain: data.domain || domain,
+                scan: data.scan || {},
+                evaluation: data.evaluation || {},
+                remediation: data.remediation || []
+            };
+
+            if (!best) {
+                best = current;
+            } else {
+                const bestScore = Number(best.evaluation?.score || 0);
+                const currentScore = Number(current.evaluation?.score || 0);
+                if ((!restore && currentScore < bestScore) || (restore && currentScore > bestScore)) {
+                    best = current;
+                }
+            }
+
+            displayResults({ status: 'success', count: 1, results: [best] });
+
+            const score = Number(current.evaluation?.score || 0);
+            if (expectedScore !== null) {
+                if ((!restore && score <= expectedScore) || (restore && score >= expectedScore)) {
+                    return best;
+                }
+            }
+        } catch (e) {
+            // Keep retrying until attempts are exhausted.
         }
     }
+
+    return best;
 }
 
 async function showHistory(domain) {
@@ -4344,7 +4409,7 @@ def test_hub():
                 <button id="resetDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(false)" style="border-color:rgba(234,179,8,0.6); color:#fde68a;">
                     ♻ Reset Demo DNS (Re-break for retest)
                 </button>
-                <button class="action-btn secondary" onclick="resetDemoDomain(true)">
+                <button id="restoreDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(true)">
                     ✅ Restore Demo DNS (Strong state)
                 </button>
             </div>
