@@ -11,20 +11,33 @@ echo.
 REM ── Navigate to wherever this .bat file lives ──────────────────────
 cd /d "%~dp0"
 
+REM ── Ensure we are running from a writable location ──────────────────
+set "RUN_DIR=%cd%"
+set "WRITE_TEST=%RUN_DIR%\.__auroraedge_write_test.tmp"
+copy nul "%WRITE_TEST%" >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] This location is not writable: %RUN_DIR%
+    echo [*] Copying project to local writable path and relaunching...
+    set "LOCAL_RUN_DIR=%LOCALAPPDATA%\AuroraEdge\AuroraEdge_FYP_submission"
+    if not exist "%LOCAL_RUN_DIR%" mkdir "%LOCAL_RUN_DIR%" >nul 2>&1
+    robocopy "%RUN_DIR%" "%LOCAL_RUN_DIR%" /E /NFL /NDL /NJH /NJS /NP >nul
+    if errorlevel 8 (
+        echo [ERROR] Failed to copy project to: %LOCAL_RUN_DIR%
+        echo         Copy the folder manually to your Desktop/Documents, then re-run START.bat.
+        pause
+        exit /b 1
+    )
+    echo [OK] Relaunching from: %LOCAL_RUN_DIR%
+    start "" "%LOCAL_RUN_DIR%\START.bat"
+    exit /b 0
+)
+del "%WRITE_TEST%" >nul 2>&1
+
 REM ── Locate a working Python (>= 3.10) ─────────────────────────────
 set "PY="
-where python >nul 2>&1
-if not errorlevel 1 (
-    for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
-    set "PY=python"
-)
-if not defined PY (
-    where py >nul 2>&1
-    if not errorlevel 1 (
-        for /f "tokens=2 delims= " %%v in ('py --version 2^>^&1') do set "PY_VER=%%v"
-        set "PY=py"
-    )
-)
+set "PY_VER="
+call :probe_python python
+if not defined PY call :probe_python py
 if not defined PY (
     echo.
     echo [ERROR] Python not found on this machine!
@@ -218,3 +231,24 @@ REM ── Launch server (blocks until Ctrl+C) ───────────
 echo.
 echo Goodbye!
 pause
+
+goto :eof
+
+:probe_python
+set "PY_CANDIDATE=%~1"
+set "PY_PROBE_OUT="
+
+for /f "delims=" %%v in ('%PY_CANDIDATE% --version 2^>^&1') do (
+    if not defined PY_PROBE_OUT set "PY_PROBE_OUT=%%v"
+)
+if not defined PY_PROBE_OUT goto :eof
+
+echo %PY_PROBE_OUT% | findstr /r /c:"^Python [0-9][0-9]*\.[0-9][0-9]*" >nul 2>&1
+if errorlevel 1 goto :eof
+
+%PY_CANDIDATE% -c "import venv" >nul 2>&1
+if errorlevel 1 goto :eof
+
+set "PY=%PY_CANDIDATE%"
+for /f "tokens=2 delims= " %%v in ("%PY_PROBE_OUT%") do set "PY_VER=%%v"
+goto :eof
