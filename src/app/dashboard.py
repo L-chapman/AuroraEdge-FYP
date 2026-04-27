@@ -7,6 +7,7 @@ import csv
 import json
 import asyncio
 import logging
+import subprocess
 import concurrent.futures
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -112,6 +113,8 @@ except ImportError:
 
 
 logger = logging.getLogger("auroraedge")
+DEMO_DOMAIN = "auroraedge.co.uk"
+DEMO_RESET_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "demo_prep.py"
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -130,8 +133,9 @@ async def lifespan(application: FastAPI):
                 logger.info("Database cleared for fresh session (clear_on_start=true)")
             else:
                 logger.info("Keeping previous scan data (clear_on_start=false)")
-            db.set_setting("demo_domain", "auroraedge.co.uk")
-            logger.info("Demo domain seeded: auroraedge.co.uk")
+            db.set_setting("demo_domain", DEMO_DOMAIN)
+            db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
+            logger.info("Demo domain seeded and managed: %s", DEMO_DOMAIN)
         except Exception as e:
             logger.warning("Could not initialise database on startup: %s", e)
 
@@ -3419,6 +3423,51 @@ async function autoFixFromScan(domain) {
     }
 }
 
+async function resetDemoDomain(restore = false) {
+    const btn = document.getElementById('resetDemoBtn');
+    const original = btn ? btn.innerHTML : '';
+    const actionLabel = restore ? 'restore' : 'reset';
+    const confirmMsg = restore
+        ? 'Restore auroraedge.co.uk to the strong DNS state now?'
+        : 'This will intentionally re-break auroraedge.co.uk DNS records for another live auto-fix test.\\n\\nProceed?';
+
+    if (!confirm(confirmMsg)) return;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = restore ? '⏳ Restoring Demo…' : '⏳ Resetting Demo…';
+    }
+
+    try {
+        const res = await fetch('/api/demo/reset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: demoDomain, restore: restore })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showToast('Demo ' + actionLabel + ' failed: ' + (data.detail || 'Unknown error.'), 'error', 10000);
+            return;
+        }
+
+        addQuickDomain(demoDomain);
+        let msg = data.message || ('Demo ' + actionLabel + ' complete.');
+        if (data.scan && data.scan.grade) {
+            msg += '\\nCurrent grade: ' + data.scan.grade + ' (' + data.scan.score + '/100, ' + data.scan.severity + ')';
+        } else {
+            msg += '\\nScan ' + demoDomain + ' to verify the current state.';
+        }
+        showToast(msg, 'success', 12000);
+    } catch (e) {
+        showToast('Demo ' + actionLabel + ' error: ' + e.message, 'error', 10000);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = original;
+        }
+    }
+}
+
 async function showHistory(domain) {
     try {
         const response = await fetch('/api/history/' + encodeURIComponent(domain));
@@ -3879,6 +3928,126 @@ async def api_apply_fix(request: Request):
     }
 
 
+@app.post("/api/demo/reset", dependencies=[Depends(require_token)])
+async def api_demo_reset(request: Request):
+    """
+    Intentionally reset the demo domain to a weak state for repeatable classroom testing.
+
+    POST body (optional):
+    {
+        "domain": "auroraedge.co.uk",   // must be the demo domain
+        "restore": false                 // true => restore strong state
+    }
+    """
+    if not HAS_DB:
+        raise HTTPException(status_code=501, detail="Database not available")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    domain, d_err = _sanitize_domain(body.get("domain", DEMO_DOMAIN))
+    if d_err:
+        raise HTTPException(status_code=400, detail=d_err)
+    if domain != DEMO_DOMAIN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Demo reset is restricted to {DEMO_DOMAIN}",
+        )
+
+    restore = bool(body.get("restore", False))
+    action = "restore" if restore else "reset"
+
+    db = get_database()
+    db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
+
+    # Ensure runtime Cloudflare settings are synced and present.
+    try:
+        _apply_cf_settings(db)
+    except Exception:
+        pass
+    token = db.get_setting("cf_api_token", "").strip()
+    zone = db.get_setting("cf_zone_id", "").strip()
+    if not token or not zone:
+        raise HTTPException(
+            status_code=503,
+            detail="Cloudflare credentials are missing. Configure API Token and Zone ID in Settings first.",
+        )
+
+    if not DEMO_RESET_SCRIPT.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Demo reset script not found: {DEMO_RESET_SCRIPT}",
+        )
+
+    cmd = [sys.executable, str(DEMO_RESET_SCRIPT)]
+    if restore:
+        cmd.append("--restore")
+
+    try:
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            cwd=str(Path(__file__).resolve().parents[2]),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Demo reset timed out after 120 seconds")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to run demo reset: {e}")
+
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    tail_lines = [ln for ln in (out + ("\n" + err if err else "")).splitlines() if ln.strip()]
+    tail = "\n".join(tail_lines[-8:])
+
+    if proc.returncode != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Demo {action} failed. {tail or 'See server logs for details.'}",
+        )
+
+    scan_summary = {}
+    if HAS_SCANNER:
+        try:
+            scan_result = await asyncio.to_thread(scan_domain, DEMO_DOMAIN, False)
+            scan_result["domain"] = DEMO_DOMAIN
+            evaluation = evaluate(scan_result)
+            grade = evaluation.get("grade", "F")
+            score = evaluation.get("score", 0)
+            severity = evaluation.get("severity", "OK")
+            db.update_managed_domain_scan(DEMO_DOMAIN, grade, score)
+
+            scan_id = db.start_scan(notes=f"Demo {action} verification scan for {DEMO_DOMAIN}")
+            db.save_result(scan_id, DEMO_DOMAIN, scan_result, evaluation)
+            db.complete_scan(scan_id, 1)
+            scan_summary = {
+                "grade": grade,
+                "score": score,
+                "severity": severity,
+                "violations": evaluation.get("violation_count", 0),
+            }
+        except Exception:
+            # Keep reset flow successful even if verification scan fails.
+            scan_summary = {}
+
+    return {
+        "ok": True,
+        "domain": DEMO_DOMAIN,
+        "action": action,
+        "message": (
+            "Demo domain restored to strong state."
+            if restore
+            else "Demo domain reset to intentionally weak state."
+        ),
+        "script_tail": tail,
+        "scan": scan_summary,
+    }
+
+
 @app.get("/api/fix-status", dependencies=[Depends(require_token)])
 async def api_fix_status():
     """
@@ -3981,6 +4150,14 @@ def test_hub():
             <p style="margin:10px 0 0; color:#94a3b8; font-size:0.85rem;">
                 You may also scan any other domain (your own, university domains, etc.) — only <em>auroraedge.co.uk</em> supports auto-fix as it is the Cloudflare-managed zone.
             </p>
+            <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+                <button id="resetDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(false)" style="border-color:rgba(234,179,8,0.6); color:#fde68a;">
+                    ♻ Reset Demo DNS (Re-break for retest)
+                </button>
+                <button class="action-btn secondary" onclick="resetDemoDomain(true)">
+                    ✅ Restore Demo DNS (Strong state)
+                </button>
+            </div>
         </div>
         
         <!-- Tab Navigation -->
