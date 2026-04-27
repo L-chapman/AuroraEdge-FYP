@@ -4,6 +4,18 @@
 
 AuroraEdge is an automated email authentication and cyber defence system for small organisations. This guide keeps the testing steps simple and practical.
 
+## Assessor 5-Minute Run
+
+If you only need to verify the project quickly on a college machine:
+
+1. Open the project folder and run `START.bat`.
+2. Wait for the browser to open `/test` automatically.
+3. Scan `auroraedge.co.uk`.
+4. Click **Reset Demo DNS** once, then scan again.
+5. Click **Auto-Fix DNS** and confirm the score/grade improves.
+
+Expected: one-click reset and one-click fix cycle should be visible without manual retries.
+
 ## Use This Guide
 
 | If you want to... | Start here |
@@ -76,7 +88,7 @@ python -m app.cli --domain bbc.co.uk --remediation
 
 ### Test Your Own Domain
 ```powershell
-python -m app.cli --domain belfast.ac.uk --remediation
+python -m app.cli --domain belfastmet.ac.uk --remediation
 ```
 
 If you do not own a domain, use `auroraedge.co.uk` for the controlled authorised demo workflow.
@@ -198,6 +210,16 @@ Run a scan first:
 python -m app.cli --domain google.com
 ```
 
+### "Found python was" or odd Python version text
+Windows can expose a Store alias instead of a real Python install.
+
+Fix:
+- Disable **App execution aliases** for `python.exe` and `python3.exe` in Windows Settings.
+- Re-run `START.bat`.
+
+### "Access is denied" or `PermissionError` under `D:\`/read-only path
+Run `START.bat` from a normal writable folder (for example under `C:\Users\...`) or allow it to auto-copy and relaunch into `%LOCALAPPDATA%\AuroraEdge\AuroraEdge_FYP_submission`.
+
 ---
 
 ## Evaluation Checklist
@@ -239,6 +261,7 @@ Use it like this:
 2. Scan `auroraedge.co.uk` in the dashboard or CLI and show the lower grade.
 3. Apply **Auto-Fix DNS** and show the supported records being repaired.
 4. Run `python scripts/demo_prep.py --restore` after the session to return the domain to the normal strong state.
+5. If DNS propagation is slightly delayed, wait briefly and click **Rescan** once; the UI now performs staged refreshes to reduce stale first-refresh scores.
 
 This is a controlled authorised workflow for `auroraedge.co.uk`. Do not use it on domains you do not own or manage with permission.
 

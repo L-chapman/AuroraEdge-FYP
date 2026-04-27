@@ -11,6 +11,7 @@ Use it when you want to know which document to read first, which files are activ
 | If you want to... | Read this first |
 |-------------------|-----------------|
 | Run the project quickly | `README.md` |
+| Perform a fast assessor check | `docs/TESTING_GUIDE.md` → **Assessor 5-Minute Run** |
 | Test the dashboard and CLI | `docs/TESTING_GUIDE.md` |
 | Understand the module layout and design choices | `docs/ARCHITECTURE.md` |
 | Configure Cloudflare auto-fix or optional lab integrations | `docs/INTEGRATION_GUIDE.md` |
