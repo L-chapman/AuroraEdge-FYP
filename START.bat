@@ -42,6 +42,39 @@ echo [1/4] Python ready.
 echo [*] Please wait while AuroraEdge prepares the local environment.
 echo     First launch can take a minute or two while dependencies are checked.
 
+REM ── Cloudflare credentials bootstrap (single-file flow) ────────────
+set "CF_SECRET_FILE=%cd%\state\cf_secrets.local.cmd"
+if exist "%CF_SECRET_FILE%" (
+    call "%CF_SECRET_FILE%" >nul 2>&1
+)
+
+if not defined CF_API_TOKEN (
+    if not exist "state" mkdir state
+    echo.
+    echo [*] Cloudflare credentials are optional for scans, but required for Auto-Fix demo.
+    set /p "CF_API_TOKEN=Enter CF_API_TOKEN (leave blank to skip): "
+    if defined CF_API_TOKEN (
+        set /p "CF_ZONE_ID=Enter CF_ZONE_ID: "
+        set /p "CF_ACCOUNT_ID=Enter CF_ACCOUNT_ID (optional, press Enter to skip): "
+        if defined CF_API_TOKEN if defined CF_ZONE_ID (
+            >"%CF_SECRET_FILE%" (
+                echo @echo off
+                echo set "CF_API_TOKEN=%CF_API_TOKEN%"
+                echo set "CF_ZONE_ID=%CF_ZONE_ID%"
+                echo set "CF_ACCOUNT_ID=%CF_ACCOUNT_ID%"
+            )
+            echo [OK] Saved Cloudflare credentials for future launches.
+        ) else (
+            echo [!] Incomplete Cloudflare credentials. Auto-Fix will stay disabled.
+        )
+    )
+)
+if defined CF_API_TOKEN if defined CF_ZONE_ID (
+    echo [OK] Cloudflare credentials loaded for Auto-Fix.
+) else (
+    echo [!] Cloudflare credentials not loaded. Scanning works, Auto-Fix is disabled.
+)
+
 REM ── Create / repair virtual environment ────────────────────────────
 echo [2/4] Setting up environment...
 set "VENV_DIR=%cd%\.venv"
