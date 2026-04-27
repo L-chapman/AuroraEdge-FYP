@@ -4248,29 +4248,27 @@ async def api_demo_reset(request: Request):
                     and not mta_present
                 )
 
-            chosen_scan = None
-            chosen_eval = None
+            matched_scan = None
+            matched_eval = None
+            last_scan = None
+            last_eval = None
             for attempt in range(8):
                 if attempt > 0:
                     time.sleep(6)
                 cur_scan = await asyncio.to_thread(scan_domain, DEMO_DOMAIN, False)
                 cur_scan["domain"] = DEMO_DOMAIN
                 cur_eval = evaluate(cur_scan)
-
-                if chosen_eval is None:
-                    chosen_scan, chosen_eval = cur_scan, cur_eval
-                else:
-                    # For reset we want the worst observed result, for restore the best.
-                    cur_score = cur_eval.get("score", 0)
-                    chosen_score = chosen_eval.get("score", 0)
-                    if (not restore and cur_score < chosen_score) or (restore and cur_score > chosen_score):
-                        chosen_scan, chosen_eval = cur_scan, cur_eval
+                last_scan, last_eval = cur_scan, cur_eval
 
                 if _matches_target_state(cur_scan, restore):
+                    matched_scan, matched_eval = cur_scan, cur_eval
                     break
 
-            scan_result = chosen_scan or {}
-            evaluation = chosen_eval or {}
+            # Use the first matching state if available, otherwise the latest scan.
+            # Avoid choosing "best/worst" snapshots because DNS-related checks can be
+            # transient and produce confusing score mismatches across consecutive rescans.
+            scan_result = matched_scan or last_scan or {}
+            evaluation = matched_eval or last_eval or {}
             grade = evaluation.get("grade", "F")
             score = evaluation.get("score", 0)
             severity = evaluation.get("severity", "OK")
