@@ -1,7 +1,7 @@
 # Stage 8 - Scoring System (0-100) + Letter Grades
 
 ## Overview
-Stage 8 deliverable: Implemented a comprehensive scoring system that evaluates domain email security configurations and assigns both numeric scores (0-100) and letter grades (A+ to F).
+Stage 8 added the scoring system. It evaluates a domain's email security setup and returns both a numeric score (0-100) and a letter grade (A+ to F).
 
 ## Features
 

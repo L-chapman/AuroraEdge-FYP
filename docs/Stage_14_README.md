@@ -1,7 +1,7 @@
 # Stage 14 - Interactive Test Hub + Demo Script
 
 ## Overview
-Stage 14 deliverable: Created an interactive testing interface for live domain scanning and a comprehensive demo script for evaluators.
+Stage 14 added an interactive testing page for live domain scans and a demo script for evaluators.
 
 ## Features
 
@@ -51,7 +51,7 @@ async def scan_domains(request: ScanRequest):
 
 ### Ethical & Safety Framing for Auto-Fix
 
-Auto-fix is intentionally constrained for ethical and professional practice. The current implementation supports **zero-touch remediation** for a limited set of DNS-only records once a domain is onboarded with Cloudflare credentials.
+Auto-fix is intentionally limited for ethical and practical reasons. It supports a small set of DNS-only fixes once a domain is onboarded with Cloudflare credentials.
 
 - **Safety controls:** Only apply to domains you own or have explicit permission to manage. Cloudflare tokens must be scoped to **Zone:DNS:Edit** for a single zone. Once configured, auto-fix runs automatically for managed domains (no per-fix prompt).
 - **Operational risk:** Changing SPF/DMARC/TLS-RPT can affect deliverability and enforcement. This is why remediation is limited to a small subset and is designed to be **auditable**.

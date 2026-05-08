@@ -478,16 +478,18 @@ def _empty_result(notes: str = "") -> Dict[str, object]:
 
 
 def _domain_exists(domain: str) -> bool:
-    """Quick check — can we resolve *any* DNS record for this domain?"""
+    """Quick check using the same helpers the scanner uses so mocks work."""
     if dns is None:
-        return True  # assume reachable when dnspython is missing
-    for qtype in ("A", "MX", "NS"):
-        try:
-            _fresh_resolver().resolve(domain, qtype)
-            return True
-        except Exception:
-            continue
-    return False
+        return True
+    if _mx(domain):
+        return True
+    if _txt(domain):
+        return True
+    try:
+        _fresh_resolver().resolve(domain, "NS")
+        return True
+    except Exception:
+        return False
 
 
 def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
