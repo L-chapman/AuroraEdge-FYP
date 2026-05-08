@@ -4848,7 +4848,7 @@ def domain_detail(domain: str):
 
     <script>
     async function fixDomain() {{
-        if (!confirm('Auto-Fix will attempt to update DNS records for {domain} via Cloudflare.\\n\\nProceed?')) return;
+        if (!confirm('Auto-Fix will attempt to update DNS records for {domain} via Cloudflare.' + String.fromCharCode(10,10) + 'Proceed?')) return;
         try {{
             showProgressPopup('Applying Auto-Fix DNS', 'Checking Cloudflare access for {domain}...');
             const cfRes = await fetch('/api/settings/test-cloudflare');
@@ -4863,7 +4863,7 @@ def domain_detail(domain: str):
             const dom = '{domain}'.toLowerCase();
             if (zone && dom !== zone && !dom.endsWith('.' + zone)) {{
                 hideProgressPopup();
-                alert('&#9940; Cannot auto-fix "{domain}"\\n\\nYour Cloudflare zone is "' + zone + '".\\nYou can only auto-fix domains within that zone.\\n\\nGo to Settings if you need to change your Cloudflare credentials.');
+                alert('&#9940; Cannot auto-fix "{domain}"' + String.fromCharCode(10,10) + 'Your Cloudflare zone is "' + zone + '".' + String.fromCharCode(10) + 'You can only auto-fix domains within that zone.' + String.fromCharCode(10,10) + 'Go to Settings if you need to change your Cloudflare credentials.');
                 return;
             }}
             updateProgressPopup('Applying DNS fixes via Cloudflare API...');
@@ -5762,6 +5762,9 @@ def settings_page():
 
     cf_badge = '<span class="status-chip connected">Connected</span>' if cf_token_set and zone_id else '<span class="status-chip not-connected">Not configured</span>'
 
+    _cf_token_current = '<div class=\'current-value\'>Current: <code style="color:var(--accent);">' + cf_token_display + "</code></div>" if cf_token_display else ""
+    _cf_apikey_current = '<div class=\'current-value\'>Current: <code style="color:var(--accent);">' + cf_api_key_display + "</code></div>" if cf_api_key_display else ""
+
     html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -6073,7 +6076,7 @@ def settings_page():
                             <input type="password" id="cfToken" placeholder="{"Token saved &#8212; enter new value to change" if cf_token_set else "Paste your Cloudflare API token"}" autocomplete="off">
                             <button class="toggle-vis" onclick="toggleTokenVis()" title="Show/hide token" type="button">&#128065;&#65039;</button>
                         </div>
-                        {"<div class='current-value'>Current: <code style=\"color:var(--accent);\">" + cf_token_display + "</code></div>" if cf_token_display else ""}
+                        {_cf_token_current}
                         <small>
                             <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener" class="quick-link">
                                 &#128279; Create token on Cloudflare
@@ -6099,7 +6102,7 @@ def settings_page():
                         <div class="input-group">
                             <input type="password" id="cfApiKey" placeholder="{"Key saved &#8212; enter new value to change" if cf_api_key_set else "Only needed if Worker routes fail with your token"}" autocomplete="off">
                         </div>
-                        {"<div class='current-value'>Current: <code style=\"color:var(--accent);\">" + cf_api_key_display + "</code></div>" if cf_api_key_display else ""}
+                        {_cf_apikey_current}
                         <small>Optional. Used only when your API token cannot create Cloudflare Worker routes.</small>
                     </div>
                     <div class="form-row" style="margin-bottom:0;">
