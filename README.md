@@ -382,14 +382,14 @@ For a more guided lecturer or presentation experience:
 
 The demo script can:
 
-- scanning one domain
-- scanning many domains
-- scanning with remediation
-- launching the dashboard
-- opening the test hub
-- viewing reports
-- checking system health
-- running unit tests
+- scan one domain
+- scan many domains
+- scan with remediation
+- launch the dashboard
+- open the test hub
+- view reports
+- check system health
+- run unit tests
 
 Recommended approach:
 
