@@ -10,9 +10,9 @@ Academic Year 2025/2026
 
 ## Overview
 
-AuroraEdge Security is a local-first email security assessment and remediation platform built for small organisations.
+AuroraEdge Security is a local tool for checking and improving email security records for small organisations.
 
-It focuses on the email security controls that are commonly missing, misconfigured, or left too weak in real deployments:
+It checks the controls that are often missing, misconfigured, or left too weak in real deployments:
 
 - SPF
 - DKIM
@@ -22,9 +22,9 @@ It focuses on the email security controls that are commonly missing, misconfigur
 - STARTTLS
 - MX mail routing
 
-AuroraEdge does not just detect problems. It also explains what they mean, scores the domain, stores results locally, and can automatically fix supported DNS records through Cloudflare when credentials are available.
+AuroraEdge detects these problems, explains what they mean, scores the domain, stores the results locally, and can apply supported DNS fixes through Cloudflare when credentials are available.
 
-This repository includes:
+The project includes:
 
 - A FastAPI web dashboard
 - A command-line scanner
@@ -35,9 +35,9 @@ This repository includes:
 - A demo workflow for lecturers and evaluators
 - A large automated test suite
 
-For final assessment, keep the intent of the main documents separate:
+For assessment, the main documents are split by purpose:
 
-- `README.md` for quick setup and day-one use
+- `README.md` for quick setup and first run
 - `docs/TESTING_GUIDE.md` for marking and validation steps
 - `docs/ARCHITECTURE.md` for the design view
 - `docs/FINAL_RELEASE_NOTES.md` for the final release snapshot and evidence set
@@ -53,14 +53,14 @@ For final assessment, keep the intent of the main documents separate:
 | **Primary Interface** | FastAPI dashboard with pages for scanning, managed domains, DNS record generation, and settings |
 | **Secondary Interface** | CLI for single-domain scans, batch scans, remediation reporting, and optional DNS fixing |
 | **Storage** | SQLite database in `state/auroraedge.db`, report files in `reports/`, logs in `logs/` |
-| **Optional Integration** | Cloudflare API for zero-touch DNS remediation and MTA-STS Worker deployment |
+| **Optional Integration** | Cloudflare API for DNS remediation and MTA-STS Worker deployment |
 | **Verification** | `verify_system.py`, `scripts/demo.ps1`, and the `tests/` suite |
 
 ---
 
 ## What AuroraEdge Does
 
-AuroraEdge is built around five practical jobs:
+AuroraEdge has five main tasks:
 
 1. **Scan** public DNS and HTTPS resources for email security controls.
 2. **Evaluate** the results using RFC-based rules, severity levels, and a 0-100 scoring model.
@@ -83,7 +83,7 @@ The main application flow is:
 7. `src/app/analysis.py` calculates statistics used by reports and dashboard views.
 8. `src/app/logging_config.py` centralises structured logging.
 
-In practice, that means AuroraEdge can support four kinds of users from the same codebase:
+The same codebase can be used by:
 
 - **Lecturers or markers** who just want to run the system and test a few domains
 - **Developers** who want to inspect, verify, and extend the platform
@@ -311,7 +311,7 @@ Good starter domains:
 
 ## 1. Dashboard Workflow
 
-The dashboard is the main interface for most users.
+The dashboard is the main interface for most use cases.
 
 ### Main pages
 
@@ -380,7 +380,7 @@ For a more guided lecturer or presentation experience:
 .\scripts\demo.ps1
 ```
 
-The demo script offers menu-driven actions such as:
+The demo script can:
 
 - scanning one domain
 - scanning many domains
@@ -645,6 +645,7 @@ Key examples include:
 
 | Problem | Fix |
 |---------|-----|
+| **Smart App Control blocks `START.bat`** | Right-click `START.bat` and choose **Run as administrator**. If it is still blocked, open **Windows Security > App & browser control > Smart App Control** and turn Smart App Control **Off**, then run `START.bat` again. |
 | `Python not found` | Install Python 3.10+ and make sure it is available on `PATH` |
 | `Found python was` or other strange version text | Disable Windows App Execution Aliases for `python.exe`/`python3.exe`, then rerun `START.bat` |
 | `ModuleNotFoundError: app` | Set `PYTHONPATH` to the `src` folder before running CLI or Uvicorn |
@@ -681,10 +682,10 @@ Use these documents depending on what you need:
 
 ## Privacy, Ethics, And Safety
 
-AuroraEdge is designed around public-domain email security assessment and authorised remediation.
+AuroraEdge is limited to public-domain email security assessment and authorised remediation.
 
-- It queries public DNS and related HTTPS resources.
-- It does not attempt mailbox intrusion or credential abuse.
+- The scans query public DNS and related HTTPS resources.
+- The tool does not attempt mailbox intrusion or credential abuse.
 - Cloudflare auto-fix should only be used for domains you control or are authorised to manage.
 - Legal, privacy, and ethical context is documented in `docs/PRIVACY_AND_ETHICS.md`.
 
@@ -692,5 +693,5 @@ AuroraEdge is designed around public-domain email security assessment and author
 
 ## Licence
 
-This project was developed as a Final Year Project for academic assessment.  
+Developed as a Final Year Project for academic assessment.  
 All rights reserved © 2025-2026 Leon Chapman.

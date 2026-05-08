@@ -22,6 +22,7 @@ except Exception:
 RESOLVER_TIMEOUT = 3.0
 HTTP_TIMEOUT = 5.0
 SMTP_TIMEOUT = 10.0
+SCAN_TIMEOUT = 30.0
 MAX_SPF_RECURSION = 10
 MAX_SPF_FETCHES = 50
 
@@ -457,6 +458,38 @@ def _mx_blacklist_check(mx_hosts: List[str]) -> Tuple[int, List[Dict]]:
     return total, details
 
 
+def _empty_result(notes: str = "") -> Dict[str, object]:
+    """Return a blank scan result dict."""
+    return {
+        "spf_present": False, "spf_record": "", "spf_lookups": 0,
+        "spf_includes": "", "spf_all": "",
+        "mx_present": False, "mx_count": 0, "mx_hosts": "",
+        "dmarc_present": False, "dmarc_policy": "", "dmarc_strength": "",
+        "dmarc_sp": "", "dmarc_aspf": "r", "dmarc_adkim": "r",
+        "dmarc_pct": 100, "dmarc_rua": "", "dmarc_ruf": "",
+        "dkim_present": False, "dkim_selectors": "", "dkim_algos": "",
+        "mta_sts_present": False, "mta_sts_mode": "", "mta_sts_max_age": 0,
+        "tls_rpt_present": False, "tls_rpt_rua": "",
+        "bimi_present": False, "bimi_logo": "", "bimi_authority": "",
+        "rbl_listings": 0, "rbl_details": [],
+        "starttls_grade": "", "starttls_worst": "",
+        "notes": notes,
+    }
+
+
+def _domain_exists(domain: str) -> bool:
+    """Quick check — can we resolve *any* DNS record for this domain?"""
+    if dns is None:
+        return True  # assume reachable when dnspython is missing
+    for qtype in ("A", "MX", "NS"):
+        try:
+            _fresh_resolver().resolve(domain, qtype)
+            return True
+        except Exception:
+            continue
+    return False
+
+
 def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
     """
     Comprehensive email security scan for a domain.
@@ -480,21 +513,12 @@ def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
     d = domain.strip().lower()
     if not is_valid_domain(d):
         logger.warning("Invalid domain format: %s", d)
-        return {
-            "spf_present": False, "spf_record": "", "spf_lookups": 0,
-            "spf_includes": "", "spf_all": "",
-            "mx_present": False, "mx_count": 0, "mx_hosts": "",
-            "dmarc_present": False, "dmarc_policy": "", "dmarc_strength": "",
-            "dmarc_sp": "", "dmarc_aspf": "r", "dmarc_adkim": "r",
-            "dmarc_pct": 100, "dmarc_rua": "", "dmarc_ruf": "",
-            "dkim_present": False, "dkim_selectors": "", "dkim_algos": "",
-            "mta_sts_present": False, "mta_sts_mode": "", "mta_sts_max_age": 0,
-            "tls_rpt_present": False, "tls_rpt_rua": "",
-            "bimi_present": False, "bimi_logo": "", "bimi_authority": "",
-            "rbl_listings": 0, "rbl_details": [],
-            "starttls_grade": "", "starttls_worst": "",
-            "notes": "Invalid domain format",
-        }
+        return _empty_result("Invalid domain format")
+
+    if not _domain_exists(d):
+        logger.warning("Domain not found: %s", d)
+        return _empty_result("Domain not found — check for typos and try again")
+
     notes = []
     logger.info("Scanning domain: %s", d)
 
