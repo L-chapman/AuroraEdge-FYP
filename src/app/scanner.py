@@ -1,4 +1,4 @@
-﻿from typing import Dict, Set, Tuple, List, Optional
+from typing import Dict, Set, Tuple, List, Optional
 import re
 import socket
 import ssl
@@ -31,7 +31,7 @@ def _fresh_resolver() -> "dns.resolver.Resolver":
     """Return a resolver that bypasses local DNS cache.
 
     Uses Cloudflare (1.1.1.1) and Google (8.8.8.8) public DNS servers
-    so that recently-changed records are picked up immediately — critical
+    so that recently-changed records are picked up immediately &#8212; critical
     for the auto-fix demo where records are modified via the Cloudflare
     API seconds before a rescan.
     """
@@ -315,9 +315,9 @@ def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
 def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
     """Return (present, mode, max_age, raw_first_line).
 
-    MTA-STS requires BOTH a ``_mta-sts.{domain}`` TXT record (RFC 8461 §3.1)
+    MTA-STS requires BOTH a ``_mta-sts.{domain}`` TXT record (RFC 8461 &#167;3.1)
     AND a valid HTTPS policy at ``https://mta-sts.{domain}/.well-known/mta-sts.txt``.
-    We check the DNS TXT record first — if it is missing the protocol is
+    We check the DNS TXT record first &#8212; if it is missing the protocol is
     incomplete even when a Cloudflare Worker still serves the policy file.
     """
     # Step 1: Check DNS TXT record at _mta-sts.{domain}
@@ -330,7 +330,7 @@ def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
 
     # Step 2: Fetch the HTTPS policy file
     if requests is None:
-        # DNS record present but cannot verify HTTPS — still mark present
+        # DNS record present but cannot verify HTTPS &#8212; still mark present
         return (True, "", 0, "")
     url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
     try:
@@ -375,7 +375,7 @@ def _tls_rpt(domain: str) -> Tuple[bool, str]:
     return (len(ruas) > 0, ",".join(sorted(set(ruas))))
 
 
-# ── BIMI (Brand Indicators for Message Identification) ──────────────────────
+# &#9472;&#9472; BIMI (Brand Indicators for Message Identification) &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
 # RFC draft-brand-indicators-for-message-identification
 # Record lives at  default._bimi.<domain>  TXT  "v=BIMI1; l=<svg_url>; a=<vmc_url>"
 
@@ -398,7 +398,7 @@ def _bimi(domain: str) -> Tuple[bool, str, str]:
     return (False, "", "")
 
 
-# ── Blacklist / RBL (DNSBL) checking ────────────────────────────────────────
+# &#9472;&#9472; Blacklist / RBL (DNSBL) checking &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
 # Query well-known DNS-based blocklists for the IP addresses behind MX hosts.
 
 _DNSBL_ZONES = [
@@ -519,7 +519,7 @@ def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
 
     if not _domain_exists(d):
         logger.warning("Domain not found: %s", d)
-        return _empty_result("Domain not found — check for typos and try again")
+        return _empty_result("Domain not found &#8212; check for typos and try again")
 
     notes = []
     logger.info("Scanning domain: %s", d)

@@ -353,7 +353,7 @@ Requirements:
     # Check Cloudflare credentials
     cf = get_cloudflare_client()
     if not cf and not args.dry_run:
-        print("❌ Cloudflare API not configured.")
+        print("&#10060; Cloudflare API not configured.")
         print("   Set CF_API_TOKEN and CF_ZONE_ID environment variables.")
         print("   Or use --dry-run for detection tests only.")
         sys.exit(1)
@@ -361,11 +361,11 @@ Requirements:
     if cf:
         ok, msg = cf.validate_connection()
         if not ok:
-            print(f"❌ Cloudflare connection failed: {msg}")
+            print(f"&#10060; Cloudflare connection failed: {msg}")
             sys.exit(1)
-        print(f"✅ {msg}")
+        print(f"&#9989; {msg}")
     
-    print(f"\n🧪 AuroraEdge Lab Experiment")
+    print(f"\n&#129514; AuroraEdge Lab Experiment")
     print(f"   Domain: {args.domain}")
     print(f"   Iterations: {args.iterations}")
     print(f"   DNS Wait: {args.dns_wait}s")
@@ -391,7 +391,7 @@ Requirements:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         experiment.generate_report(results, output_path)
         
-        print(f"\n✅ Experiment complete. Report: {output_path}")
+        print(f"\n&#9989; Experiment complete. Report: {output_path}")
 
 
 if __name__ == "__main__":

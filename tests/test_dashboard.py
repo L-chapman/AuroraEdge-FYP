@@ -108,7 +108,7 @@ def test_settings_reject_invalid_monitor_interval(monkeypatch):
 
 
 def test_ip_address_rejected_as_domain(monkeypatch):
-    """IP addresses should be rejected — we need real domain names for DNS checks."""
+    """IP addresses should be rejected &#8212; we need real domain names for DNS checks."""
     monkeypatch.setenv("DASH_TOKEN", "")
     client = TestClient(dashboard.app)
 

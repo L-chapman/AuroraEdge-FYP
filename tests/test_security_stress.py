@@ -129,7 +129,7 @@ class TestSQLInjection:
             headers={**AUTH, "Content-Type": "application/json"},
             json={"domain": payload},
         )
-        # Should reject invalid domain or add harmlessly — never crash
+        # Should reject invalid domain or add harmlessly &#8212; never crash
         assert r.status_code in (200, 400, 422)
         assert "sqlite" not in r.text.lower()
 
@@ -167,7 +167,7 @@ class TestPathTraversal:
     def test_download_path_traversal(self, payload):
         """File download must be constrained to the reports directory."""
         r = client.get(f"/download/{payload}", headers=AUTH)
-        # Must either 404 or serve only from reports/ — never serve system files
+        # Must either 404 or serve only from reports/ &#8212; never serve system files
         if r.status_code == 200:
             # If it returns something, verify it's actually from reports dir
             assert r.headers.get("content-type", "").startswith(("text/csv", "text/markdown", "application/octet-stream"))
@@ -261,7 +261,7 @@ class TestStressAndAbuse:
         r = client.post(
             "/api/scan",
             headers={**AUTH, "Content-Type": "application/json"},
-            json={"domains": ["münchen.de", "例え.jp", "☺.com"]},
+            json={"domains": ["m&#252;nchen.de", "&#20363;&#12360;.jp", "&#9786;.com"]},
         )
         assert r.status_code in (200, 400, 422)
 

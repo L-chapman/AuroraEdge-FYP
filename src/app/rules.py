@@ -1,4 +1,4 @@
-﻿"""AuroraEdge Rules Engine — RFC-based email security evaluation."""
+"""AuroraEdge Rules Engine &#8212; RFC-based email security evaluation."""
 from typing import Dict, List, Tuple
 
 SEVERITY_ORDER = {"OK": 0, "INFO": 1, "WARN": 2, "HIGH": 3, "CRITICAL": 4, "ERROR": 5}
@@ -412,7 +412,7 @@ def rule_bimi_missing(r: Dict) -> Tuple[str, str, str]:
         return (
             "R13_BIMI_MISSING",
             "INFO",
-            "BIMI record not found — domain qualifies but no brand logo configured",
+            "BIMI record not found &#8212; domain qualifies but no brand logo configured",
         )
     return ("", "OK", "")
 
@@ -425,7 +425,7 @@ def rule_rbl_listed(r: Dict) -> Tuple[str, str, str]:
         return (
             "R14_RBL_LISTED",
             severity,
-            f"MX IP(s) listed on {listings} blacklist(s) — may affect deliverability",
+            f"MX IP(s) listed on {listings} blacklist(s) &#8212; may affect deliverability",
         )
     return ("", "OK", "")
 
@@ -436,7 +436,7 @@ def rule_dmarc_sp_weak(r: Dict) -> Tuple[str, str, str]:
         return ("", "OK", "")
     pol = (r.get("dmarc_policy", "") or "").lower()
     sp = (r.get("dmarc_sp", "") or "").lower()
-    # If sp is not set, it inherits parent policy — no issue
+    # If sp is not set, it inherits parent policy &#8212; no issue
     if not sp:
         return ("", "OK", "")
     strength = {"none": 0, "quarantine": 1, "reject": 2}
@@ -587,7 +587,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R3B_SPF_PERMISSIVE",
                     "priority": "HIGH",
-                    "description": f"SPF uses {spf_all} which allows any sender — change to -all",
+                    "description": f"SPF uses {spf_all} which allows any sender &#8212; change to -all",
                     "example": f'{domain}. IN TXT "v=spf1 include:_spf.google.com -all"',
                     "reference": "RFC 7208",
                 }
@@ -643,7 +643,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R5C_DMARC_PCT",
                     "priority": "WARN",
-                    "description": f"DMARC pct={pct}% — increase to 100% for full coverage",
+                    "description": f"DMARC pct={pct}% &#8212; increase to 100% for full coverage",
                     "example": "Remove pct= tag or set pct=100",
                     "reference": "RFC 7489",
                 }
@@ -679,7 +679,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R9_MTA_STS_MODE",
                     "priority": "WARN",
-                    "description": f"MTA-STS mode is '{mode}' — upgrade to 'enforce'",
+                    "description": f"MTA-STS mode is '{mode}' &#8212; upgrade to 'enforce'",
                     "example": "mode: enforce",
                     "reference": "RFC 8461",
                 }
@@ -715,7 +715,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R7_DKIM_TEST",
                     "priority": "WARN",
-                    "description": "DKIM selector is in test mode (t=y) — remove t=y for production",
+                    "description": "DKIM selector is in test mode (t=y) &#8212; remove t=y for production",
                     "example": "Remove t=y from DKIM TXT record",
                     "reference": "RFC 6376",
                 }
@@ -728,7 +728,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
             {
                 "rule": "R11_STARTTLS_WEAK",
                 "priority": "WARN",
-                "description": f"STARTTLS grade {starttls_worst} — upgrade TLS to 1.2+ with strong ciphers",
+                "description": f"STARTTLS grade {starttls_worst} &#8212; upgrade TLS to 1.2+ with strong ciphers",
                 "example": "Disable SSLv3, TLS 1.0, TLS 1.1 on your mail server",
                 "reference": "RFC 8996",
             }
@@ -788,7 +788,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R15_DMARC_SP_WEAK",
                     "priority": "WARN",
-                    "description": f"DMARC subdomain policy sp={sp} is weaker than p={dmarc_pol} — subdomains can be spoofed",
+                    "description": f"DMARC subdomain policy sp={sp} is weaker than p={dmarc_pol} &#8212; subdomains can be spoofed",
                     "example": f'_dmarc.{domain}. IN TXT "v=DMARC1; p={dmarc_pol}; sp={dmarc_pol}; rua=mailto:dmarc@{domain}"',
                     "reference": "RFC 7489 Section 6.3",
                 }

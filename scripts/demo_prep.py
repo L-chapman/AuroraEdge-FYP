@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-demo_prep.py — Prepare auroraedge.co.uk for a controlled authorised Auto-Fix demonstration.
+demo_prep.py &#8212; Prepare auroraedge.co.uk for a controlled authorised Auto-Fix demonstration.
 
 This script talks directly to the Cloudflare API and puts the demo domain
 into a known weak state so that the AuroraEdge auto-fixer has something real
@@ -8,10 +8,10 @@ to repair during a live demo.
 
 Actions
 -------
-1.  Weaken SPF from -all to ~all  → SPF softfail
-2.  Downgrade DMARC to p=quarantine; pct=50  → weak DMARC
-3.  DELETE the MTA-STS DNS record  → MTA-STS missing
-4.  (TLS-RPT, DKIM already configured — left intact)
+1.  Weaken SPF from -all to ~all  &#8594; SPF softfail
+2.  Downgrade DMARC to p=quarantine; pct=50  &#8594; weak DMARC
+3.  DELETE the MTA-STS DNS record  &#8594; MTA-STS missing
+4.  (TLS-RPT, DKIM already configured &#8212; left intact)
 
 After running this, the domain should scan as Grade D with at least five
 violations (R3C_SPF_SOFTFAIL, R5B_DMARC_QUARANTINE, R5C_DMARC_PCT,
@@ -39,7 +39,7 @@ from pathlib import Path
 try:
     import requests
 except ImportError:
-    sys.exit("ERROR: 'requests' library not found — pip install requests")
+    sys.exit("ERROR: 'requests' library not found &#8212; pip install requests")
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -84,7 +84,7 @@ def _db_path() -> Path:
     for p in candidates:
         if p.exists():
             return p
-    sys.exit("ERROR: Could not find state/auroraedge.db — run from the project root.")
+    sys.exit("ERROR: Could not find state/auroraedge.db &#8212; run from the project root.")
 
 
 def _get_cf_creds() -> tuple[str, str]:
@@ -128,9 +128,9 @@ def _delete_record(token: str, zone_id: str, record_id: str, name: str) -> bool:
     data = resp.json()
     ok = data.get("success", False)
     if ok:
-        print(f"  ✓ Deleted {name} (id={record_id})")
+        print(f"  &#10003; Deleted {name} (id={record_id})")
     else:
-        print(f"  ✗ Failed to delete {name}: {data}")
+        print(f"  &#10007; Failed to delete {name}: {data}")
     return ok
 
 
@@ -141,9 +141,9 @@ def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
     data = resp.json()
     ok = data.get("success", False)
     if ok:
-        print(f"  ✓ Created {name} → {content}")
+        print(f"  &#10003; Created {name} &#8594; {content}")
     else:
-        print(f"  ✗ Failed to create {name}: {data}")
+        print(f"  &#10007; Failed to create {name}: {data}")
     return ok
 
 
@@ -153,7 +153,7 @@ def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
 
 def break_records():
     """Reset SPF/DMARC and remove MTA-STS for the controlled demo state."""
-    print(f"\n🔧 DEMO RESET — Setting DNS records to the controlled demo state for {DOMAIN}")
+    print(f"\n&#128295; DEMO RESET &#8212; Setting DNS records to the controlled demo state for {DOMAIN}")
     print("=" * 55)
 
     token, zone_id = _get_cf_creds()
@@ -171,26 +171,26 @@ def break_records():
         print(f"\n[{rec['label']}] Removing {rec['name']} for the demo state ...")
         matches = _find_records(token, zone_id, rec["type"], rec["name"])
         if not matches:
-            print(f"  – Record not found (already removed)")
+            print(f"  &#8211; Record not found (already removed)")
             continue
         for m in matches:
             if _delete_record(token, zone_id, m["id"], rec["name"]):
                 changes += 1
 
     print(f"\n{'=' * 55}")
-    print(f"Done — {changes} change(s) applied.")
+    print(f"Done &#8212; {changes} change(s) applied.")
     print(f"\nExpected scan result after DNS propagation:")
-    print(f"  • SPF     → ⚠ ~all (softfail, not -all)")
-    print(f"  • DMARC   → ⚠ p=quarantine; pct=50 (weak)")
-    print(f"  • MTA-STS → ❌ Missing")
-    print(f"  • TLS-RPT → ✅ Present (unchanged)")
-    print(f"  • DKIM    → ✅ Present (Google selector)")
+    print(f"  &#8226; SPF     &#8594; &#9888; ~all (softfail, not -all)")
+    print(f"  &#8226; DMARC   &#8594; &#9888; p=quarantine; pct=50 (weak)")
+    print(f"  &#8226; MTA-STS &#8594; &#10060; Missing")
+    print(f"  &#8226; TLS-RPT &#8594; &#9989; Present (unchanged)")
+    print(f"  &#8226; DKIM    &#8594; &#9989; Present (Google selector)")
     print(f"\nYou can now scan {DOMAIN} and run the authorised Auto-Fix demo flow.\n")
 
 
 def restore_records():
     """Return the demo domain to its normal strong state."""
-    print(f"\n🔄 RESTORE — Strengthening DNS records for {DOMAIN}")
+    print(f"\n&#128260; RESTORE &#8212; Strengthening DNS records for {DOMAIN}")
     print("=" * 55)
 
     token, zone_id = _get_cf_creds()
@@ -213,13 +213,13 @@ def restore_records():
         print(f"\n[{label}] Recreating {rec['name']} ...")
         existing = _find_records(token, zone_id, rec["type"], rec["name"])
         if existing:
-            print(f"  – Already exists, skipping")
+            print(f"  &#8211; Already exists, skipping")
             continue
         if _create_record(token, zone_id, rec["name"], restore_val):
             changes += 1
 
     print(f"\n{'=' * 55}")
-    print(f"Done — {changes} record(s) restored.")
+    print(f"Done &#8212; {changes} record(s) restored.")
     print(f"Run a scan to verify the domain is healthy again.\n")
 
 

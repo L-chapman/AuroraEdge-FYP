@@ -1,4 +1,4 @@
-﻿"""Command-line scanner and report writer for AuroraEdge."""
+"""Command-line scanner and report writer for AuroraEdge."""
 
 import argparse
 import csv as csv_mod
@@ -76,7 +76,7 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
     if not cf:
         if not quiet:
             print(
-                "\n⚠️  Cloudflare API not configured. Set CF_API_TOKEN and CF_ZONE_ID environment variables."
+                "\n&#9888;&#65039;  Cloudflare API not configured. Set CF_API_TOKEN and CF_ZONE_ID environment variables."
             )
             print("   See docs/INTEGRATION_GUIDE.md for setup instructions.")
         return 0
@@ -85,11 +85,11 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
     success, message = cf.validate_connection()
     if not success:
         if not quiet:
-            print(f"\n❌ Cloudflare connection failed: {message}")
+            print(f"\n&#10060; Cloudflare connection failed: {message}")
         return 0
 
     if not quiet:
-        print("\n🔧 Cloudflare DNS Auto-Fix")
+        print("\n&#128295; Cloudflare DNS Auto-Fix")
         print(f"   {message}")
         print()
 
@@ -107,7 +107,7 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
             continue
 
         if not quiet:
-            print(f"   📍 {domain}:")
+            print(f"   &#128205; {domain}:")
 
         for fix in fixes:
             fix_type = fix.get("type", "Unknown")
@@ -120,13 +120,13 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
                     if ok:
                         fixes_applied += 1
                         if not quiet:
-                            print(f"      ✅ {fix_type}: {msg}")
+                            print(f"      &#9989; {fix_type}: {msg}")
                     else:
                         if not quiet:
-                            print(f"      ❌ {fix_type}: {msg}")
+                            print(f"      &#10060; {fix_type}: {msg}")
             except Exception as e:
                 if not quiet:
-                    print(f"      ❌ {fix_type}: Error - {e}")
+                    print(f"      &#10060; {fix_type}: Error - {e}")
 
     if not quiet:
         print(f"\n   Applied {fixes_applied} fix(es)")

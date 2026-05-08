@@ -1,4 +1,4 @@
-﻿"""Statistics and chart helpers used in the AuroraEdge reports."""
+"""Statistics and chart helpers used in the AuroraEdge reports."""
 
 import csv
 import logging

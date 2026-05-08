@@ -30,7 +30,7 @@ class AuroraDatabase:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit — close connection."""
+        """Context manager exit &#8212; close connection."""
         self.close()
         return False
 
@@ -552,7 +552,7 @@ class AuroraDatabase:
             self.conn.commit()
             return {"ok": True, "domain": domain, "added_at": now}
         except sqlite3.IntegrityError:
-            # Already exists — reactivate if inactive
+            # Already exists &#8212; reactivate if inactive
             cursor.execute(
                 """UPDATE managed_domains SET is_active = 1, notes = ?
                    WHERE domain = ?""",

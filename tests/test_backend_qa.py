@@ -1,5 +1,5 @@
 """
-Backend Quality & Assurance Tests — Stage 15
+Backend Quality & Assurance Tests &#8212; Stage 15
 Covers improvements from the backend audit:
   - Domain validation (scanner.is_valid_domain)
   - Database thread safety, WAL mode, context manager, composite index
@@ -20,7 +20,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Domain‐validation tests
+# Domain&#8208;validation tests
 # ---------------------------------------------------------------------------
 
 class TestDomainValidation:
@@ -157,7 +157,7 @@ class TestScannerImprovements:
     """exp= not counted, type-hint consistency, socket fix."""
 
     def test_exp_not_counted_as_lookup(self):
-        """exp= modifier must NOT count toward DNS lookup limit (RFC 7208 §4.6.4)."""
+        """exp= modifier must NOT count toward DNS lookup limit (RFC 7208 &#167;4.6.4)."""
         from app.scanner import _spf_count
 
         with patch("app.scanner._spf_fetch") as mock_fetch:

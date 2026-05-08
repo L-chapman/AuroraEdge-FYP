@@ -1,4 +1,4 @@
-﻿from app.rules import evaluate
+from app.rules import evaluate
 
 
 def test_rules_mx_and_spf_missing_is_high():

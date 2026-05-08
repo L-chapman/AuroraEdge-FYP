@@ -1,4 +1,4 @@
-﻿import app.scanner as scanner
+import app.scanner as scanner
 from app.rules import evaluate
 
 

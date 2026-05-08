@@ -678,7 +678,7 @@ class CloudflareDNS:
                     all_ok = False
 
         else:
-            # Generic provider — create TXT record stub with known selector
+            # Generic provider &#8212; create TXT record stub with known selector
             selectors = provider.get("selectors", ["default"])
             for selector in selectors:
                 # We can create the _domainkey subdomain but the value
@@ -687,7 +687,7 @@ class CloudflareDNS:
                     f"Detected email provider: {provider.get('name', 'Unknown')}. "
                     f"DKIM selector '{selector}' requires the public key from your "
                     f"email provider's admin console. AuroraEdge created the DNS "
-                    f"record name ({selector}._domainkey.{domain}) — paste the "
+                    f"record name ({selector}._domainkey.{domain}) &#8212; paste the "
                     f"public key value in your provider's DKIM setup."
                 )
 
@@ -700,7 +700,7 @@ class CloudflareDNS:
             return False, summary
 
     # -----------------------------------------------------------------
-    # Cloudflare Workers — MTA-STS HTTPS Policy Hosting
+    # Cloudflare Workers &#8212; MTA-STS HTTPS Policy Hosting
     # -----------------------------------------------------------------
 
     def get_account_id(self) -> Optional[str]:
@@ -791,7 +791,7 @@ async function handleRequest(request) {{
         steps_failed = []
 
         # Step 1: Create proxied DNS A record for mta-sts.<domain>
-        # Using 192.0.2.1 (RFC 5737 TEST-NET, safe dummy IP) — traffic goes
+        # Using 192.0.2.1 (RFC 5737 TEST-NET, safe dummy IP) &#8212; traffic goes
         # through Cloudflare's proxy so the origin IP doesn't matter.
         a_name = f"mta-sts.{domain}"
         ok, msg = self.create_or_update_a(
@@ -806,7 +806,7 @@ async function handleRequest(request) {{
                 steps_done.append(f"DNS already managed by Workers: {a_name}")
             else:
                 steps_failed.append(f"DNS A record failed: {msg}")
-                # DNS is critical — abort if it fails
+                # DNS is critical &#8212; abort if it fails
                 return False, f"Failed to create DNS record for {a_name}: {msg}"
 
         # Step 2: Upload Worker script
@@ -843,7 +843,7 @@ async function handleRequest(request) {{
             return False, f"Worker upload error: {e}"
 
         # Step 3: Bind Worker to the mta-sts subdomain
-        # Try: A) API Token route → B) Global API Key route → C) Custom Domains
+        # Try: A) API Token route &#8594; B) Global API Key route &#8594; C) Custom Domains
         route_pattern = f"mta-sts.{domain}/*"
         route_bound = False
 
@@ -999,7 +999,7 @@ async function handleRequest(request) {{
                     }
                 )
 
-        # DMARC fix — always target p=reject (strongest policy)
+        # DMARC fix &#8212; always target p=reject (strongest policy)
         if not scan_result.get("dmarc_present"):
             fixes.append(
                 {
@@ -1053,7 +1053,7 @@ async function handleRequest(request) {{
                 }
             )
 
-        # MTA-STS fix — DNS record + Cloudflare Worker for HTTPS hosting
+        # MTA-STS fix &#8212; DNS record + Cloudflare Worker for HTTPS hosting
         if not scan_result.get("mta_sts_present"):
             mx_hosts = scan_result.get("mx_hosts", "")
             fixes.append(
@@ -1066,7 +1066,7 @@ async function handleRequest(request) {{
                     "auto_fix": lambda: self.fix_mta_sts_dns(domain),
                 }
             )
-            # MTA-STS HTTPS hosting — automated via Cloudflare Worker
+            # MTA-STS HTTPS hosting &#8212; automated via Cloudflare Worker
             fixes.append(
                 {
                     "type": "MTA-STS-HTTPS",
@@ -1078,12 +1078,12 @@ async function handleRequest(request) {{
                 }
             )
 
-        # DKIM — auto-detect email provider and create DNS records
+        # DKIM &#8212; auto-detect email provider and create DNS records
         if not scan_result.get("dkim_present"):
             provider = self.detect_email_provider(scan_result.get("mx_hosts", ""))
             provider_name = provider.get("name", "Unknown")
             if provider.get("provider") != "unknown":
-                # Known provider — fully automated DKIM fix
+                # Known provider &#8212; fully automated DKIM fix
                 fixes.append(
                     {
                         "type": "DKIM",
@@ -1096,12 +1096,12 @@ async function handleRequest(request) {{
                     }
                 )
             else:
-                # Unknown provider — provide guidance but still try generic fix
+                # Unknown provider &#8212; provide guidance but still try generic fix
                 fixes.append(
                     {
                         "type": "DKIM",
                         "priority": "HIGH",
-                        "description": "Configure DKIM signing — email provider not auto-detected",
+                        "description": "Configure DKIM signing &#8212; email provider not auto-detected",
                         "current": "No DKIM selectors found",
                         "recommended": f'selector1._domainkey.{domain}. IN TXT "v=DKIM1; k=rsa; p=<public_key>"',
                         "auto_fix": None,
@@ -1202,16 +1202,16 @@ def generate_comparison_report() -> str:
     # Build comparison rows
     features = [
         ("Type", "type"),
-        ("SPF Check", lambda t: "✓" if "SPF" in t["checks"] else "✗"),
-        ("DKIM Check", lambda t: "✓" if "DKIM" in t["checks"] else "✗"),
-        ("DMARC Check", lambda t: "✓" if "DMARC" in t["checks"] else "✗"),
-        ("MTA-STS Check", lambda t: "✓" if "MTA-STS" in t["checks"] else "✗"),
-        ("TLS-RPT Check", lambda t: "✓" if "TLS-RPT" in t["checks"] else "✗"),
-        ("BIMI Check", lambda t: "✓" if "BIMI" in t["checks"] else "✗"),
-        ("Blacklist/RBL", lambda t: "✓" if "Blacklist/RBL" in t.get("checks", []) or "Blacklist" in t.get("checks", []) else "✗"),
-        ("Auto-Fix DNS", lambda t: "✓" if t["auto_fix"] else "✗"),
-        ("PDF Reports", lambda t: "✓" if "PDF" in t.get("reporting", []) else "✗"),
-        ("API Access", lambda t: "✓" if t["api"] else "✗"),
+        ("SPF Check", lambda t: "&#10003;" if "SPF" in t["checks"] else "&#10007;"),
+        ("DKIM Check", lambda t: "&#10003;" if "DKIM" in t["checks"] else "&#10007;"),
+        ("DMARC Check", lambda t: "&#10003;" if "DMARC" in t["checks"] else "&#10007;"),
+        ("MTA-STS Check", lambda t: "&#10003;" if "MTA-STS" in t["checks"] else "&#10007;"),
+        ("TLS-RPT Check", lambda t: "&#10003;" if "TLS-RPT" in t["checks"] else "&#10007;"),
+        ("BIMI Check", lambda t: "&#10003;" if "BIMI" in t["checks"] else "&#10007;"),
+        ("Blacklist/RBL", lambda t: "&#10003;" if "Blacklist/RBL" in t.get("checks", []) or "Blacklist" in t.get("checks", []) else "&#10007;"),
+        ("Auto-Fix DNS", lambda t: "&#10003;" if t["auto_fix"] else "&#10007;"),
+        ("PDF Reports", lambda t: "&#10003;" if "PDF" in t.get("reporting", []) else "&#10007;"),
+        ("API Access", lambda t: "&#10003;" if t["api"] else "&#10007;"),
         ("Cost", "cost"),
         ("Deployment", "deployment"),
     ]

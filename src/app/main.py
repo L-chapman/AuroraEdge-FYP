@@ -1,4 +1,4 @@
-﻿"""AuroraEdge CLI entry point."""
+"""AuroraEdge CLI entry point."""
 from app.cli import main
 
 if __name__ == "__main__":
