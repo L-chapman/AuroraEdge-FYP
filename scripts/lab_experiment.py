@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AuroraEdge Lab Experiment Protocol
+NorthFlux Security Lab Experiment Protocol
 ==================================
 
 This script implements the recommended lab evaluation protocol from the
@@ -45,7 +45,7 @@ logger = logging.getLogger("lab_experiment")
 
 class LabExperiment:
     """
-    Controlled lab experiment for measuring AuroraEdge detection and fix performance.
+    Controlled lab experiment for measuring NorthFlux Security detection and fix performance.
     """
     
     # Known good baseline configurations
@@ -258,7 +258,7 @@ class LabExperiment:
     def generate_report(self, results: Dict, output_path: Path) -> str:
         """Generate markdown report from experiment results."""
         lines = [
-            "# AuroraEdge Lab Experiment Report",
+            "# NorthFlux Security Lab Experiment Report",
             "",
             f"**Domain:** {results['domain']}",
             f"**Start:** {results['experiment_start']}",
@@ -330,7 +330,7 @@ class LabExperiment:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AuroraEdge Lab Experiment Protocol",
+        description="NorthFlux Security Lab Experiment Protocol",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example:
@@ -365,7 +365,7 @@ Requirements:
             sys.exit(1)
         print(f"&#9989; {msg}")
     
-    print(f"\n&#129514; AuroraEdge Lab Experiment")
+    print(f"\n&#129514; NorthFlux Security Lab Experiment")
     print(f"   Domain: {args.domain}")
     print(f"   Iterations: {args.iterations}")
     print(f"   DNS Wait: {args.dns_wait}s")

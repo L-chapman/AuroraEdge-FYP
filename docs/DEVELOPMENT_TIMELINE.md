@@ -1,7 +1,7 @@
 # AuroraEdge Development Timeline
 
 ## Project Information
-**Student**: Leon Chapman (50030738)  
+**Student**: Leon Chapman
 **Course**: Cybersecurity & Networking Infrastructure  
 **Institution**: Belfast Metropolitan College  
 **Project Span**: September 2025 - February 2026  

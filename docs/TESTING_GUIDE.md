@@ -275,7 +275,6 @@ Important notes:
 ## Project Information
 
 **Student**: Leon Chapman  
-**Student ID**: 50030738  
 **Course**: Cybersecurity & Networking Infrastructure  
 **Institution**: Belfast Metropolitan College  
 **Year**: 2025/2026 Final Year Project  

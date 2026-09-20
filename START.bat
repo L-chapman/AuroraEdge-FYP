@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title AuroraEdge Security
+title NorthFlux Security
 echo.
 echo ===================================================================
-echo        AuroraEdge Security
-echo        Final Year Project - Leon Chapman
+echo        NorthFlux Security
+echo        Email security assessment and remediation
 echo ===================================================================
 echo.
 
@@ -13,12 +13,12 @@ cd /d "%~dp0"
 
 REM ── Ensure we are running from a writable location ──────────────────
 set "RUN_DIR=%cd%"
-set "WRITE_TEST=%RUN_DIR%\.__auroraedge_write_test.tmp"
+set "WRITE_TEST=%RUN_DIR%\.__northflux_write_test.tmp"
 copy nul "%WRITE_TEST%" >nul 2>&1
 if errorlevel 1 (
     echo [WARN] This location is not writable: %RUN_DIR%
     echo [*] Copying project to local writable path and relaunching...
-    set "LOCAL_RUN_DIR=%LOCALAPPDATA%\AuroraEdge\AuroraEdge_FYP_submission"
+    set "LOCAL_RUN_DIR=%LOCALAPPDATA%\NorthFlux Security\app"
     if not exist "%LOCAL_RUN_DIR%" mkdir "%LOCAL_RUN_DIR%" >nul 2>&1
     robocopy "%RUN_DIR%" "%LOCAL_RUN_DIR%" /E /NFL /NDL /NJH /NJS /NP >nul
     if errorlevel 8 (
@@ -52,40 +52,16 @@ if not defined PY (
 )
 echo [OK] Found %PY% %PY_VER%
 echo [1/4] Python ready.
-echo [*] Please wait while AuroraEdge prepares the local environment.
+echo [*] Please wait while NorthFlux Security prepares the local environment.
 echo     First launch can take a minute or two while dependencies are checked.
 
-REM ── Cloudflare credentials bootstrap (single-file flow) ────────────
-set "CF_SECRET_FILE=%cd%\state\cf_secrets.local.cmd"
-if exist "%CF_SECRET_FILE%" (
-    call "%CF_SECRET_FILE%" >nul 2>&1
-)
-
-if not defined CF_API_TOKEN (
-    if not exist "state" mkdir state
-    echo.
-    echo [*] Cloudflare credentials are optional for scans, but required for Auto-Fix demo.
-    set /p "CF_API_TOKEN=Enter CF_API_TOKEN (leave blank to skip): "
-    if defined CF_API_TOKEN (
-        set /p "CF_ZONE_ID=Enter CF_ZONE_ID: "
-        set /p "CF_ACCOUNT_ID=Enter CF_ACCOUNT_ID (optional, press Enter to skip): "
-        if defined CF_API_TOKEN if defined CF_ZONE_ID (
-            >"%CF_SECRET_FILE%" (
-                echo @echo off
-                echo set "CF_API_TOKEN=%CF_API_TOKEN%"
-                echo set "CF_ZONE_ID=%CF_ZONE_ID%"
-                echo set "CF_ACCOUNT_ID=%CF_ACCOUNT_ID%"
-            )
-            echo [OK] Saved Cloudflare credentials for future launches.
-        ) else (
-            echo [!] Incomplete Cloudflare credentials. Auto-Fix will stay disabled.
-        )
-    )
-)
+REM ── Cloudflare credentials ─────────────────────────────────────────
+REM Credentials may be supplied through environment variables or the
+REM authenticated Settings page. START.bat never writes secrets to disk.
 if defined CF_API_TOKEN if defined CF_ZONE_ID (
-    echo [OK] Cloudflare credentials loaded for Auto-Fix.
+    echo [OK] Cloudflare credentials detected in the current environment.
 ) else (
-    echo [!] Cloudflare credentials not loaded. Scanning works, Auto-Fix is disabled.
+    echo [INFO] Cloudflare credentials are not set. Scanning remains available.
 )
 
 REM ── Create / repair virtual environment ────────────────────────────
@@ -100,7 +76,7 @@ if not exist "%VENV_ACTIVATE%" (
     if errorlevel 1 (
         echo [WARN] Could not create .venv in this folder ^(common on synced drives^).
         echo [*] Falling back to local user environment under LOCALAPPDATA...
-        set "VENV_DIR=%LOCALAPPDATA%\AuroraEdge\venv_submission"
+        set "VENV_DIR=%LOCALAPPDATA%\NorthFlux Security\venv"
         set "VENV_ACTIVATE=!VENV_DIR!\Scripts\activate.bat"
         set "VENV_PY=!VENV_DIR!\Scripts\python.exe"
         set "VENV_LABEL=!VENV_DIR!"

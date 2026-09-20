@@ -1,4 +1,6 @@
-# AuroraEdge Final Release Notes
+# Historical AuroraEdge 3.1 Release Notes
+
+> **Historical record:** This document describes the April 2026 final-project snapshot, not the current NorthFlux Security release candidate. For current product status, version, tests, and release changes, use [`../README.md`](../README.md), [`../CHANGELOG.md`](../CHANGELOG.md), and [`TESTING.md`](TESTING.md).
 
 ## Release Snapshot
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Quick smoke test for AuroraEdge."""
+"""Quick smoke test for NorthFlux Security."""
 
 import argparse
 import io
@@ -33,7 +33,7 @@ def setup_stdout_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="AuroraEdge smoke test")
+    parser = argparse.ArgumentParser(description="NorthFlux Security smoke test")
     parser.add_argument(
         "--domain",
         help="Domain to use for the live scan check (defaults to a small fallback list)",
@@ -108,7 +108,7 @@ def main() -> int:
     args = parse_args()
 
     print("=" * 60)
-    print("AuroraEdge System Verification")
+    print("NorthFlux Security System Verification")
     print("=" * 60)
 
     print("\n[1/6] Testing Module Imports...")
@@ -117,7 +117,7 @@ def main() -> int:
 
         from app.scanner import scan_domain
         from app.rules import evaluate, generate_remediation
-        from app.database import AuroraDatabase, get_database
+        import app.database
         from app.analysis import calculate_statistics
         from app.dns_fix import TOOL_COMPARISON
         from app.logging_config import get_logger, ScanLogger
@@ -163,17 +163,17 @@ def main() -> int:
     print("  [OK] Logging system functional")
 
     print("\n" + "=" * 60)
-    print("VERIFICATION COMPLETE - All Systems Operational")
+    print("VERIFICATION COMPLETE - Checked Components Passed")
     print("=" * 60)
 
     print(
         """
-FYP Objectives Alignment:
--------------------------
+Capability verification:
+------------------------
 [OK] Check and validate DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT)
 [OK] Show a security score and suggestions
-[OK] Automatically fix incorrect records (Cloudflare API ready)
-[OK] HTTPS support (via uvicorn)
+[INFO] Cloudflare remediation module imported (no live DNS write performed)
+[INFO] HTTPS is expected at the deployment reverse proxy (not tested here)
 [OK] Authentication tokens (DASH_TOKEN env var)
 [OK] Basic logging (logging_config.py)
 [OK] Compare to similar tools (OnDMARC, EasyDMARC, etc.)

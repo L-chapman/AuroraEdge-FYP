@@ -1,6 +1,6 @@
 # AuroraEdge — Strengths, Weaknesses & Future Work
 
-**Author:** Leon Chapman (50030738)  
+**Author:** Leon Chapman
 **Date:** February 2026  
 **Version:** Final Build (397 passed, 0 skipped)
 

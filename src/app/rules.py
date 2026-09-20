@@ -1,4 +1,4 @@
-"""AuroraEdge Rules Engine &#8212; RFC-based email security evaluation."""
+"""NorthFlux Security rules engine for RFC-based email security evaluation."""
 from typing import Dict, List, Tuple
 
 SEVERITY_ORDER = {"OK": 0, "INFO": 1, "WARN": 2, "HIGH": 3, "CRITICAL": 4, "ERROR": 5}

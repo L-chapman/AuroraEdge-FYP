@@ -5,7 +5,7 @@ import ssl
 import logging
 
 # Configure module logger
-logger = logging.getLogger("auroraedge.scanner")
+logger = logging.getLogger("northflux.scanner")
 
 # Import optional external dependencies safely so tests can run even when
 # the environment doesn't have all packages installed.
@@ -116,7 +116,7 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
                 return ("F", "", "No valid SMTP banner")
 
             # Send EHLO
-            sock.sendall(b"EHLO auroraedge.local\r\n")
+            sock.sendall(b"EHLO northflux.local\r\n")
             ehlo_resp = sock.recv(4096).decode("utf-8", errors="ignore")
 
             # Check for STARTTLS support

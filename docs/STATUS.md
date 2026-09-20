@@ -7,7 +7,7 @@
 - Treat the sections below as project evidence rather than first-time user guidance.
 
 ## Project Timeline (September 2025 - February 2026)
-**Student**: Leon Chapman (50030738)  
+**Student**: Leon Chapman
 **Start**: 02 September 2025  
 **End**: 16 February 2026  
 

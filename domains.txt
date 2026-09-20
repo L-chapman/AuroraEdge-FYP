@@ -1,23 +1,24 @@
-﻿# AuroraEdge Academic Dataset
-# 50 domains for FYP analysis
-# Mix of UK organisations, tech companies, and educational institutions
+# NorthFlux public posture sample set
+# 50 varied public domains for read-only comparison scans
+# Vendor configurations change; results are observations, not endorsements.
+# Never apply remediation to a zone you do not own or manage with permission.
 
-# UK Educational Institutions
-belfastmet.ac.uk
-qub.ac.uk
-ulster.ac.uk
-oxford.ac.uk
-cam.ac.uk
-imperial.ac.uk
-ucl.ac.uk
-ed.ac.uk
-manchester.ac.uk
-birmingham.ac.uk
-leeds.ac.uk
-bristol.ac.uk
-warwick.ac.uk
-glasgow.ac.uk
-exeter.ac.uk
+# Email, cloud, and collaboration services
+outlook.com
+yahoo.com
+aol.com
+zoho.com
+mail.com
+icloud.com
+stripe.com
+shopify.com
+slack.com
+zoom.us
+adobe.com
+oracle.com
+ibm.com
+cisco.com
+dropbox.com
 
 # UK Government & Public Sector
 gov.uk
@@ -61,5 +62,5 @@ tutanota.com
 fastmail.com
 
 # Demo & Test Domains
-auroraedge.co.uk  # Demo domain - safe to scan even if you do not have Cloudflare
+auroraedge.co.uk  # Controlled legacy demo domain; read-only scanning is public
 example.com

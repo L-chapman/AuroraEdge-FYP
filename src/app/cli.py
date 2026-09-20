@@ -1,4 +1,4 @@
-"""Command-line scanner and report writer for AuroraEdge."""
+"""Command-line scanner and report writer for NorthFlux Security."""
 
 import argparse
 import csv as csv_mod
@@ -13,7 +13,7 @@ from app.rules import evaluate, generate_remediation
 from app.database import get_database
 from app.dns_fix import get_cloudflare_client
 
-logger = logging.getLogger("auroraedge.cli")
+logger = logging.getLogger("northflux.cli")
 
 # Rich console for pretty output
 try:
@@ -269,7 +269,7 @@ def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
 def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str):
     """Write results to Markdown file."""
     lines = [
-        "# AuroraEdge Scan Results",
+        "# NorthFlux Security Scan Results",
         "",
         f"**Scan Time:** {scan_ts} UTC",
         f"**Domains Scanned:** {len(rows)}",
@@ -373,7 +373,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
 def print_summary(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
     """Print Rich console summary table."""
     table = Table(
-        title="AuroraEdge Email Security Scan",
+        title="NorthFlux Security Email Scan",
         box=box.ROUNDED,
         show_header=True,
         header_style="bold cyan",
@@ -478,7 +478,7 @@ def print_remediation(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="AuroraEdge Security - Automated Email Authentication & Cyber Defence System",
+        description="NorthFlux Security - self-hosted email security assessment and remediation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -563,8 +563,8 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
 
     # Generate timestamp for filenames
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    csv_path = outdir / f"auroraedge_results_{ts}.csv"
-    md_path = outdir / f"auroraedge_results_{ts}.md"
+    csv_path = outdir / f"northflux_results_{ts}.csv"
+    md_path = outdir / f"northflux_results_{ts}.md"
 
     # Run scans
     logger.info(f"Starting scan of {len(targets)} domain(s)")

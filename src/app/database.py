@@ -9,18 +9,32 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import random
 
-logger = logging.getLogger("auroraedge.database")
+logger = logging.getLogger("northflux.database")
 
 # Default database path relative to project root
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "state" / "auroraedge.db"
+STATE_DIR = Path(__file__).resolve().parents[2] / "state"
+DEFAULT_DB_PATH = STATE_DIR / "northflux.db"
+LEGACY_DB_PATH = STATE_DIR / "auroraedge.db"
 
 
-class AuroraDatabase:
-    """SQLite database for AuroraEdge scan results."""
+def _default_db_path() -> Path:
+    """Use the new database name while preserving existing local installations."""
+    if DEFAULT_DB_PATH.exists() or not LEGACY_DB_PATH.exists():
+        return DEFAULT_DB_PATH
+    logger.info(
+        "Using legacy database at %s; migrate it to %s when convenient",
+        LEGACY_DB_PATH,
+        DEFAULT_DB_PATH,
+    )
+    return LEGACY_DB_PATH
+
+
+class NorthFluxDatabase:
+    """SQLite database for NorthFlux Security scan results."""
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialise the database connection."""
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
         self._init_db()
@@ -639,11 +653,24 @@ class AuroraDatabase:
             logger.error("Failed to set setting %s: %s", key, e)
             raise
 
+    def delete_setting(self, key: str) -> bool:
+        """Delete one setting, returning whether a row was removed."""
+        try:
+            with self._lock:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM settings WHERE key = ?", (key,))
+                removed = cursor.rowcount > 0
+                self.conn.commit()
+                return removed
+        except sqlite3.Error as e:
+            logger.error("Failed to delete setting %s: %s", key, e)
+            raise
+
     def clear_scan_data(self):
         """Clear all scan-related data (scans, results, domains, managed_domains, alerts).
 
-        Preserves settings (Cloudflare credentials, org name, etc.).
-        Called on server startup so each launch begins with a clean slate.
+        Preserves application settings. Production credentials should be
+        supplied through the runtime environment rather than this database.
         """
         try:
             with self._lock:
@@ -749,17 +776,21 @@ class AuroraDatabase:
         return cursor.fetchone()["c"]
 
 
+# Compatibility alias for integrations written before the product rename.
+AuroraDatabase = NorthFluxDatabase
+
+
 # Singleton instance for convenience
-_db_instance: Optional[AuroraDatabase] = None
+_db_instance: Optional[NorthFluxDatabase] = None
 _db_lock = threading.Lock()
 
 
-def get_database(db_path: Optional[Path] = None) -> AuroraDatabase:
+def get_database(db_path: Optional[Path] = None) -> NorthFluxDatabase:
     """Get or create the database instance (thread-safe)."""
     global _db_instance
     if _db_instance is None:
         with _db_lock:
             # Double-checked locking
             if _db_instance is None:
-                _db_instance = AuroraDatabase(db_path)
+                _db_instance = NorthFluxDatabase(db_path)
     return _db_instance
