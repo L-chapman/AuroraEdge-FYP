@@ -250,6 +250,13 @@ class NorthFluxDatabase:
             "CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC)"
         )
 
+        # Additive migration: retain every existing row and mark old scans as
+        # complete because earlier releases did not record this distinction.
+        for table, column in (("results", "scan_incomplete"), ("managed_domains", "last_scan_incomplete")):
+            columns = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
+            if column not in columns:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+
         self.conn.commit()
         logger.info("Database initialised at %s", self.db_path)
 
@@ -311,6 +318,9 @@ class NorthFluxDatabase:
         combined: Dict, now: str, *, commit: bool = True
     ):
         """Inner implementation of save_result (must be called under _lock)."""
+        incomplete = bool(result.get("scan_incomplete"))
+        score = None if incomplete else evaluation.get("score", 0)
+        grade = None if incomplete else evaluation.get("grade", "")
         cursor = self.conn.cursor()
         cursor.execute(
             """
@@ -324,8 +334,8 @@ class NorthFluxDatabase:
                 tls_rpt_present, tls_rpt_rua,
                 starttls_grade, starttls_worst,
                 severity, score, grade, violations, violation_count, advice, notes,
-                raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                raw_json, scan_incomplete
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 scan_id,
@@ -358,26 +368,26 @@ class NorthFluxDatabase:
                 result.get("tls_rpt_rua", ""),
                 result.get("starttls_grade", ""),
                 result.get("starttls_worst", ""),
-                evaluation.get("severity", ""),
-                evaluation.get("score", 0),
-                evaluation.get("grade", ""),
+                "ERROR" if incomplete else evaluation.get("severity", ""),
+                score,
+                grade,
                 evaluation.get("violations", ""),
                 evaluation.get("violation_count", 0),
                 evaluation.get("advice", ""),
                 result.get("notes", ""),
                 json.dumps(combined),
+                int(incomplete),
             ),
         )
 
         # Update domains tracking table
         cursor.execute("SELECT * FROM domains WHERE domain = ?", (domain,))
         existing = cursor.fetchone()
-        score = evaluation.get("score", 0)
-        grade = evaluation.get("grade", "")
-
         if existing:
-            best = max(existing["best_score"], score)
-            worst = min(existing["worst_score"], score)
+            best_values = [value for value in (existing["best_score"], score) if value is not None]
+            worst_values = [value for value in (existing["worst_score"], score) if value is not None]
+            best = max(best_values) if best_values else None
+            worst = min(worst_values) if worst_values else None
             cursor.execute(
                 """
                 UPDATE domains SET
@@ -490,12 +500,13 @@ class NorthFluxDatabase:
                         )
 
                 if manage_domains or update_managed:
-                    for domain, _result, evaluation in entries:
+                    for domain, result, evaluation in entries:
                         self._update_managed_domain_scan_inner(
                             cursor,
                             domain,
                             evaluation.get("grade", "F"),
                             evaluation.get("score", 0),
+                            scan_incomplete=bool(result.get("scan_incomplete")),
                         )
 
                 self.conn.commit()
@@ -529,7 +540,7 @@ class NorthFluxDatabase:
             cursor.execute(
                 """
                 SELECT * FROM results
-                ORDER BY scanned_at DESC
+                ORDER BY scanned_at DESC, id DESC
                 LIMIT ?
             """,
                 (limit,),
@@ -544,7 +555,7 @@ class NorthFluxDatabase:
                 """
                 SELECT * FROM results
                 WHERE domain = ?
-                ORDER BY scanned_at DESC
+                ORDER BY scanned_at DESC, id DESC
                 LIMIT ?
             """,
                 (domain, limit),
@@ -572,7 +583,7 @@ class NorthFluxDatabase:
             cursor.execute(
                 """
                 SELECT * FROM scans
-                ORDER BY started_at DESC
+                ORDER BY started_at DESC, id DESC
                 LIMIT ?
             """,
                 (limit,),
@@ -790,6 +801,8 @@ class NorthFluxDatabase:
         domain: str,
         grade: str,
         score: int,
+        *,
+        scan_incomplete: bool = False,
     ) -> Dict[str, Any]:
         """Update managed-domain metadata inside the caller's lock/transaction."""
         clean_domain = domain.lower().strip()
@@ -803,14 +816,15 @@ class NorthFluxDatabase:
         cursor.execute(
             """UPDATE managed_domains
                SET last_scan_at = ?, last_grade = ?, last_score = ?,
-                   previous_grade = ?, previous_score = ?
+                   previous_grade = ?, previous_score = ?, last_scan_incomplete = ?
                WHERE domain = ?""",
             (
                 datetime.now(timezone.utc).isoformat(),
-                grade,
-                score,
+                None if scan_incomplete else grade,
+                None if scan_incomplete else score,
                 previous_grade,
                 previous_score,
+                int(scan_incomplete),
                 clean_domain,
             ),
         )
@@ -832,20 +846,25 @@ class NorthFluxDatabase:
         return row["value"] if row else default
 
     def set_setting(self, key: str, value: str):
-        """Set a setting value."""
-        try:
-            with self._lock:
-                cursor = self.conn.cursor()
+        """Set one setting using the same atomic path as a settings form."""
+        self.set_settings({key: value})
+
+    def set_settings(self, values: Dict[str, str]):
+        """Save a validated settings form together or roll back every change."""
+        with self._lock:
+            try:
                 now = datetime.now(timezone.utc).isoformat()
-                cursor.execute(
+                self.conn.executemany(
                     """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-                       ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?""",
-                    (key, value, now, value, now),
+                       ON CONFLICT(key) DO UPDATE SET
+                           value = excluded.value, updated_at = excluded.updated_at""",
+                    [(key, value, now) for key, value in values.items()],
                 )
                 self.conn.commit()
-        except sqlite3.Error as e:
-            logger.error("Failed to set setting %s: %s", key, e)
-            raise
+            except Exception:
+                self.conn.rollback()
+                logger.exception("Failed to save settings")
+                raise
 
     def delete_setting(self, key: str) -> bool:
         """Delete one setting, returning whether a row was removed."""
@@ -898,7 +917,7 @@ class NorthFluxDatabase:
                 cursor.execute(
                     """UPDATE managed_domains
                        SET last_scan_at = NULL, last_grade = NULL, last_score = NULL,
-                           previous_grade = NULL, previous_score = NULL
+                           previous_grade = NULL, previous_score = NULL, last_scan_incomplete = 0
                        WHERE domain = ?""",
                     (d,),
                 )

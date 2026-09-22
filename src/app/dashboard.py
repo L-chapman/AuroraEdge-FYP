@@ -9,7 +9,6 @@ import asyncio
 import logging
 import subprocess
 import concurrent.futures
-import hmac
 import hashlib
 import secrets
 import threading
@@ -24,6 +23,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
 from app.branding import DEMO_DOMAIN, PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_VERSION
+from app.request_security import RequestSizeLimitMiddleware, constant_time_equal, json_object
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Query, Response
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse, JSONResponse
@@ -77,7 +77,9 @@ def _sanitize_domain(raw) -> tuple:
     """
     if raw is None:
         return ("", "Domain is required")
-    domain = str(raw).strip().lower()
+    if not isinstance(raw, str):
+        return ("", "Domain must be text")
+    domain = raw.strip().lower()
     # Strip common protocol prefixes users might paste in
     for prefix in ("https://", "http://", "ftp://"):
         if domain.startswith(prefix):
@@ -86,7 +88,7 @@ def _sanitize_domain(raw) -> tuple:
     domain = domain.split("?")[0]          # Remove query string
     if not domain:
         return ("", "Domain is required")
-    if not _DOMAIN_RE.match(domain):
+    if len(domain) > 253 or not _DOMAIN_RE.fullmatch(domain):
         return ("", "Invalid domain format")
     # Reject bare IP addresses &#8211; we need a real domain for DNS checks
     if all(part.isdigit() for part in domain.split(".")):
@@ -216,7 +218,7 @@ def _get_session(session_id: str, configured_token: str) -> Optional[Dict]:
         session = _sessions.get(session_id)
         if not session:
             return None
-        if session["expires_at"] <= now or not hmac.compare_digest(
+        if session["expires_at"] <= now or not constant_time_equal(
             session["token_fingerprint"], _token_fingerprint(configured_token)
         ):
             _sessions.pop(session_id, None)
@@ -238,7 +240,7 @@ def _require_session_csrf(request: Request, session: Dict) -> None:
         return
     origin = request.headers.get("origin", "").rstrip("/")
     expected_origin = _expected_origin(request)
-    if not origin or not hmac.compare_digest(origin, expected_origin):
+    if not origin or not constant_time_equal(origin, expected_origin):
         raise HTTPException(status_code=403, detail="Invalid request origin")
     header_token = request.headers.get("x-csrf-token", "")
     cookie_token = request.cookies.get(_CSRF_COOKIE, "")
@@ -246,8 +248,8 @@ def _require_session_csrf(request: Request, session: Dict) -> None:
     if not (
         header_token
         and cookie_token
-        and hmac.compare_digest(header_token, expected_token)
-        and hmac.compare_digest(cookie_token, expected_token)
+        and constant_time_equal(header_token, expected_token)
+        and constant_time_equal(cookie_token, expected_token)
     ):
         raise HTTPException(status_code=403, detail="CSRF validation failed")
 
@@ -382,6 +384,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+app.add_middleware(RequestSizeLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
@@ -543,12 +546,12 @@ def require_token(req: Request):
     # Explicit bearer credentials are not ambient browser authority, so they do
     # not require a CSRF token.
     auth = req.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and hmac.compare_digest(auth.split(" ", 1)[1], want):
+    if auth.startswith("Bearer ") and constant_time_equal(auth.split(" ", 1)[1], want):
         return
 
     # Query-string tokens are retained only for legacy local development links.
     qtok = req.query_params.get("token")
-    if not _is_production() and qtok and hmac.compare_digest(qtok, want):
+    if not _is_production() and qtok and constant_time_equal(qtok, want):
         return
 
     session_id = req.cookies.get(_SESSION_COOKIE, "")
@@ -631,9 +634,13 @@ async def login(request: Request):
         if len(raw_body) > 4096:
             _record_login_failure(client_key)
             raise HTTPException(status_code=413, detail="Sign-in request is too large")
-    body = parse_qs(raw_body.decode("utf-8", errors="replace"), max_num_fields=10)
+    try:
+        body = parse_qs(raw_body.decode("utf-8", errors="strict"), max_num_fields=10)
+    except (ValueError, UnicodeError):
+        _record_login_failure(client_key)
+        raise HTTPException(status_code=400, detail="Invalid sign-in form")
     supplied = body.get("token", [""])[0]
-    if not want or not hmac.compare_digest(supplied, want):
+    if not want or not constant_time_equal(supplied, want):
         _record_login_failure(client_key)
         raise HTTPException(status_code=401, detail="Invalid access token")
     _clear_login_failures(client_key)
@@ -682,7 +689,7 @@ def _auth_state(request: Request) -> AuthState:
         )
 
     auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and hmac.compare_digest(
+    if auth.startswith("Bearer ") and constant_time_equal(
         auth.split(" ", 1)[1], configured_token
     ):
         return AuthState(required=True, authenticated=True, expires_at=None)
@@ -691,7 +698,7 @@ def _auth_state(request: Request) -> AuthState:
     if (
         not _is_production()
         and query_token
-        and hmac.compare_digest(query_token, configured_token)
+        and constant_time_equal(query_token, configured_token)
     ):
         return AuthState(required=True, authenticated=True, expires_at=None)
 
@@ -770,7 +777,7 @@ def api_v1_auth_login(payload: LoginRequest, request: Request, response: Respons
         raise HTTPException(status_code=409, detail="Authentication is not enabled")
 
     client_key = _login_rate_check(request)
-    if not hmac.compare_digest(payload.token, configured_token):
+    if not constant_time_equal(payload.token, configured_token):
         _record_login_failure(client_key)
         raise HTTPException(status_code=401, detail="Invalid access token")
 
@@ -905,6 +912,7 @@ def api_v1_dashboard():
                 last_scan_at=_parse_api_timestamp(record.get("last_scan_at")),
                 last_grade=_normalise_grade(record.get("last_grade"), optional=True),
                 last_score=_normalise_score(record.get("last_score"), optional=True),
+                last_scan_incomplete=bool(record.get("last_scan_incomplete")),
                 previous_grade=_normalise_grade(
                     record.get("previous_grade"), optional=True
                 ),
@@ -1629,6 +1637,16 @@ def api_pdf_report(domain: str):
     if not result:
         raise HTTPException(status_code=404, detail=f"No scan data for {clean}")
 
+    # Some newer scanner fields (including BIMI) live in the extensible JSON
+    # snapshot. Persisted columns remain authoritative for grades and timestamps.
+    try:
+        raw_result = json.loads(result.get("raw_json") or "{}")
+        if isinstance(raw_result, dict):
+            result = {**raw_result, **result}
+    except (ValueError, TypeError):
+        pass
+    incomplete = _is_enabled(result.get("scan_incomplete"))
+
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -1640,24 +1658,31 @@ def api_pdf_report(domain: str):
         import io
 
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20*mm, bottomMargin=15*mm)
+        doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm,
+            topMargin=20*mm, bottomMargin=20*mm)
         styles = getSampleStyleSheet()
         story = []
 
         title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=18, spaceAfter=6)
         subtitle_style = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=10, textColor=colors.grey)
+        detail_style = ParagraphStyle("Cell", parent=styles["Normal"], fontSize=8,
+            leading=11, splitLongWords=True)
 
         story.append(Paragraph("NorthFlux Security Report", title_style))
         story.append(Paragraph(f"Domain: {clean}", styles["Heading2"]))
-        scanned = (result.get("scanned_at") or "Unknown")[:19].replace("T", " ")
-        story.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | Last Scan: {scanned}", subtitle_style))
+        scanned = str(result.get("scanned_at") or "Unknown")[:19].replace("T", " ")
+        story.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | Last Scan: {_escape(scanned)}", subtitle_style))
         story.append(Spacer(1, 10*mm))
 
         # Score summary
         grade = result.get("grade", "F")
         score = result.get("score", 0)
         severity = result.get("severity", "OK")
-        story.append(Paragraph(f"Grade: {grade} &nbsp;&nbsp; Score: {score}/100 &nbsp;&nbsp; Severity: {severity}", styles["Heading3"]))
+        if incomplete:
+            story.append(Paragraph("Incomplete scan - no security grade assigned", styles["Heading3"]))
+            story.append(Paragraph(_escape(result.get("notes") or "Some checks could not finish. Retry before relying on these findings."), styles["Normal"]))
+        else:
+            story.append(Paragraph(f"Grade: {_escape(grade)} &nbsp;&nbsp; Score: {_escape(score)}/100 &nbsp;&nbsp; Severity: {_escape(severity)}", styles["Heading3"]))
         story.append(Spacer(1, 5*mm))
 
         # Security checks table
@@ -1679,11 +1704,15 @@ def api_pdf_report(domain: str):
             ("MX Records", _b(result.get("mx_present")), f"{result.get('mx_count', 0)} records"),
         ]
         for name, ok, detail in check_items:
-            checks_data.append([name, "PASS" if ok else "FAIL", detail])
+            text = str(detail)
+            if len(text) > 1500:
+                text = text[:1500] + " [truncated; see the saved scan for the full value]"
+            checks_data.append([name, "Found" if ok else "Not confirmed" if incomplete else "Not found",
+                Paragraph(_escape(text), detail_style)])
 
-        t = Table(checks_data, colWidths=[60*mm, 30*mm, 80*mm])
+        t = Table(checks_data, colWidths=[35*mm, 30*mm, doc.width - 65*mm], repeatRows=1, hAlign="LEFT")
         t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#12354b")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -1693,12 +1722,14 @@ def api_pdf_report(domain: str):
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ]))
         story.append(Paragraph("Security Checks", styles["Heading3"]))
+        story.append(Paragraph("Record presence is not a pass/fail verdict on the policy. Review the findings below.", subtitle_style))
+        story.append(Spacer(1, 3*mm))
         story.append(t)
         story.append(Spacer(1, 5*mm))
 
         # Violations
         violations = result.get("violations") or "None"
-        advice = result.get("advice") or "All checks passed"
+        advice = result.get("advice") or "Review the observed records and scan notes before making changes."
         story.append(Paragraph("Violations & Recommendations", styles["Heading3"]))
         story.append(Paragraph(f"<b>Issues:</b> {_escape(violations)}", styles["Normal"]))
         story.append(Paragraph(f"<b>Advice:</b> {_escape(advice)}", styles["Normal"]))
@@ -1706,7 +1737,15 @@ def api_pdf_report(domain: str):
 
         story.append(Paragraph("Report generated by NorthFlux Security", subtitle_style))
 
-        doc.build(story)
+        def page_footer(canvas, document):
+            canvas.saveState()
+            canvas.setFont("Helvetica", 8)
+            canvas.setFillColor(colors.grey)
+            canvas.drawString(document.leftMargin, 10*mm, "NorthFlux Security | Configuration assessment, not a security guarantee")
+            canvas.drawRightString(A4[0] - document.rightMargin, 10*mm, f"Page {document.page}")
+            canvas.restoreState()
+
+        doc.build(story, onFirstPage=page_footer, onLaterPages=page_footer)
         buf.seek(0)
 
         return StreamingResponse(
@@ -1746,10 +1785,7 @@ async def api_add_managed_domain(request: Request):
     """
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+    body = await json_object(request)
     domain, err = _sanitize_domain(body.get("domain"))
     if err:
         raise HTTPException(status_code=400, detail=err)
@@ -1805,13 +1841,18 @@ async def api_add_managed_domain(request: Request):
         "score": score,
         "severity": evaluation.get("severity", "OK"),
     }
+    if scan_result.get("scan_incomplete"):
+        result["initial_scan"] = {
+            "scan_incomplete": True,
+            "error": "The domain was added, but some checks could not finish. Retry the scan before relying on its findings.",
+        }
 
     # DNS changes require both the global safety setting and an explicit opt-in
     # on this individual onboarding request.
     remediation_requested = _is_enabled(
         body.get("automatic_remediation"), default=False
     )
-    if remediation_requested and _is_enabled(
+    if not scan_result.get("scan_incomplete") and remediation_requested and _is_enabled(
         db.get_setting("automatic_remediation", "false")
     ):
         if db.get_data_generation() != data_generation:
@@ -1920,10 +1961,7 @@ async def api_save_settings(request: Request):
     """
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+    body = await json_object(request)
 
     db = get_database()
     allowed_keys = [
@@ -1934,31 +1972,45 @@ async def api_save_settings(request: Request):
     ]
     production_secret_keys = {"cf_api_token", "cf_api_key", "cf_email"}
     allowed_intervals = {"6", "12", "24", "48", "168"}
-    saved = []
+    boolean_keys = {"monitoring_enabled", "automatic_remediation", "clear_on_start"}
+    prepared = {}
     for key in allowed_keys:
         if key in body:
+            value = body[key]
+            if key in boolean_keys:
+                if not isinstance(value, (str, bool, int)) or str(value).strip().lower() not in {
+                    "true", "false", "1", "0", "yes", "no", "on", "off",
+                }:
+                    raise HTTPException(status_code=400, detail=f"{key} must be true or false")
+                value = "true" if _is_enabled(value) else "false"
+            elif key != "monitor_interval" and not isinstance(value, str):
+                raise HTTPException(status_code=400, detail=f"{key} must be text")
+            if len(str(value)) > 4096:
+                raise HTTPException(status_code=400, detail=f"{key} is too long (maximum 4096 characters)")
             if _is_production() and key in production_secret_keys:
-                if str(body[key]).strip():
+                if str(value).strip():
                     raise HTTPException(
                         status_code=400,
                         detail=f"{key} must be supplied through the runtime environment in production",
                     )
                 continue
             if key == "monitor_interval":
-                interval = str(body[key]).strip()
+                interval = str(value).strip()
                 if interval not in allowed_intervals:
                     raise HTTPException(
                         status_code=400,
                         detail="monitor_interval must be one of: 6, 12, 24, 48, 168",
                     )
-            db.set_setting(key, str(body[key]))
-            saved.append(key)
+                value = interval
+            prepared[key] = str(value)
+
+    db.set_settings(prepared)
 
     # If CF credentials provided, update the live dns_fix module
     if any(k in body for k in ("cf_api_token", "cf_zone_id", "cf_account_id", "cf_api_key", "cf_email")):
         _apply_cf_settings(db)
 
-    return {"ok": True, "saved": saved}
+    return {"ok": True, "saved": list(prepared)}
 
 
 def _apply_cf_settings(db):
@@ -1966,7 +2018,7 @@ def _apply_cf_settings(db):
     _load_cf_runtime_settings(db)
 
 
-def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
+def _auto_fix_domain(domain: str, scan_result: dict = None, should_continue=None) -> dict:
     """
     Automatically scan and fix ALL DNS issues for a domain via Cloudflare.
     No human in the loop &#8212; applies every available fix.
@@ -1974,6 +2026,8 @@ def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
     Args:
         domain: The domain name to fix
         scan_result: Optional pre-existing scan result (avoids double scan)
+        should_continue: Optional scheduled-work cancellation check. Provider
+            writes already sent cannot be recalled.
 
     Returns:
         dict with keys: applied, failed, skipped_reason (if CF not available)
@@ -2000,6 +2054,9 @@ def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
         logger.warning(f"Auto-fix blocked for {domain}: {ownership_msg}")
         return {"applied": [], "failed": [], "skipped_reason": ownership_msg}
 
+    if should_continue is not None and not should_continue():
+        return {"applied": [], "failed": [], "skipped_reason": "Operator stopped scheduled remediation"}
+
     # Scan if no result provided
     if scan_result is None:
         if not HAS_SCANNER:
@@ -2015,6 +2072,8 @@ def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
     for fix in fixes:
         fix_type = fix.get("type", "Unknown")
         try:
+            if should_continue is not None and not should_continue():
+                return {"applied": applied, "failed": failed, "skipped_reason": "Operator stopped scheduled remediation"}
             auto_fix_fn = fix.get("auto_fix")
             if auto_fix_fn:
                 success, message = auto_fix_fn()
@@ -2055,16 +2114,18 @@ def api_test_cloudflare():
     ok, msg = cf.validate_connection()
     zone = (cf.zone_name or "").strip().lower().rstrip(".")
 
-    # Granular permission probing
-    perms = {"zone_read": ok, "dns_edit": False, "workers": False}
+    # Listing resources proves read access, never write permission. Keep legacy
+    # keys, but use null for the write capabilities this read-only check cannot test.
+    perms = {"zone_read": ok, "dns_read": False, "dns_edit": None,
+             "workers": False, "workers_edit": None}
     account_id = None
     if ok:
-        # Test DNS edit by listing records (safe read operation)
+        # Read-only DNS access probe.
         try:
             import requests as _req
             _h = {"Authorization": f"Bearer {cf.api_token}", "Content-Type": "application/json"}
             dr = _req.get(f"{cf.base_url}?per_page=1", headers=_h, timeout=8)
-            perms["dns_edit"] = dr.json().get("success", False)
+            perms["dns_read"] = dr.json().get("success", False)
         except Exception:
             pass
 
@@ -2084,16 +2145,16 @@ def api_test_cloudflare():
             except Exception:
                 pass
 
-    # Build feature availability summary
+    # Describe observations, not untested ability to deploy or edit resources.
     features = []
-    if perms["dns_edit"]:
-        features.append("SPF, DMARC, DKIM, TLS-RPT, MTA-STS DNS")
+    if perms["dns_read"]:
+        features.append("DNS records readable")
     if perms["workers"]:
-        features.append("MTA-STS HTTPS auto-hosting")
+        features.append("Worker scripts readable")
 
     return {
         "ok": ok,
-        "message": msg,
+        "message": msg + ". This is a read-only check; write permission is not tested.",
         "zone_name": zone,
         "workers": perms["workers"],
         "permissions": perms,
@@ -2160,10 +2221,21 @@ async def _monitoring_loop():
 
             data_generation = db.get_data_generation()
 
+            def cycle_active():
+                return (
+                    db.get_data_generation() == data_generation
+                    and _is_enabled(db.get_setting("monitoring_enabled", "false"))
+                )
+
             for d in domains:
+                if not cycle_active():
+                    break
                 domain = d["domain"]
                 try:
                     scan_result = await asyncio.to_thread(scan_domain, domain, False)
+                    if not cycle_active():
+                        logger.info("Monitoring cycle stopped after operator settings or data changed")
+                        break
                     scan_result["domain"] = domain
                     evaluation = evaluate(scan_result)
                     grade = evaluation.get("grade", "F")
@@ -2179,6 +2251,18 @@ async def _monitoring_loop():
                     if not persisted:
                         logger.info("Monitoring cycle cancelled after scan data changed")
                         break
+
+                    if scan_result.get("scan_incomplete"):
+                        db.create_alert(
+                            domain=domain,
+                            alert_type="scan_incomplete",
+                            severity="WARN",
+                            message=f"Some checks for {domain} could not finish; no grade or automatic fixes were applied.",
+                            details="Retry the scan and check network availability.",
+                            expected_generation=data_generation,
+                        )
+                        await asyncio.sleep(2)
+                        continue
 
                     # Detect drift against the snapshot read at cycle start.
                     prev_grade = d.get("last_grade")
@@ -2214,11 +2298,14 @@ async def _monitoring_loop():
                     if grade not in ("A+", "A") and _is_enabled(
                         db.get_setting("automatic_remediation", "false")
                     ):
-                        if db.get_data_generation() != data_generation:
+                        if not cycle_active():
                             logger.info("Automatic remediation cancelled after scan data changed")
                             break
                         fix_result = await asyncio.to_thread(
-                            _auto_fix_domain, domain, scan_result
+                            _auto_fix_domain, domain, scan_result,
+                            should_continue=lambda: cycle_active() and _is_enabled(
+                                db.get_setting("automatic_remediation", "false")
+                            ),
                         )
                         if fix_result.get("applied"):
                             fix_types = [f["type"] for f in fix_result["applied"]]
@@ -2232,7 +2319,11 @@ async def _monitoring_loop():
                             )
                             # Rescan after fix to update grade
                             await asyncio.sleep(2)
+                            if not cycle_active():
+                                break
                             rescan = await asyncio.to_thread(scan_domain, domain, False)
+                            if not cycle_active():
+                                break
                             rescan["domain"] = domain
                             re_eval = evaluate(rescan)
                             post_fix_saved = db.write_scan_results(
@@ -4795,10 +4886,7 @@ async def api_scan(request: Request):
     if not HAS_SCANNER:
         raise HTTPException(status_code=501, detail="Scanner module not available")
 
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    body = await json_object(request)
 
     domains = body.get("domains", [])
     if not domains:
@@ -4806,6 +4894,8 @@ async def api_scan(request: Request):
 
     if isinstance(domains, str):
         domains = [domains]
+    if not isinstance(domains, list):
+        raise HTTPException(status_code=400, detail="domains must be a list of domain names")
 
     # Limit to prevent abuse
     if len(domains) > 20:
@@ -4943,6 +5033,26 @@ async def api_apply_fix(request: Request):
 
     Requires CF_API_TOKEN and CF_ZONE_ID environment variables.
     """
+    body = await json_object(request)
+    domain, error = _sanitize_domain(body.get("domain"))
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+    requested = body.get("fix_types")
+    if requested is not None and (
+        not isinstance(requested, list)
+        or not requested
+        or any(not isinstance(item, str) or item not in {
+            "SPF", "DMARC", "DKIM", "TLS-RPT", "MTA-STS", "MTA-STS-HTTPS",
+        } for item in requested)
+    ):
+        raise HTTPException(status_code=400, detail="fix_types must be a non-empty list of supported fixes")
+    # Provider requests, DNS scans and propagation waits are synchronous. Keep
+    # them off the event loop so sign-in, health and other pages remain usable.
+    return await asyncio.to_thread(_apply_fix_sync, domain, requested)
+
+
+def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Dict:
+    """Run one already-validated remediation request in a worker thread."""
     if not HAS_DNS_FIX:
         raise HTTPException(status_code=501, detail="DNS fix module not available")
 
@@ -4967,14 +5077,6 @@ async def api_apply_fix(request: Request):
             status_code=503, detail=f"Cloudflare connection failed: {msg}"
         )
 
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    domain, d_err = _sanitize_domain(body.get("domain"))
-    if d_err:
-        raise HTTPException(status_code=400, detail=d_err)
     persistence_db = get_database() if HAS_DB else None
     data_generation = (
         persistence_db.get_data_generation() if persistence_db else None
@@ -4984,8 +5086,6 @@ async def api_apply_fix(request: Request):
     owned, ownership_msg = cf.verify_domain_ownership(domain)
     if not owned:
         raise HTTPException(status_code=403, detail=ownership_msg)
-
-    requested_fix_types = body.get("fix_types", None)
 
     # First scan the domain to see what needs fixing
     if not HAS_SCANNER:
@@ -5049,6 +5149,7 @@ async def api_apply_fix(request: Request):
     # so we can report the *actual* improvement (or surface propagation lag).
     post_fix_eval = {}
     verification_note = ""
+    verification_status = "not_run"
     history_saved = False
     cf_verified = []  # records confirmed via Cloudflare API
     if applied_fixes:
@@ -5083,9 +5184,7 @@ async def api_apply_fix(request: Request):
         # DNS cache immediately after fixes are applied.
         try:
             pre_score = pre_fix_eval.get("score", 0)
-            best_scan = None
-            best_eval = {}
-            best_score = -1
+            post_scan = None
             attempts = [0, 8, 18, 30, 45, 60]  # cumulative wait for DNS propagation
 
             def _strong_demo_state(scan: Dict) -> bool:
@@ -5103,37 +5202,48 @@ async def api_apply_fix(request: Request):
                 cur_scan["domain"] = domain
                 cur_eval = evaluate(cur_scan)
                 cur_score = cur_eval.get("score", 0)
-                if cur_score > best_score:
-                    best_score = cur_score
-                    best_scan = cur_scan
-                    best_eval = cur_eval
-                if cur_score > pre_score and _strong_demo_state(cur_scan):
+                # Keep the latest observation, including regressions/timeouts.
+                # Choosing the highest score hides a later failure.
+                post_scan = cur_scan
+                post_fix_eval = cur_eval
+                if not cur_scan.get("scan_incomplete") and cur_score > pre_score and _strong_demo_state(cur_scan):
                     break
 
-            post_scan = best_scan or scan_result
-            post_fix_eval = best_eval or pre_fix_eval
             post_score = post_fix_eval.get("score", 0)
-            if post_score > pre_score:
+            if post_scan.get("scan_incomplete"):
+                verification_status = "incomplete"
+                verification_note = (
+                    "Changes were submitted, but the latest verification scan was incomplete. "
+                    "No post-change grade is available. Retry the scan before relying on these changes."
+                )
+            elif post_score > pre_score:
+                verification_status = "observed"
                 verification_note = (
                     f"Score improved from {pre_score} to {post_score} "
-                    f"(Grade {pre_fix_eval.get('grade', '?')} &#8594; {post_fix_eval.get('grade', '?')}). "
-                    "DNS changes verified."
+                    f"(Grade {pre_fix_eval.get('grade', '?')} to {post_fix_eval.get('grade', '?')}). "
+                    "The latest public scan observed an improvement; review the individual records."
                 )
             elif post_score == pre_score and cf_verified:
+                verification_status = "pending"
                 verification_note = (
-                    "DNS changes confirmed on Cloudflare &#8212; "
+                    "Cloudflare currently reports these records: "
                     + "; ".join(cf_verified)
-                    + ". DNS resolvers may still show old values for up to 60 seconds."
+                    + ". The public scan score is unchanged; cached DNS answers can take longer to update."
                 )
             elif post_score == pre_score:
+                verification_status = "pending"
                 verification_note = (
                     "DNS changes submitted to Cloudflare but the verification "
-                    "scan still sees the old values. This is normal &#8212; Cloudflare "
-                    "edge propagation can take 30&#8211;120 seconds. Click Rescan in a "
-                    "moment to see the updated grade."
+                    "scan score is unchanged. Review the records and rescan after cached DNS answers expire."
                 )
-            # Persist improved result if better
-            if persistence_db and post_score >= pre_score:
+            else:
+                verification_status = "observed"
+                verification_note = (
+                    f"The latest verification score is lower: {pre_score} to {post_score}. "
+                    "Review the new findings and DNS records before making further changes."
+                )
+            # Persist the actual latest observation, not only favourable results.
+            if persistence_db:
                 try:
                     history_saved = persistence_db.write_scan_results(
                         [(domain, post_scan, post_fix_eval)],
@@ -5151,7 +5261,8 @@ async def api_apply_fix(request: Request):
                     logger.exception("Could not persist post-fix verification for %s", domain)
         except Exception:
             logger.exception("Post-fix verification scan failed for %s", domain)
-            verification_note = "Post-fix verification scan failed. Review server logs."
+            verification_status = "failed"
+            verification_note = "Changes were submitted, but post-fix verification failed. No post-change grade is available. Review server logs and rescan."
 
     # Use post-fix evaluation if available, otherwise pre-fix
     final_eval = post_fix_eval if post_fix_eval else pre_fix_eval
@@ -5168,18 +5279,23 @@ async def api_apply_fix(request: Request):
     else:
         status = "failed"
 
+    uncertain = bool(scan_result.get("scan_incomplete")) or verification_status in {"incomplete", "failed"}
+    if applied_fixes and uncertain:
+        status = "partial"
+
     return {
         "status": status,
         "domain": domain,
         "applied": applied_fixes,
         "failed": failed_fixes,
         "manual_actions": manual_actions,
-        "grade": final_eval.get("grade", ""),
-        "score": final_eval.get("score", 0),
+        "grade": None if uncertain else final_eval.get("grade", ""),
+        "score": None if uncertain else final_eval.get("score", 0),
         "violations": final_eval.get("violation_count", 0),
         "pre_fix_grade": pre_fix_eval.get("grade", ""),
         "pre_fix_score": pre_fix_eval.get("score", 0),
         "verification": verification_note,
+        "verification_status": verification_status,
         "history_saved": history_saved,
         "cf_verified": cf_verified,
         "cloudflare_zone": msg,
@@ -7372,8 +7488,8 @@ def settings_page():
                 const cross = '<span style="color:var(--danger);font-weight:700;">&#10007;</span>';
                 let html = '';
                 html += '<div>' + (p.zone_read ? tick : cross) + ' <span class="perm-tag">Zone : Zone : Read</span> Zone verification</div>';
-                html += '<div>' + (p.dns_edit ? tick : cross) + ' <span class="perm-tag">Zone : DNS : Edit</span> SPF, DMARC, DKIM, TLS-RPT, MTA-STS records</div>';
-                html += '<div>' + (p.workers ? tick : cross) + ' <span class="perm-tag">Account : Workers Scripts : Edit</span> MTA-STS HTTPS auto-hosting';
+                html += '<div>' + (p.dns_read ? tick : cross) + ' <span class="perm-tag">Zone : DNS : Read</span> DNS records readable; write permission not tested</div>';
+                html += '<div>' + (p.workers ? tick : cross) + ' <span class="perm-tag">Account : Workers Scripts : Read</span> Script listing only; deployment not tested';
                 if (!p.workers) {{
                     html += ' <span style="color:var(--warning);font-size:0.78rem;margin-left:6px;">&#8212; update your token to enable this</span>';
                 }}
@@ -7381,9 +7497,9 @@ def settings_page():
                 permList.innerHTML = html;
 
                 if (data.features && data.features.length) {{
-                    featList.innerHTML = '&#128295; <strong>Available auto-fix features:</strong> ' + data.features.map(escapeHtml).join(', ');
+                    featList.innerHTML = '<strong>Read-only checks:</strong> ' + data.features.map(escapeHtml).join(', ');
                 }} else {{
-                    featList.innerHTML = '&#9888;&#65039; No auto-fix features available. Check your token permissions.';
+                    featList.innerHTML = 'No resource read access confirmed. Check token permissions in Cloudflare before applying changes.';
                 }}
                 permBox.style.display = 'block';
             }} else {{

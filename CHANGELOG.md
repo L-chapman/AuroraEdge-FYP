@@ -4,13 +4,21 @@ This project follows semantic versioning from the NorthFlux Security rename onwa
 
 ## 4.0.0 - Unreleased
 
+- Completed a deep-debug pass with fail-first regressions and a [plain-language review](docs/DEEP_DEBUG_REVIEW.md) distinguishing fixed faults, measured coverage and launch limitations.
+- Added bounded public-only scanner connections, HTTPS certificate checks, stricter policy parsing and explicit incomplete-scan handling throughout storage, React and reports.
+- Made DNS prerequisites fail closed on failed/ambiguous reads and preserved conflicting infrastructure; removed guessed SPF/provider and DKIM automation.
+- Stopped selecting the highest post-change scan score, preserved later regressions, and prevented incomplete verification from claiming success or a grade.
+- Added monitoring cancellation checks after slow scans/provider reads and before fix callbacks, with tests for disabling/removing domains during work.
+- Hardened request sizes/types, Unicode credential comparisons and atomic settings saves; moved slow manual remediation off the request event loop.
+- Fixed stale authentication responses, domain-detail state, generated TXT/mailto edge cases, PDF overflow/missing evidence and CLI/report value handling.
+- Strengthened installed-dependency checks and source archive safeguards, fixed browser-test Python paths with spaces, and removed duplicate feature-branch push/PR CI runs.
 - Added one shared Windows/Linux local launcher with clear prerequisite checks, non-destructive environment handling, a custom port, and an isolated startup check.
 - Added fresh-checkout startup CI on Windows and Linux with Node 22.12/24, plus Windows Chromium UI coverage.
 - Refined the React interface with a local SVG identity, simpler explanations, restrained movement, readable text throughout transitions, keyboard navigation, and reduced-motion support.
 - Fixed recoverable sign-out failures, malformed domain-route handling, misleading history-error states, and a validation-library CSP conflict without weakening browser security.
 - Fixed settings-form initialisation and refresh races: saved values are present before editing, drafts survive refreshes, and controls are locked while saving.
 - Fixed a WebKit click race caused by smooth page scrolling moving controls during a click; visual transitions remain enabled with reduced-motion support.
-- Expanded the suite to 472 Python and 72 frontend tests, with 12 browser checks per profile including 320px layout, keyboard and CSP regressions.
+- The preceding launch-polish milestone expanded the suite to 472 Python and 72 frontend tests, with 12 browser checks per profile including 320px layout, keyboard and CSP regressions; the deep-debug review records the newer suite.
 - Made source packaging preserve the last archive when checkout validation fails and explicitly require PowerShell 7.
 - Added a plain-language project tour, clearer Windows/Linux setup and testing guidance, and a configuration reference separate from the main overview.
 - Grouped the original academic documents, progress records, and figures in `docs/academic/archive/`, preserving the earlier work and repairing references.

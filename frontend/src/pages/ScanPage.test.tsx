@@ -42,6 +42,21 @@ afterEach(() => {
 })
 
 describe('ScanPage completed-result state', () => {
+  it('does not present a confident grade or offer DNS changes when essential checks were incomplete', async () => {
+    const payload = successfulScan('example.com')
+    Object.assign(payload.results[0]!.scan, { scan_incomplete: true, notes: ['SPF lookup timed out.'] })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(payload))
+    const user = userEvent.setup()
+    renderScanner()
+    await user.type(screen.getByLabelText('Domain'), 'example.com')
+    await user.click(screen.getByRole('button', { name: 'Run security scan' }))
+    expect(await screen.findByRole('heading', { name: 'example.com' })).toBeVisible()
+    expect(screen.getByLabelText('Scan incomplete; no security grade is available')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('SPF lookup timed out.')
+    expect(screen.getByRole('button', { name: 'Plan DNS fix' })).toBeDisabled()
+    expect(screen.queryByLabelText('Grade A, score 90 out of 100')).not.toBeInTheDocument()
+  })
+
   it('keeps report availability tied to the server-confirmed result', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(successfulScan('example.com')))
     const user = userEvent.setup()

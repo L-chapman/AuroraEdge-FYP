@@ -159,6 +159,67 @@ def test_failed_build_does_not_cache_success(project, monkeypatch):
     assert not (project / ".venv/.northflux-setup.json").exists()
 
 
+def test_changed_installed_python_version_invalidates_setup_cache(project, monkeypatch):
+    python = launch.venv_python(project)
+    python.parent.mkdir(parents=True)
+    python.touch()
+    calls = []
+    inventory = ["original-pinned-environment"]
+
+    def fake_run(command, cwd, **kwargs):
+        calls.append(command)
+        if command[-1] == launch.ENVIRONMENT_PROBE:
+            return inventory[0]
+        return "v24.0.0" if command[-1] == "--version" else ""
+
+    monkeypatch.setattr(launch, "run", fake_run)
+    monkeypatch.setattr(launch, "npm_command", lambda *args: ["npm"])
+    launch.prepare(project, "node", "npm")
+    calls.clear()
+    # Imports and pip check can still pass after replacing a directly pinned
+    # package with a different, internally compatible version.
+    inventory[0] = "manually-changed-package-version"
+    launch.prepare(project, "node", "npm")
+    assert any("install" in command for command in calls)
+
+
+def test_inconsistent_new_python_install_is_not_cached(project, monkeypatch):
+    python = launch.venv_python(project)
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    def fake_run(command, cwd, **kwargs):
+        if command[-2:] == ["pip", "check"]:
+            raise launch.LaunchError("inconsistent dependencies")
+        return "v24.0.0" if command[-1] == "--version" else ""
+
+    monkeypatch.setattr(launch, "run", fake_run)
+    with pytest.raises(launch.LaunchError, match="inconsistent dependencies"):
+        launch.prepare(project, "node", "npm")
+    assert not (project / ".venv/.northflux-setup.json").exists()
+
+
+def test_incomplete_cached_frontend_install_is_repaired(project, monkeypatch):
+    python = launch.venv_python(project)
+    python.parent.mkdir(parents=True)
+    python.touch()
+    calls = []
+
+    def fake_run(command, cwd, **kwargs):
+        calls.append(command)
+        if command[1:2] == ["ls"]:
+            raise launch.LaunchError("missing TypeScript despite existing Vite")
+        return "v24.0.0" if command[-1] == "--version" else ""
+
+    monkeypatch.setattr(launch, "run", fake_run)
+    monkeypatch.setattr(launch, "npm_command", lambda *args: ["npm"])
+    launch.prepare(project, "node", "npm")
+    calls.clear()
+    launch.prepare(project, "node", "npm")
+    assert ["npm", "ls", "--depth=0", "--json"] in calls
+    assert ["npm", "ci"] in calls
+
+
 def test_local_environment_preserves_auth_and_does_not_read_dotenv(project, monkeypatch):
     monkeypatch.setenv("DASH_TOKEN", "user-supplied-token")
     (project / ".env").write_text("DASH_TOKEN=must-not-load", encoding="utf-8")

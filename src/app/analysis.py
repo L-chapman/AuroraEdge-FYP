@@ -1,7 +1,10 @@
 """Statistics and chart helpers used in NorthFlux Security reports."""
 
 import csv
+import html
 import logging
+import math
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
@@ -28,7 +31,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[2]
 REPORTS_ROOT = REPORTS_DIR
 REPORTS = REPORTS_ROOT / "indexed"
-FIGURES = ROOT / "docs" / "figures"
+FIGURES = REPORTS_ROOT / "figures"
 
 
 def ensure_figures_dir():
@@ -38,11 +41,18 @@ def ensure_figures_dir():
 
 def load_latest_csv() -> List[Dict]:
     """Load the most recent CSV report."""
-    csvs = sorted(REPORTS.glob("*_results_*.csv"), key=lambda p: p.name, reverse=True)
-    if not csvs:
-        csvs = sorted(
-            REPORTS_ROOT.glob("*_results_*.csv"), key=lambda p: p.name, reverse=True
-        )
+    candidates = list(REPORTS.glob("*_results_*.csv")) + list(REPORTS_ROOT.glob("*_results_*.csv"))
+
+    def report_time(path: Path) -> float:
+        match = re.search(r"_results_(\d{8}_\d{6})\.csv$", path.name)
+        if match:
+            try:
+                return datetime.strptime(match[1], "%Y%m%d_%H%M%S").replace(tzinfo=timezone.utc).timestamp()
+            except ValueError:
+                pass
+        return path.stat().st_mtime
+
+    csvs = sorted(candidates, key=report_time, reverse=True)
     if not csvs:
         return []
 
@@ -63,18 +73,45 @@ def _median(values: List[float]) -> float:
     return s[mid]
 
 
+def _scores(rows: List[Dict]) -> List[float]:
+    """Ignore missing/non-finite values without losing genuine zero scores."""
+    scores = []
+    for row in rows:
+        try:
+            value = float(row.get("score"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            scores.append(value)
+    return scores
+
+
+def _present(value) -> bool:
+    """Accept the booleans used by scans and their CSV/SQLite representations."""
+    return value is True or value == 1 or (isinstance(value, str) and value.strip().lower() in {"true", "1", "yes"})
+
+
+def _chart_output(output_path: Optional[Path], filename: str) -> Path:
+    selected = output_path if output_path is not None else FIGURES / filename
+    selected.parent.mkdir(parents=True, exist_ok=True)
+    return selected
+
+
+def _report_cell(value) -> str:
+    """Render externally observed values as plain Markdown table text."""
+    text = html.escape("" if value is None else str(value), quote=False)
+    for character in "\\`*_[]()!|":
+        text = text.replace(character, "\\" + character)
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+
 def calculate_statistics(rows: List[Dict]) -> Dict:
     """Calculate aggregate statistics from scan results."""
     if not rows:
         return {}
 
     # Score statistics
-    scores = []
-    for r in rows:
-        try:
-            scores.append(float(r.get("score", 0)))
-        except (ValueError, TypeError):
-            continue
+    scores = _scores(rows)
 
     # Grade distribution
     grade_counts = Counter(r.get("grade", "F") for r in rows)
@@ -92,18 +129,18 @@ def calculate_statistics(rows: List[Dict]) -> Dict:
 
     # Check presence rates
     checks = {
-        "spf": sum(1 for r in rows if r.get("spf_present") == "True"),
-        "dmarc": sum(1 for r in rows if r.get("dmarc_present") == "True"),
-        "dkim": sum(1 for r in rows if r.get("dkim_present") == "True"),
-        "mta_sts": sum(1 for r in rows if r.get("mta_sts_present") == "True"),
-        "tls_rpt": sum(1 for r in rows if r.get("tls_rpt_present") == "True"),
+        "spf": sum(1 for r in rows if _present(r.get("spf_present"))),
+        "dmarc": sum(1 for r in rows if _present(r.get("dmarc_present"))),
+        "dkim": sum(1 for r in rows if _present(r.get("dkim_present"))),
+        "mta_sts": sum(1 for r in rows if _present(r.get("mta_sts_present"))),
+        "tls_rpt": sum(1 for r in rows if _present(r.get("tls_rpt_present"))),
     }
 
     # DMARC policy distribution
     dmarc_policies = Counter()
     for r in rows:
-        if r.get("dmarc_present") == "True":
-            pol = r.get("dmarc_policy", "unknown").lower()
+        if _present(r.get("dmarc_present")):
+            pol = str(r.get("dmarc_policy") or "unknown").strip().lower()
             dmarc_policies[pol] += 1
 
     return {
@@ -129,8 +166,7 @@ def generate_grade_chart(
         logger.warning("matplotlib not installed - cannot generate charts")
         return None
 
-    ensure_figures_dir()
-    output_path = output_path or FIGURES / "grade_distribution.png"
+    output_path = _chart_output(output_path, "grade_distribution.png")
 
     grades = ["A+", "A", "B", "C", "D", "F"]
     grade_dist = stats.get("grade_distribution", {})
@@ -156,7 +192,7 @@ def generate_grade_chart(
     ax.set_xlabel("Security Grade", fontsize=12)
     ax.set_ylabel("Number of Domains", fontsize=12)
     ax.set_title("Email Security Grade Distribution", fontsize=14, fontweight="bold")
-    ax.set_ylim(0, max(counts) * 1.2 if counts else 10)
+    ax.set_ylim(0, max(counts) * 1.2 if any(counts) else 10)
 
     # Add grid
     ax.yaxis.grid(True, linestyle="--", alpha=0.7)
@@ -177,8 +213,7 @@ def generate_check_presence_chart(
     if not HAS_MATPLOTLIB:
         return None
 
-    ensure_figures_dir()
-    output_path = output_path or FIGURES / "check_presence.png"
+    output_path = _chart_output(output_path, "check_presence.png")
 
     checks = ["SPF", "DMARC", "DKIM", "MTA-STS", "TLS-RPT"]
     check_keys = ["spf", "dmarc", "dkim", "mta_sts", "tls_rpt"]
@@ -235,8 +270,7 @@ def generate_violation_chart(
     if not HAS_MATPLOTLIB:
         return None
 
-    ensure_figures_dir()
-    output_path = output_path or FIGURES / "violation_frequency.png"
+    output_path = _chart_output(output_path, "violation_frequency.png")
 
     violations = stats.get("violation_frequency", {})
     if not violations:
@@ -286,8 +320,7 @@ def generate_dmarc_policy_chart(
     if not HAS_MATPLOTLIB:
         return None
 
-    ensure_figures_dir()
-    output_path = output_path or FIGURES / "dmarc_policies.png"
+    output_path = _chart_output(output_path, "dmarc_policies.png")
 
     policies = stats.get("dmarc_policies", {})
     if not policies:
@@ -340,15 +373,9 @@ def generate_score_histogram(
     if not HAS_MATPLOTLIB:
         return None
 
-    ensure_figures_dir()
-    output_path = output_path or FIGURES / "score_histogram.png"
+    output_path = _chart_output(output_path, "score_histogram.png")
 
-    scores = []
-    for r in rows:
-        try:
-            scores.append(float(r.get("score", 0)))
-        except (ValueError, TypeError):
-            continue
+    scores = _scores(rows)
 
     if not scores:
         return None
@@ -356,7 +383,7 @@ def generate_score_histogram(
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Create histogram with custom bins
-    bins = [0, 20, 40, 60, 75, 85, 95, 100]
+    bins = [0, 40, 60, 75, 85, 95, 100]
     n, bins_out, patches = ax.hist(scores, bins=bins, edgecolor="black", linewidth=1.2)
 
     # Color bins by score range
@@ -364,7 +391,6 @@ def generate_score_histogram(
         "#ef4444",
         "#fb923c",
         "#fbbf24",
-        "#fcd34d",
         "#22d3ee",
         "#4ade80",
         "#22c55e",
@@ -446,7 +472,8 @@ def generate_summary_report(
     if rows is None:
         rows = load_latest_csv()
 
-    output_path = output_path or ROOT / "docs" / "SCAN_ANALYSIS.md"
+    output_path = output_path if output_path is not None else REPORTS_ROOT / "northflux_analysis.md"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     stats = calculate_statistics(rows)
 
     lines = [
@@ -509,7 +536,7 @@ def generate_summary_report(
 
     violations = stats.get("violation_frequency", {})
     for v, count in list(violations.items())[:10]:
-        lines.append(f"| {v} | {count} |")
+        lines.append(f"| {_report_cell(v)} | {count} |")
 
     lines.extend(
         [
@@ -523,7 +550,7 @@ def generate_summary_report(
 
     dmarc = stats.get("dmarc_policies", {})
     for pol, count in dmarc.items():
-        lines.append(f"| p={pol} | {count} |")
+        lines.append(f"| p={_report_cell(pol)} | {count} |")
 
     lines.extend(
         [

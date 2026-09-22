@@ -65,6 +65,7 @@ class ManagedDomainResponse(StrictApiModel):
     last_scan_at: Optional[datetime] = None
     last_grade: Optional[Grade] = None
     last_score: Optional[int] = Field(default=None, ge=0, le=100)
+    last_scan_incomplete: bool = False
     previous_grade: Optional[Grade] = None
     previous_score: Optional[int] = Field(default=None, ge=0, le=100)
     notes: str

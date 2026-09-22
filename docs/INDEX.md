@@ -8,6 +8,7 @@ Start with the guide that matches what you want to do. The everyday guides expla
 | Review the features and the engineering behind them | [Project tour](PROJECT_TOUR.md) |
 | Run a private, lasting installation | [Deployment](DEPLOYMENT.md) |
 | See what has actually been tested, or run the checks | [Testing](TESTING.md) |
+| Read the deep-debug findings, fixes and next priorities | [Deep-debug review](DEEP_DEBUG_REVIEW.md) |
 | Understand the code and design decisions | [Architecture](ARCHITECTURE.md) |
 | Connect Cloudflare or a mail system | [Integrations](INTEGRATIONS.md) |
 | Understand what data is kept | [Privacy](PRIVACY.md) |

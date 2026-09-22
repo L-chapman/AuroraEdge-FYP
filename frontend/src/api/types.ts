@@ -37,6 +37,7 @@ export interface DomainSummary {
   last_scan_at?: string | null
   last_grade?: string | null
   last_score?: number | null
+  last_scan_incomplete?: boolean
   previous_grade?: string | null
   previous_score?: number | null
   notes?: string

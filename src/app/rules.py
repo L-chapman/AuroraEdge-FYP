@@ -517,13 +517,18 @@ def evaluate(result: Dict) -> Dict:
     else:
         grade = "F"
 
+    incomplete = bool(result.get("scan_incomplete"))
+    if incomplete:
+        advice = "Incomplete scan: observations and any calculated score are provisional. " + str(result.get("notes") or "Review the scan errors and retry.")
+
     return {
-        "severity": top[1],
+        "severity": "ERROR" if incomplete else top[1],
         "violations": violations,
         "advice": advice,
         "score": score,
         "grade": grade,
         "violation_count": len(hits),
+        "scan_incomplete": incomplete,
     }
 
 

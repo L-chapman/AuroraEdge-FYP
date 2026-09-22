@@ -65,18 +65,25 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
       credentials: 'same-origin',
     })
   } catch {
+    options.signal?.throwIfAborted()
     throw new ApiError(0, 'NorthFlux could not reach the service. Check your connection and try again.')
   }
 
+  options.signal?.throwIfAborted()
   const contentType = response.headers.get('content-type') ?? ''
+  let unreadable = false
   const payload: unknown = contentType.includes('application/json')
-    ? await response.json().catch(() => null)
+    ? await response.json().catch(() => { unreadable = true; return null })
     : await response.text().catch(() => '')
 
+  // Cancellation also applies while a response body is being read. An old
+  // request must not invalidate a newer session when its late 401 arrives.
+  options.signal?.throwIfAborted()
   if (!response.ok) {
     if (response.status === 401) unauthorizedHandler?.()
     throw new ApiError(response.status, errorDetail(payload, response.statusText || 'Request failed'))
   }
+  if (unreadable) throw new ApiError(502, 'NorthFlux received an unreadable response from the service. Please try again.')
 
   return payload as T
 }

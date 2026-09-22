@@ -2,6 +2,7 @@
 
 import argparse
 import csv as csv_mod
+import html
 import logging
 import sys
 from datetime import datetime, timezone
@@ -165,6 +166,35 @@ def scan_domains(
             logger.warning(f"Could not initialise database: {e}")
             db = None
 
+    def scan_one(domain: str) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+        try:
+            res = scan_domain(domain, check_starttls=check_starttls)
+            ev = evaluate(res)
+        except Exception as e:
+            logger.error("Error scanning %s: %s", domain, e)
+            return (
+                domain,
+                {"error": str(e), "scan_incomplete": True},
+                {"severity": "CRITICAL", "score": 0, "grade": "F",
+                 "violations": "", "violation_count": 0, "advice": str(e)},
+            )
+
+        # Storage failure does not invalidate an otherwise completed scan.
+        # Keep its one report row and make the missing history explicit.
+        if db and scan_id:
+            try:
+                db.save_result(scan_id, domain, res, ev)
+            except Exception as e:
+                logger.warning("Scan result for %s was not saved to the database: %s", domain, e)
+                res = {
+                    **res,
+                    "notes": "; ".join(filter(None, [
+                        str(res.get("notes") or ""),
+                        "Scan completed, but this result was not saved to the database. Check the application log.",
+                    ])),
+                }
+        return domain, res, ev
+
     if HAS_RICH:
         console = Console()
         with Progress(
@@ -178,52 +208,38 @@ def scan_domains(
 
             for domain in targets:
                 progress.update(task, description=f"Scanning {domain}...")
-                try:
-                    res = scan_domain(domain, check_starttls=check_starttls)
-                    ev = evaluate(res)
-                    results.append((domain, res, ev))
-
-                    if db and scan_id:
-                        db.save_result(scan_id, domain, res, ev)
-
-                except Exception as e:
-                    logger.error(f"Error scanning {domain}: {e}")
-                    results.append(
-                        (
-                            domain,
-                            {"error": str(e)},
-                            {"severity": "CRITICAL", "score": 0, "grade": "F",
-                             "violations": "", "violation_count": 0, "advice": str(e)},
-                        )
-                    )
-
+                results.append(scan_one(domain))
                 progress.advance(task)
     else:
         for i, domain in enumerate(targets, 1):
             print(f"[{i}/{len(targets)}] Scanning {domain}...")
-            try:
-                res = scan_domain(domain, check_starttls=check_starttls)
-                ev = evaluate(res)
-                results.append((domain, res, ev))
-
-                if db and scan_id:
-                    db.save_result(scan_id, domain, res, ev)
-
-            except Exception as e:
-                logger.error(f"Error scanning {domain}: {e}")
-                results.append(
-                    (
-                        domain,
-                        {"error": str(e)},
-                        {"severity": "CRITICAL", "score": 0, "grade": "F",
-                         "violations": "", "violation_count": 0, "advice": str(e)},
-                    )
-                )
+            results.append(scan_one(domain))
 
     if db and scan_id:
-        db.complete_scan(scan_id, len(results))
+        try:
+            db.complete_scan(scan_id, len(results))
+        except Exception as e:
+            logger.warning("Could not mark scan complete in the database: %s", e)
 
     return results
+
+
+def _incomplete_result(result: Dict, evaluation: Dict) -> bool:
+    """Either source can carry the scanner's incomplete-state flag."""
+    return bool(result.get("scan_incomplete") or evaluation.get("scan_incomplete"))
+
+
+def _report_notes(result: Dict, evaluation: Dict) -> str:
+    """Retain uncertainty, scan failures and storage warnings in saved reports."""
+    notes = []
+    if _incomplete_result(result, evaluation):
+        notes.append("Incomplete scan: no grade or score assigned. Retry before relying on these observations.")
+    for value in (result.get("notes"), result.get("error")):
+        if value is not None and value != "":
+            text = str(value)
+            if text not in notes:
+                notes.append(text)
+    return "; ".join(notes)
 
 
 def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
@@ -255,16 +271,29 @@ def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
         "starttls_worst",
         "notes",
         "advice",
+        "scan_incomplete",
     ]
 
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv_mod.writer(f)
         writer.writerow(csv_cols)
         for domain, res, ev in rows:
-            combined = {**res, **ev, "domain": domain}
+            incomplete = _incomplete_result(res, ev)
+            combined = {**res, **ev, "domain": domain, "scan_incomplete": incomplete,
+                        "notes": _report_notes(res, ev)}
+            if incomplete:
+                combined.update(grade=None, score=None)
             writer.writerow([
-                str(combined.get(col, "") or "") for col in csv_cols
+                "" if combined.get(col) is None else str(combined[col]) for col in csv_cols
             ])
+
+
+def _markdown_cell(value: Any) -> str:
+    """Keep observed record values as text, not report markup or extra rows."""
+    text = html.escape("" if value is None else str(value), quote=False)
+    for character in "\\`*_[]()!|":
+        text = text.replace(character, "\\" + character)
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
 
 
 def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str):
@@ -272,33 +301,38 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
     lines = [
         "# NorthFlux Security Scan Results",
         "",
-        f"**Scan Time:** {scan_ts} UTC",
+        f"**Scan Time:** {_markdown_cell(scan_ts)} UTC",
         f"**Domains Scanned:** {len(rows)}",
         "",
         "## Summary Statistics",
         "",
+        "Score summaries and grade distribution include only complete scans.",
+        "",
     ]
 
     # Calculate statistics
-    scores = [ev.get("score", 0) for _, _, ev in rows]
-    avg_score = sum(scores) / len(scores) if scores else 0
+    complete_rows = [row for row in rows if not _incomplete_result(row[1], row[2])]
+    scores = [ev.get("score", 0) for _, _, ev in complete_rows]
+    avg_score = f"{sum(scores) / len(scores):.1f}" if scores else "Not available"
 
-    severity_counts = {"OK": 0, "INFO": 0, "WARN": 0, "HIGH": 0, "CRITICAL": 0}
+    severity_counts = {"OK": 0, "INFO": 0, "WARN": 0, "HIGH": 0, "CRITICAL": 0, "ERROR": 0}
     grade_counts = {"A+": 0, "A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
 
-    for _, _, ev in rows:
+    for _, res, ev in rows:
         sev = ev.get("severity", "OK")
-        grade = ev.get("grade", "F")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
-        grade_counts[grade] = grade_counts.get(grade, 0) + 1
+        if not _incomplete_result(res, ev):
+            grade = ev.get("grade", "F")
+            grade_counts[grade] = grade_counts.get(grade, 0) + 1
 
     lines.extend(
         [
             "| Metric | Value |",
             "|--------|-------|",
-            f"| Average Score | {avg_score:.1f} |",
-            f"| Min Score | {min(scores) if scores else 0} |",
-            f"| Max Score | {max(scores) if scores else 0} |",
+            f"| Average Score | {avg_score} |",
+            f"| Min Score | {min(scores) if scores else 'Not available'} |",
+            f"| Max Score | {max(scores) if scores else 'Not available'} |",
+            f"| Incomplete Scans | {len(rows) - len(complete_rows)} |",
             "",
             "### Grade Distribution",
             "",
@@ -318,7 +352,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
             "|----------|-------|",
         ]
     )
-    for sev in ["OK", "INFO", "WARN", "HIGH", "CRITICAL"]:
+    for sev in ["OK", "INFO", "WARN", "HIGH", "CRITICAL", "ERROR"]:
         lines.append(f"| {sev} | {severity_counts.get(sev, 0)} |")
 
     # Detailed results table
@@ -333,6 +367,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
     )
 
     for domain, res, ev in rows:
+        incomplete = _incomplete_result(res, ev)
         spf = "Y" if res.get("spf_present") else "N"
         dmarc = res.get("dmarc_policy", "N") if res.get("dmarc_present") else "N"
         dkim = "Y" if res.get("dkim_present") else "N"
@@ -340,10 +375,19 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         tls = "Y" if res.get("tls_rpt_present") else "N"
         violations = ev.get("violation_count", 0)
 
-        lines.append(
-            f"| {domain} | {ev.get('grade', 'F')} | {ev.get('score', 0)} | {ev.get('severity', 'OK')} | "
-            f"{spf} | {dmarc} | {dkim} | {sts} | {tls} | {violations} |"
-        )
+        cells = (domain, "Incomplete" if incomplete else ev.get("grade", "F"),
+                 "Not available" if incomplete else ev.get("score", 0), ev.get("severity", "OK"),
+                 spf, dmarc, dkim, sts, tls, violations)
+        lines.append("| " + " | ".join(_markdown_cell(cell) for cell in cells) + " |")
+
+    note_rows = [(domain, _report_notes(res, ev), ev.get("advice") or "")
+                 for domain, res, ev in rows]
+    note_rows = [row for row in note_rows if row[1] or row[2]]
+    if note_rows:
+        lines.extend(["", "## Scan Notes & Advice", "",
+                      "| Domain | Notes | Advice |", "|--------|-------|--------|"])
+        for row in note_rows:
+            lines.append("| " + " | ".join(_markdown_cell(cell) for cell in row) + " |")
 
     # Common violations section
     violation_counts = {}
@@ -365,7 +409,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         for v, count in sorted(
             violation_counts.items(), key=lambda x: x[1], reverse=True
         ):
-            lines.append(f"| {v} | {count} |")
+            lines.append(f"| {_markdown_cell(v)} | {count} |")
 
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")

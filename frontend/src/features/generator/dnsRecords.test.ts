@@ -11,6 +11,17 @@ import {
 } from './dnsRecords'
 
 describe('SPF generation', () => {
+  it('splits long zone-file TXT output into strings of at most 255 bytes without changing the record', () => {
+    const result = generateSpf({ domain: 'example.com', includes: '', ipAddresses: Array.from({ length: 24 }, (_, index) => `203.0.113.${index}`).join('\n'), policy: '-all' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.value.length).toBeGreaterThan(255)
+    const strings = [...result.value.zoneFile.matchAll(/"([^"]*)"/g)].map((match) => match[1])
+    expect(strings.length).toBeGreaterThan(1)
+    expect(strings.every((value) => new TextEncoder().encode(value).length <= 255)).toBe(true)
+    expect(strings.join('')).toBe(result.value.value)
+  })
+
   it.each([
     ['203.0.113.10', 'ip4:203.0.113.10'],
     ['198.51.100.0/24', 'ip4:198.51.100.0/24'],
@@ -47,6 +58,18 @@ describe('SPF generation', () => {
 })
 
 describe('DMARC generation', () => {
+  it('accepts an already encoded mailto URI without encoding it twice', () => {
+    const result = generateDmarc({ domain: 'example.com', policy: 'none', subdomainPolicy: '', aggregateEmails: 'mailto:reports%3Fdaily@example.com', forensicEmails: '', percentage: 100 })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.value).toContain('rua=mailto:reports%3Fdaily@example.com')
+  })
+
+  it('encodes mailbox URI delimiters without changing the destination address', () => {
+    const result = generateDmarc({ domain: 'example.com', policy: 'none', subdomainPolicy: '', aggregateEmails: 'reports?daily#tag%quota!@example.com', forensicEmails: '', percentage: 100 })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.value).toContain('rua=mailto:reports%3Fdaily%23tag%25quota%21@example.com')
+  })
+
   it('preserves an explicit zero policy percentage', () => {
     const result = generateDmarc({
       domain: 'example.com',
@@ -118,6 +141,24 @@ describe('MTA-STS generation', () => {
 })
 
 describe('TLS-RPT generation', () => {
+  it('encodes reserved mailbox characters in reporting URIs', () => {
+    const result = generateTlsRpt({ domain: 'example.com', reportEmails: 'reports?daily#tag%quota@example.com' })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.value.value).toContain('rua=mailto:reports%3Fdaily%23tag%25quota@example.com')
+  })
+
+  it.each(['.reports@example.com', 'reports.@example.com', 'reports..daily@example.com'])('rejects invalid dot-atom mailbox %s', (reportEmails) => {
+    expect(generateTlsRpt({ domain: 'example.com', reportEmails }).ok).toBe(false)
+  })
+
+  it.each(['mailto:reports%invalid@example.com', 'mailto:reports?daily@example.com', 'mailto:reports#daily@example.com'])('rejects malformed or unescaped mailto URI %s', (reportEmails) => {
+    expect(generateTlsRpt({ domain: 'example.com', reportEmails }).ok).toBe(false)
+  })
+
+  it('rejects mailbox local parts longer than 64 octets', () => {
+    expect(generateTlsRpt({ domain: 'example.com', reportEmails: `${'a'.repeat(65)}@example.com` }).ok).toBe(false)
+  })
+
   it('creates mailto destinations for comma and line separated addresses', () => {
     const result = generateTlsRpt({
       domain: 'example.com',
@@ -135,6 +176,22 @@ describe('TLS-RPT generation', () => {
   it('requires at least one valid reporting address', () => {
     expect(generateTlsRpt({ domain: 'example.com', reportEmails: '' }).ok).toBe(false)
     expect(generateTlsRpt({ domain: 'example.com', reportEmails: 'invalid' }).ok).toBe(false)
+  })
+})
+
+describe('Generated DNS owner length', () => {
+  const longDomain = `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(55)}`
+  it('rejects a DMARC name whose prefix exceeds the DNS name limit', () => {
+    expect(generateDmarc({ domain: longDomain, policy: 'none', subdomainPolicy: '', aggregateEmails: '', forensicEmails: '', percentage: 100 }).ok).toBe(false)
+  })
+  it('rejects a TLS report name whose prefix exceeds the DNS name limit', () => {
+    expect(generateTlsRpt({ domain: longDomain, reportEmails: 'reports@example.com' }).ok).toBe(false)
+  })
+  it('rejects an MTA-STS name whose prefix exceeds the DNS name limit', () => {
+    expect(generateMtaSts({ domain: longDomain, mode: 'none', mxHosts: '', maxAge: 0, policyId: 'test' }).ok).toBe(false)
+  })
+  it('rejects a BIMI name whose selector and prefix exceed the DNS name limit', () => {
+    expect(generateBimi({ domain: longDomain, selector: 'default', logoUrl: 'https://example.com/logo.svg', certificateUrl: '' }).ok).toBe(false)
   })
 })
 

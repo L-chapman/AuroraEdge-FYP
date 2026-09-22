@@ -3,11 +3,14 @@
 import os
 import json
 import logging
+import re
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from logging.handlers import RotatingFileHandler
 
 from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
+from app.scanner import is_valid_domain
 
 # Optional requests import for Cloudflare API calls
 try:
@@ -38,6 +41,10 @@ _audit_handler = RotatingFileHandler(
 _audit_logger = logging.getLogger("northflux.dns_audit")
 _audit_logger.addHandler(_audit_handler)
 _audit_logger.setLevel(logging.INFO)
+
+
+class DNSReadError(RuntimeError):
+    """A failed prerequisite read must never be treated as an absent record."""
 
 
 class CloudflareDNS:
@@ -169,6 +176,12 @@ class CloudflareDNS:
         domain = domain.strip().lower().rstrip(".")
         zone = (self.zone_name or "").strip().lower().rstrip(".")
 
+        # TXT names legitimately use underscore labels; URL delimiters, control
+        # characters and malformed labels must never enter Cloudflare queries.
+        if (len(domain) > 253 or not all(re.fullmatch(r"[A-Za-z0-9_-]{1,63}", label)
+                                         for label in domain.split("."))):
+            return False, "Invalid DNS record name."
+
         if not zone or zone == "unknown":
             return False, "Could not determine Cloudflare zone name."
 
@@ -185,11 +198,17 @@ class CloudflareDNS:
 
     def get_txt_records(self, name: str) -> List[Dict]:
         """Get all TXT records for a name without assuming the first is ours."""
-        url = f"{self.base_url}?type=TXT&name={name}"
+        url = f"{self.base_url}?{urlencode({'type': 'TXT', 'name': name, 'per_page': 100})}"
         success, result = self._request("GET", url)
-        if success:
-            return list(result.get("result") or [])
-        return []
+        if not success or not isinstance(result.get("result"), list):
+            raise DNSReadError(f"Could not read existing TXT records for {name}; no changes made.")
+        try:
+            complete = int((result.get("result_info") or {}).get("total_pages", 1)) <= 1
+        except (TypeError, ValueError):
+            complete = False
+        if not complete:
+            raise DNSReadError(f"TXT record lookup for {name} was incomplete; review the records manually.")
+        return result["result"]
 
     def get_txt_record(self, name: str, content_prefix: str = "") -> Optional[Dict]:
         """Get one TXT record, optionally selecting by protocol prefix."""
@@ -222,9 +241,13 @@ class CloudflareDNS:
             return False, ownership_message
 
         protocol_prefix = content.split(";", 1)[0].split(" ", 1)[0].strip().lower()
+        try:
+            records = self.get_txt_records(name)
+        except DNSReadError as exc:
+            return False, str(exc)
         matching = [
             record
-            for record in self.get_txt_records(name)
+            for record in records
             if str(record.get("content", "")).strip().lower().startswith(protocol_prefix)
         ]
         if len(matching) > 1:
@@ -337,7 +360,10 @@ class CloudflareDNS:
             return False, msg
 
         dmarc_name = f"_dmarc.{domain}"
-        existing = self.get_txt_record(dmarc_name, "v=dmarc1")
+        try:
+            existing = self.get_txt_record(dmarc_name, "v=dmarc1")
+        except DNSReadError as exc:
+            return False, str(exc)
         preserved = {}
         if existing:
             for part in str(existing.get("content", "")).split(";"):
@@ -524,9 +550,11 @@ class CloudflareDNS:
 
     def get_cname_record(self, name: str) -> Optional[Dict]:
         """Get existing CNAME record by name."""
-        url = f"{self.base_url}?type=CNAME&name={name}"
+        url = f"{self.base_url}?{urlencode({'type': 'CNAME', 'name': name})}"
         success, result = self._request("GET", url)
-        if success and result.get("result"):
+        if not success or not isinstance(result.get("result"), list):
+            raise DNSReadError(f"Could not read existing CNAME records for {name}; no changes made.")
+        if result["result"]:
             return result["result"][0]
         return None
 
@@ -548,7 +576,10 @@ class CloudflareDNS:
         ok, ownership_message = self._ensure_ownership(name)
         if not ok:
             return False, ownership_message
-        existing = self.get_cname_record(name)
+        try:
+            existing = self.get_cname_record(name)
+        except DNSReadError as exc:
+            return False, str(exc)
         old_value = existing.get("content", "") if existing else ""
 
         data = {
@@ -582,10 +613,24 @@ class CloudflareDNS:
     # -----------------------------------------------------------------
 
     def get_a_record(self, name: str) -> Optional[Dict]:
-        """Get existing A record by name."""
-        url = f"{self.base_url}?type=A&name={name}"
+        """Return an unambiguous complete A lookup, never an arbitrary first row."""
+        url = f"{self.base_url}?{urlencode({'type': 'A', 'name': name, 'per_page': 100})}"
         success, result = self._request("GET", url)
-        if success and result.get("result"):
+        if not success or not isinstance(result.get("result"), list):
+            raise DNSReadError(f"Could not read existing A records for {name}; no changes made.")
+        records = result["result"]
+        try:
+            metadata = result.get("result_info") or {}
+            complete = (
+                0 <= int(metadata.get("total_pages", 1)) <= 1
+                and int(metadata.get("page", 1)) == 1
+                and int(metadata.get("total_count", len(records))) == len(records)
+            )
+        except (AttributeError, TypeError, ValueError):
+            complete = False
+        if not complete or len(records) > 1:
+            raise DNSReadError(f"A record lookup for {name} is ambiguous or incomplete; review the records manually.")
+        if result["result"]:
             return result["result"][0]
         return None
 
@@ -604,7 +649,13 @@ class CloudflareDNS:
         Returns:
             Tuple of (success, message)
         """
-        existing = self.get_a_record(name)
+        ok, ownership_message = self._ensure_ownership(name)
+        if not ok:
+            return False, ownership_message
+        try:
+            existing = self.get_a_record(name)
+        except DNSReadError as exc:
+            return False, str(exc)
         old_value = existing.get("content", "") if existing else ""
 
         data = {
@@ -635,7 +686,12 @@ class CloudflareDNS:
 
     def _delete_a_record(self, name: str) -> None:
         """Delete any A records matching *name* (best-effort, no error raised)."""
-        existing = self.get_a_record(name)
+        if not self._ensure_ownership(name)[0]:
+            return
+        try:
+            existing = self.get_a_record(name)
+        except DNSReadError:
+            return
         if existing:
             url = f"{self.base_url}/{existing['id']}"
             self._request("DELETE", url)
@@ -720,6 +776,14 @@ class CloudflareDNS:
         Returns:
             Tuple of (success, message)
         """
+        ok, ownership_message = self._ensure_ownership(domain)
+        if not ok:
+            return False, ownership_message
+        if not is_valid_domain(domain):
+            return False, "A valid domain is required before Worker deployment."
+        mx_hosts = [h.strip().rstrip(".") for h in mx_hosts_str.split(",") if h.strip()]
+        if not mx_hosts or any(not is_valid_domain(host) for host in mx_hosts):
+            return False, "Valid observed MX hostnames are required; review the mail routing before deployment."
         account_id = self.get_account_id()
         if not account_id:
             return False, (
@@ -727,13 +791,25 @@ class CloudflareDNS:
                 "Ensure your API token has Zone:Read permission."
             )
 
-        # Build the MTA-STS policy content from actual MX records
-        mx_hosts = [h.strip() for h in mx_hosts_str.split(",") if h.strip()]
-        if not mx_hosts:
-            mx_hosts = [f"*.{domain}"]  # Fallback wildcard
+        try:
+            existing_a = self.get_a_record(f"mta-sts.{domain}")
+        except DNSReadError as exc:
+            return False, str(exc)
+        if existing_a and (existing_a.get("content") != "192.0.2.1" or not existing_a.get("proxied")):
+            return False, "An existing mta-sts host record needs manual review; it was not overwritten."
 
-        mx_lines = "\\n".join(f"mx: {mx}" for mx in mx_hosts)
-        policy_content = f"version: STSv1\\nmode: enforce\\n{mx_lines}\\nmax_age: 86400"
+        worker_name = f"northflux-mta-sts-{domain.replace('.', '-')}"
+        route_pattern = f"mta-sts.{domain}/*"
+        routes_ok, route_result = self._request("GET", f"{CF_API_BASE}/zones/{self.zone_id}/workers/routes")
+        if not routes_ok or not isinstance(route_result.get("result"), list):
+            return False, "Could not verify existing Worker routes; no deployment changes made."
+        if any(route.get("pattern") == route_pattern and route.get("script") != worker_name
+               for route in route_result["result"]):
+            return False, "The MTA-STS route belongs to another Worker; review it manually before deploying."
+
+        # Build the MTA-STS policy content from actual MX records
+        mx_lines = "\n".join(f"mx: {mx}" for mx in mx_hosts)
+        policy_content = f"version: STSv1\nmode: enforce\n{mx_lines}\nmax_age: 86400\n"
 
         # Worker script that serves the MTA-STS policy
         # Uses Service Worker (classic) syntax for application/javascript upload
@@ -749,7 +825,7 @@ addEventListener('fetch', function(event) {{
 async function handleRequest(request) {{
   var url = new URL(request.url);
   if (url.pathname === '/.well-known/mta-sts.txt') {{
-    var policy = "{policy_content}\\n";
+    var policy = {json.dumps(policy_content)};
     return new Response(policy, {{
       status: 200,
       headers: {{
@@ -878,14 +954,10 @@ async function handleRequest(request) {{
                 pass
 
         # -- Attempt C: Account-level Custom Domains (last resort) --
-        # Custom Domains manages its own DNS, so remove the A record we
-        # created in Step 1 to avoid the "externally managed DNS" conflict.
+        # Never delete an existing DNS record to force a custom-domain binding.
+        # A conflict requires manual review, not destructive automatic fallback.
         if not route_bound:
             cd_hostname = f"mta-sts.{domain}"
-            try:
-                self._delete_a_record(cd_hostname)
-            except Exception:
-                pass
             cd_url = f"{CF_API_BASE}/accounts/{account_id}/workers/domains"
             cd_data = {
                 "hostname": cd_hostname,
@@ -947,6 +1019,13 @@ async function handleRequest(request) {{
         """
         domain = scan_result.get("domain", "")
         fixes = []
+        if scan_result.get("scan_incomplete"):
+            return [{
+                "type": "SCAN-REVIEW", "priority": "HIGH", "manual": True,
+                "description": "Some checks could not be completed. Resolve the scan errors before changing DNS.",
+                "current": "Incomplete scan", "recommended": "Review the scan notes and run the scan again",
+                "auto_fix": None,
+            }]
 
         # SPF fix
         if not scan_result.get("spf_present"):
@@ -954,10 +1033,12 @@ async function handleRequest(request) {{
                 {
                     "type": "SPF",
                     "priority": "HIGH",
-                    "description": "Add SPF record to prevent email spoofing",
+                    "description": "Confirm every authorised mail sender before adding SPF",
                     "current": "Not configured",
-                    "recommended": "v=spf1 include:_spf.google.com -all",
-                    "auto_fix": lambda: self.fix_spf(domain, ["_spf.google.com"], "-all"),
+                    "recommended": "Build one SPF record from provider-supplied sending sources",
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "List all services that send mail for this domain. Use their published SPF guidance and review the record before applying it.",
                 }
             )
         else:
@@ -1067,10 +1148,12 @@ async function handleRequest(request) {{
                     {
                         "type": "DKIM",
                         "priority": "HIGH",
-                        "description": f"Auto-configure DKIM DNS records for {provider_name}",
+                        "description": f"Copy and review DKIM DNS records from {provider_name}",
                         "current": "No DKIM selectors found",
                         "recommended": f"DKIM CNAME/TXT records for {provider_name} selectors",
-                        "auto_fix": lambda sr=scan_result: self.fix_dkim(domain, sr),
+                        "auto_fix": None,
+                        "manual": True,
+                        "steps": "Enable DKIM in your provider's admin console, then copy its exact selector and key or CNAME target into DNS.",
                         "note": f"Detected email provider: {provider_name}",
                     }
                 )

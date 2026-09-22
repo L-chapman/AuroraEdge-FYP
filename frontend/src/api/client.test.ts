@@ -61,6 +61,25 @@ describe('API client', () => {
     expect(unauthorized).toHaveBeenCalledTimes(1)
     await expect(apiRequest('/api/private')).rejects.toMatchObject({ status: 0, detail: expect.stringContaining('could not reach') })
   })
+
+  it('rejects an unreadable JSON success instead of handing null to page callbacks', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{broken', { status: 200, headers: { 'content-type': 'application/json' } }))
+    await expect(apiRequest('/api/scan')).rejects.toMatchObject({ name: 'ApiError', detail: expect.stringContaining('unreadable') })
+  })
+
+  it('does not apply an obsolete 401 from an already cancelled request to the current session', async () => {
+    const unauthorized = vi.fn()
+    setUnauthorizedHandler(unauthorized)
+    const controller = new AbortController()
+    let complete!: (response: Response) => void
+    const response = new Promise<Response>((resolve) => { complete = resolve })
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(response)
+    const request = apiRequest('/api/old-request', { signal: controller.signal })
+    controller.abort()
+    complete(new Response(JSON.stringify({ detail: 'Old session expired' }), { status: 401, headers: { 'content-type': 'application/json' } }))
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(unauthorized).not.toHaveBeenCalled()
+  })
 })
 
 describe('API presentation normalisers', () => {

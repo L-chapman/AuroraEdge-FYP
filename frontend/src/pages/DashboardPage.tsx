@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { apiRequest, asNumber, displayDate } from '../api/client'
+import { apiRequest, asBoolean, asNumber, displayDate } from '../api/client'
 import type { DashboardPayload, DomainSummary } from '../api/types'
 import { Icon } from '../components/Icon'
 import { Button, Card, EmptyState, ErrorState, LoadingState, Metric, PageHeader, StatusBadge } from '../components/ui'
@@ -12,7 +12,7 @@ function scoreOf(domain: DomainSummary): number {
 export function DashboardPage() {
   const dashboard = useQuery({
     queryKey: ['dashboard'],
-    queryFn: () => apiRequest<DashboardPayload>('/api/v1/dashboard'),
+    queryFn: ({ signal }) => apiRequest<DashboardPayload>('/api/v1/dashboard', { signal }),
     refetchInterval: 60_000,
   })
 
@@ -24,7 +24,7 @@ export function DashboardPage() {
   const { stats, domains, alerts, settings } = dashboard.data
   const sortedDomains = [...domains].sort((a, b) => scoreOf(a) - scoreOf(b))
   const average = asNumber(stats.average_score, 0)
-  const scoredDomains = domains.filter((domain) => domain.last_score !== null && domain.last_score !== undefined)
+  const scoredDomains = domains.filter((domain) => !asBoolean(domain.last_scan_incomplete) && domain.last_score !== null && domain.last_score !== undefined)
   const monitoring = String(settings.monitoring_enabled ?? 'false').toLowerCase() === 'true'
 
   return (
@@ -76,8 +76,8 @@ export function DashboardPage() {
                   {sortedDomains.slice(0, 8).map((domain) => (
                     <tr key={domain.domain}>
                       <td><strong>{domain.domain}</strong></td>
-                      <td><StatusBadge value={domain.last_grade ?? 'Unscanned'} /></td>
-                      <td>{domain.last_score ?? '—'}</td>
+                      <td><StatusBadge value={asBoolean(domain.last_scan_incomplete) ? 'Incomplete' : domain.last_grade ?? 'Unscanned'} /></td>
+                      <td>{asBoolean(domain.last_scan_incomplete) ? '—' : domain.last_score ?? '—'}</td>
                       <td>{displayDate(domain.last_scan_at)}</td>
                       <td><Link to={`/domain/${encodeURIComponent(domain.domain)}`} aria-label={`View ${domain.domain}`}>View</Link></td>
                     </tr>

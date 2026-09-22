@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, apiRequest, displayDate } from '../api/client'
+import { ApiError, apiRequest, asBoolean, displayDate } from '../api/client'
 import type { AlertsResponse, ManagedDomainsResponse } from '../api/types'
 import { Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, InlineNotice, LoadingState, PageHeader, StatusBadge } from '../components/ui'
 import { normaliseDomain, validateDomain } from '../utils/domain'
@@ -18,8 +18,8 @@ export function DomainsPage() {
   const [messageTone, setMessageTone] = useState<'success' | 'warning'>('success')
   const queryClient = useQueryClient()
 
-  const domainsQuery = useQuery({ queryKey: ['managed-domains'], queryFn: () => apiRequest<ManagedDomainsResponse>('/api/managed-domains') })
-  const alertsQuery = useQuery({ queryKey: ['alerts'], queryFn: () => apiRequest<AlertsResponse>('/api/alerts') })
+  const domainsQuery = useQuery({ queryKey: ['managed-domains'], queryFn: ({ signal }) => apiRequest<ManagedDomainsResponse>('/api/managed-domains', { signal }) })
+  const alertsQuery = useQuery({ queryKey: ['alerts'], queryFn: ({ signal }) => apiRequest<AlertsResponse>('/api/alerts', { signal }) })
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['managed-domains'] }),
@@ -59,11 +59,12 @@ export function DomainsPage() {
   })
 
   const rescanMutation = useMutation({
-    mutationFn: (value: string) => apiRequest<{ domain: string; evaluation: { grade?: string; score?: number } }>(`/api/rescan/${encodeURIComponent(value)}`, { method: 'POST' }),
+    mutationFn: (value: string) => apiRequest<{ domain: string; evaluation: { grade?: string; score?: number }; scan?: { scan_incomplete?: boolean } }>(`/api/rescan/${encodeURIComponent(value)}`, { method: 'POST' }),
     onSuccess: async (result) => {
       await invalidate()
-      setMessageTone('success')
-      setMessage(`${result.domain} rescanned: grade ${result.evaluation.grade ?? 'unknown'}, score ${result.evaluation.score ?? 0}.`)
+      const incomplete = asBoolean(result.scan?.scan_incomplete)
+      setMessageTone(incomplete ? 'warning' : 'success')
+      setMessage(incomplete ? `${result.domain} could not be fully checked. No grade has been assigned; try Rescan again when the lookup service is available.` : `${result.domain} rescanned: grade ${result.evaluation.grade ?? 'unknown'}, score ${result.evaluation.score ?? 0}.`)
     },
   })
 
@@ -114,9 +115,9 @@ export function DomainsPage() {
           <div className="domain-card-grid">
             {domainsQuery.data.domains.map((item) => (
               <article className="domain-card" key={item.domain}>
-                <div className="domain-card__head"><h3>{item.domain}</h3><StatusBadge value={item.last_grade ?? 'Unscanned'} /></div>
+                <div className="domain-card__head"><h3>{item.domain}</h3><StatusBadge value={asBoolean(item.last_scan_incomplete) ? 'Incomplete' : item.last_grade ?? 'Unscanned'} /></div>
                 <p>{item.notes || 'No notes added.'}</p>
-                <dl><div><dt>Score</dt><dd>{item.last_score ?? '—'}</dd></div><div><dt>Last scan</dt><dd>{displayDate(item.last_scan_at)}</dd></div></dl>
+                <dl><div><dt>Score</dt><dd>{asBoolean(item.last_scan_incomplete) ? '—' : item.last_score ?? '—'}</dd></div><div><dt>Last scan</dt><dd>{displayDate(item.last_scan_at)}</dd></div></dl>
                 <div className="button-row">
                   <Link className="button button--secondary" to={`/domain/${encodeURIComponent(item.domain)}`}>Details</Link>
                   <Button variant="ghost" type="button" disabled={rescanMutation.isPending} onClick={() => rescanMutation.mutate(item.domain)}>Rescan</Button>

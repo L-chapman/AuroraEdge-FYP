@@ -2,7 +2,9 @@ name: CI
 
 "on":
   push:
-    branches: [main, master, "codex/**"]
+    # Pull requests already run the complete suite. Do not also run it for the
+    # same feature-branch push (and send duplicate failure notifications).
+    branches: [main, master]
   pull_request:
     branches: [main, master]
   workflow_dispatch:

@@ -40,10 +40,14 @@ async function clearData(page: Page) {
   expect(statuses).toEqual([200, 200])
 }
 
-async function navigateTo(page: Page, name: 'Scan' | 'Domains' | 'Generator' | 'Settings') {
+async function navigateTo(page: Page, name: 'Scan' | 'Domains' | 'Generator' | 'Settings', expectedPath = name.toLowerCase()) {
   const link = page.getByRole('navigation').getByRole('link', { name, exact: true })
   if (!(await link.isVisible())) await page.getByRole('button', { name: 'Menu' }).click()
   await link.click()
+  await expect(page).toHaveURL(new RegExp(`/${expectedPath}$`))
+  // Scan and Domains both have a textbox named Domain. Wait for the new page
+  // before filling it, otherwise a fast test can type into the outgoing page.
+  await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Email security, at a glance')
 }
 
 test.beforeEach(async ({ page }) => {
@@ -66,7 +70,7 @@ test('rejects a bad token, signs in without browser storage, and signs out', asy
   // Expired cookies must invalidate the cached React session as soon as a
   // protected query receives a 401, rather than leaving a stale dashboard.
   await context.clearCookies()
-  await navigateTo(page, 'Domains')
+  await navigateTo(page, 'Domains', 'login')
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByRole('heading', { name: 'Operator sign in' })).toBeVisible()
   await page.getByLabel('Operator token').fill(token)
@@ -146,6 +150,30 @@ test('preserves generator edge cases and uses keyboard-operable output copy', as
   await dmarc.getByLabel('Policy percentage').fill('0')
   await expect(dmarc.getByLabel('DNS TXT record')).toContainText('pct=0')
   await expect(page.getByText(/RFC 9495/i)).toHaveCount(0)
+})
+
+test('keeps incomplete scans visibly uncertain through onboarding, history and reports', async ({ page }) => {
+  await navigateTo(page, 'Scan')
+  await page.getByRole('textbox', { name: 'Domain', exact: true }).fill('incomplete.example.com')
+  await page.getByRole('button', { name: 'Run security scan' }).click()
+  await expect(page.getByRole('heading', { name: 'incomplete.example.com' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'This scan is incomplete.' })).toContainText('DNS lookup timed out')
+  await expect(page.getByText('98/100', { exact: true })).toHaveCount(0)
+  await navigateTo(page, 'Domains')
+  await expect(page.getByRole('heading', { name: 'Managed domains', exact: true })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Domain', exact: true }).fill('incomplete.example.com')
+  await page.getByRole('button', { name: 'Add domain' }).click()
+  await expect(page.getByText(/initial scan was incomplete/)).toBeVisible()
+  await expect(page.getByText('Incomplete', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: 'Details' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'This scan is incomplete.' })).toContainText('DNS lookup timed out')
+  await expect(page.getByRole('table')).not.toContainText('A+')
+  const pdf = await page.request.get('/api/report/pdf/incomplete.example.com')
+  expect(pdf.status()).toBe(200)
+  expect(pdf.headers()['content-type']).toContain('application/pdf')
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-')
+  const dashboard = await page.request.get('/api/v1/dashboard')
+  expect((await dashboard.json()).stats.score_stats.avg_score).toBeNull()
 })
 
 test('saves independent monitoring settings and protects destructive deletion', async ({ page }) => {

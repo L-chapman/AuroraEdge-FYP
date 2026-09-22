@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal DisableDelayedExpansion
 title NorthFlux Security
 if defined NORTHFLUX_PYTHON goto :configured_python
 where py >nul 2>&1

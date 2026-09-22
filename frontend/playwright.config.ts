@@ -1,8 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
+import { quoteExecutable } from './test-support/launch-command'
 
-const env = (globalThis as typeof globalThis & {
-  process?: { env?: Record<string, string | undefined> }
-}).process?.env ?? {}
+const runtime = (globalThis as typeof globalThis & {
+  process?: { env?: Record<string, string | undefined>; platform?: string }
+}).process
+const env = runtime?.env ?? {}
 const baseURL = env.NORTHFLUX_E2E_URL ?? 'http://127.0.0.1:4173'
 const pythonCommand = env.NORTHFLUX_PYTHON ?? 'python'
 const firefoxExecutablePath = env.NORTHFLUX_FIREFOX_PATH
@@ -34,7 +36,7 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: `${pythonCommand} ../scripts/e2e_server.py`,
+    command: `${quoteExecutable(pythonCommand, runtime?.platform ?? 'linux')} ../scripts/e2e_server.py`,
     url: `${baseURL}/health`,
     reuseExistingServer,
     timeout: 120_000,

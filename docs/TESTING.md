@@ -4,9 +4,9 @@
 
 A passing test run is evidence for a particular version and environment—not a promise that software can never fail. NorthFlux uses repeatable tests for its own behaviour and separate checks for packaging, browsers, and deployment.
 
-The recorded React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is the evidence for that version. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for each pushed revision.
+The historical React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is evidence for that version only. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for tested revisions.
 
-The current suite contains **472 Python tests and 72 frontend unit/component tests**. The browser suite defines 12 checks per browser profile: 48 on Linux's four profiles and 12 Chromium checks on Windows in CI. Counts describe the suite, not proof of a pass; use the matching revision's completed workflow as the release evidence.
+For the deep-debug release, use the [review and verification record](DEEP_DEBUG_REVIEW.md) for final test counts, the revision tested, actual completed runs and unresolved limits. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
 
 | Layer | Environment and checks |
 |---|---|
@@ -55,6 +55,8 @@ python -m pytest -q
 
 Tests cover scanning, rule evaluation, remediation advice, persistence, legacy and `/api/v1` contracts, authentication, session expiry and rotation behaviour, CSRF protection, Cloudflare ownership enforcement, secret-source handling and migration, TXT-record safety, input validation, XSS payloads, SQL injection probes, path traversal, React asset serving, SPA route boundaries, security headers, stress cases, and safe production defaults.
 
+Deep-debug regressions also exercise incomplete scans and ungraded storage, public-only scan connections, bounded network reads, malformed and oversized requests, failed Cloudflare prerequisite reads, saved-report rendering, installation drift, and source-package exclusions. Network and provider responses are controlled in these tests; they are checks of NorthFlux's handling, not a live provider certification.
+
 Run the offline smoke test separately:
 
 ```powershell
@@ -77,17 +79,20 @@ npm run build
 cd ..
 ```
 
-Vitest and Testing Library cover the API client, domain validation and normalisation, DNS record generation, form interactions, error states, and edge cases such as IPv4 CIDR input, DMARC `pct=0`, and multiline MTA-STS MX entries. The deterministic client and record-generation modules have minimum coverage gates of 90% for lines, functions, and statements and 85% for branches. Route-level behaviour is covered by the browser suite instead of being counted as superficial unit coverage.
+Vitest and Testing Library cover the API client, domain validation and normalisation, DNS record generation, form interactions, error states, and edge cases such as IPv4 CIDR input, DMARC `pct=0`, and multiline MTA-STS MX entries. Regressions check late responses after sign-out, cancelled requests, malformed session data, settings edits during refresh, incomplete-result warnings, and state leaking between domain pages. Generator checks include long TXT values, final DNS-name lengths, and reporting addresses that need URI encoding.
+
+Coverage gates apply only to the deterministic API-client, utility and record-generation modules: 90% for lines, functions and statements, and 85% for branches. These percentages are **not whole-frontend or whole-product coverage**. Component tests and real-browser journeys provide separate evidence for the interactive pages; neither claims every screen state is covered.
 
 ## Browser UI suite
 
-Playwright controls real browser engines to exercise the interface. The suite defines nine operator journeys plus three presentation/accessibility checks in each of four projects: desktop Chromium, desktop Firefox, desktop WebKit, and a Pixel 7 mobile Chromium profile. A complete four-profile run executes 48 browser tests. CI also runs the 12 Chromium checks on Windows. The journeys cover:
+Playwright controls real browser engines to exercise the interface. The same journeys run in desktop Chromium, desktop Firefox, desktop WebKit, and a Pixel 7 mobile Chromium profile on Linux. CI also runs Chromium on Windows. See the release review for the count and result of the actual run. The journeys cover:
 
 - invalid and valid sign-in, browser-storage handling, and sign-out;
 - the empty dashboard and a serious/critical axe accessibility check;
 - explicit single scans without silent monitoring enrolment;
 - batch submission and the 20-domain limit;
 - managed-domain enrolment, detail, rescan, and confirmed removal;
+- incomplete scans remaining visibly uncertain through onboarding, saved history and PDF reports;
 - DNS generator edge cases and keyboard-operable output;
 - independent monitoring settings and destructive-action confirmation;
 - CSRF rejection and the public privacy route; and
@@ -106,6 +111,8 @@ cd ..
 
 On Linux CI, browser system packages are installed with `npx playwright install --with-deps chromium firefox webkit`. The test runner first creates a production frontend build, then starts `scripts/e2e_server.py` at `127.0.0.1:4173`. That server uses the ignored `frontend/.e2e-data/` state/report/log root, a deterministic fake scanner, an operator test token, blank Cloudflare environment values, and a disabled Cloudflare write layer. The root is cleaned at startup and shutdown. Browser tests therefore cannot modify a live DNS zone.
 
+If the intended Python executable is not on your command path, set `NORTHFLUX_PYTHON` to its exact executable path. Paths containing spaces are supported; do not supply a shell command with extra arguments. This also lets the browser suite use the project's `.venv` rather than an unrelated system installation.
+
 Playwright retains traces, screenshots, and video only on failure. GitHub Actions uploads that evidence for seven days when the UI job fails. A browser failing to launch because its operating-system dependencies are missing is an environment failure, not a passing product test; use the supported Linux CI job as the release gate after resolving any host-specific launch problem. In the migration's local Windows checks, Firefox could not launch (`spawn UNKNOWN`); all four browser projects passed on Linux CI. That local limitation must not be reported as a Windows Firefox pass.
 
 ## Quality checks
@@ -123,7 +130,9 @@ cd ..
 
 The declared Python runtime/development and npm dependency sets reported no known vulnerabilities during the React migration audit. This is a point-in-time result; rerun both package-manager audits before each release and after dependency changes.
 
-GitHub Actions runs the checks in the matrix above. The final release job creates a source ZIP only after the required jobs pass and checks that it excludes secrets, local environments, runtime data, dependencies, build output, and test recordings. `tests/test_documentation_links.py` also checks local links in the current guides and academic archive so a tidy-up cannot silently break the reading route.
+GitHub Actions runs the matrix for pull requests targeting `main` or `master`, pushes to those branches, and manual workflow runs. Feature-branch pushes do not start a second copy of the pull-request workflow, avoiding duplicate results and notifications. A green workflow is a test result, not an automatic production deployment.
+
+The final release job creates a source ZIP only after the required jobs pass and checks that it excludes secrets, local environments, runtime data, dependencies, build output, and test recordings. `tests/test_documentation_links.py` also checks local links in the current guides and academic archive so a tidy-up cannot silently break the reading route.
 
 Container checks can also be run directly:
 
@@ -145,7 +154,7 @@ From a clean Git checkout:
 pwsh -NoProfile -File scripts/create_submission_zip.ps1
 ```
 
-This produces `dist/NorthFlux_Security.zip` and its SHA-256 checksum. It checks the working tree before replacing the previous package, and excludes local data, secrets, dependencies and generated output. The source ZIP includes setup files, not preinstalled dependencies; it has the same Python/Node requirements as a clone. `-AllowDirty` is for explicitly reviewed development snapshots only, not a clean release.
+This produces `dist/NorthFlux_Security.zip` and its SHA-256 checksum. It checks the working tree before replacing the previous package, excludes local data, secrets, dependencies and generated output, and refuses filesystem links that could pull unrelated files into the archive. Database/log files and backup virtual environments are excluded even outside their usual folders. Review the contents before sharing: filename filters cannot identify every secret someone might place in an otherwise eligible source file. The source ZIP includes setup files, not preinstalled dependencies; it has the same Python/Node requirements as a clone. `-AllowDirty` is for explicitly reviewed development snapshots only, not a clean release.
 
 The frontend lockfile fixes its dependency tree. Python requirements include some version ranges and do not lock all transitive dependencies; fresh installations can resolve different compatible versions. Re-run the full checks when dependencies or runtime versions change.
 
@@ -166,4 +175,4 @@ Automated tests do not replace checking a real deployment. For a release candida
 
 For visual changes, also check the sign-in page, empty and populated overview, domain list, forms, and dialogs at desktop and narrow widths. Use only non-sensitive sample data. Check keyboard focus, readable contrast, loading/error states, and reduced-motion preferences. Record what was actually inspected; do not label an untested screen or operating system as passed.
 
-Live remediation tests are deliberately outside the deterministic suite. They must use a controlled Cloudflare zone owned by the operator, with least-privilege credentials and an approved rollback plan. Review the audit log and restore the original DNS state after the test.
+Live remediation tests are deliberately outside the deterministic suite. No live Cloudflare write, Worker deployment or production deployment is claimed by the deep-debug checks. The settings connection test makes read probes; success does not establish DNS write permission. A live write test must use a controlled Cloudflare zone owned by the operator, with least-privilege credentials and an approved rollback plan. Review the audit log and restore the original DNS state after the test.

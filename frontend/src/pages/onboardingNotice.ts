@@ -1,11 +1,14 @@
 export type InitialScan =
-  | { grade: string; score: number; severity: string }
-  | { error: string }
+  | { grade: string; score: number; severity: string; scan_incomplete?: boolean }
+  | { error: string; scan_incomplete?: boolean }
 
 export function onboardingNotice(
   domain: string,
   initialScan?: InitialScan,
 ): { tone: 'success' | 'warning'; message: string } {
+  if (initialScan?.scan_incomplete) {
+    return { tone: 'warning', message: `${domain} is now monitored, but its initial scan was incomplete. No grade has been assigned. Use Rescan to try again.` }
+  }
   if (initialScan && 'grade' in initialScan) {
     return {
       tone: 'success',
