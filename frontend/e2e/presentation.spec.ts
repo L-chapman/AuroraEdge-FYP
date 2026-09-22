@@ -38,7 +38,11 @@ test('keeps every main page accessible at 320px with reduced motion', async ({ p
 
 test('lets keyboard users dismiss and reopen the mobile menu', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.goto('/login')
+  // Smooth document scrolling can move a control between pointer down and up.
+  // Keep clicks stable even when the user has not requested reduced motion.
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).scrollBehavior)).toBe('auto')
   await page.getByLabel('Operator token').fill(token)
   await page.getByRole('button', { name: 'Sign in securely' }).click()
   await expect(page).toHaveURL(/\/$/)

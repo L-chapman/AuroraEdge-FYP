@@ -25,7 +25,9 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: var(--bg); scroll-behavior: smooth; }
+/* Focus and bring-into-view scrolling must finish before the next pointer
+   action. Global smooth scrolling can move buttons between press and release. */
+html { min-width: 320px; background: var(--bg); scroll-behavior: auto; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(ellipse at 12% 0%, rgb(29 131 173 / 15%), transparent 42rem), radial-gradient(ellipse at 100% 35%, rgb(111 79 196 / 9%), transparent 38rem), var(--bg); color: var(--text); }
 button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }

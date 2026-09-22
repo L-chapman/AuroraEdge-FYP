@@ -61,17 +61,14 @@ docker compose ps
 
 The service listens on `127.0.0.1:8080` by default. Its liveness endpoint is `/health`; `/ready` also checks SQLite and writable runtime directories. Production mode requires the compiled React application and fails closed at startup when it is missing. The image contains `frontend/dist`, but not Node.js, `node_modules`, source maps, test output, or frontend build tooling.
 
-If deploying from a source checkout instead of the image, build the frontend before starting FastAPI:
+If deploying from a source checkout instead of the image, prepare both the Python environment and the interface first. This Linux example starts the service using that prepared environment, not the system Python:
 
 ```bash
-cd frontend
-npm ci
-npm run build
-cd ..
+python3 start.py --setup-only
 NORTHFLUX_ENV=production \
 DASH_TOKEN='replace-with-a-random-value-at-least-32-characters' \
 PYTHONPATH=src \
-python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080 --workers 1
+.venv/bin/python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080 --workers 1
 ```
 
 `NORTHFLUX_FRONTEND_DIST` may point to a different compiled Vite directory. `NORTHFLUX_SERVE_REACT` defaults to true in production and must be set to true when testing the production UI in development mode. Never place runtime secrets in Vite variables or frontend source: the compiled bundle is public to every authenticated or unauthenticated browser that can request its assets.
