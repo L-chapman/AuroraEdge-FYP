@@ -6,7 +6,7 @@ A passing test run is evidence for a particular version and environment—not a 
 
 The recorded React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is the evidence for that version. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for each pushed revision.
 
-The current suite contains **472 Python tests and 68 frontend unit/component tests**. The browser suite defines 12 checks per browser profile: 48 on Linux's four profiles and 12 Chromium checks on Windows in CI. Counts describe the suite, not proof of a pass; use the matching revision's completed workflow as the release evidence.
+The current suite contains **472 Python tests and 72 frontend unit/component tests**. The browser suite defines 12 checks per browser profile: 48 on Linux's four profiles and 12 Chromium checks on Windows in CI. Counts describe the suite, not proof of a pass; use the matching revision's completed workflow as the release evidence.
 
 | Layer | Environment and checks |
 |---|---|

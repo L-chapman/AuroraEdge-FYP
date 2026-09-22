@@ -84,7 +84,7 @@ test('rejects a bad token, signs in without browser storage, and signs out', asy
 test('shows an empty dashboard and has no serious accessibility violations', async ({ page }) => {
   await page.reload()
   await expect(page.getByText('No managed domains yet')).toBeVisible()
-  const results = await new AxeBuilder({ page }).exclude('body > div:nth-child(3)').analyze()
+  const results = await new AxeBuilder({ page }).analyze()
   expect(results.violations.filter((item) => ['critical', 'serious'].includes(item.impact ?? ''))).toEqual([])
 })
 

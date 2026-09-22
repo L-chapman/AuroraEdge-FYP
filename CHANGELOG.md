@@ -8,7 +8,8 @@ This project follows semantic versioning from the NorthFlux Security rename onwa
 - Added fresh-checkout startup CI on Windows and Linux with Node 22.12/24, plus Windows Chromium UI coverage.
 - Refined the React interface with a local SVG identity, simpler explanations, restrained movement, readable text throughout transitions, keyboard navigation, and reduced-motion support.
 - Fixed recoverable sign-out failures, malformed domain-route handling, misleading history-error states, and a validation-library CSP conflict without weakening browser security.
-- Expanded the suite to 472 Python and 68 frontend tests, with 12 browser checks per profile including 320px layout, keyboard and CSP regressions.
+- Fixed settings-form initialisation and refresh races: saved values are present before editing, drafts survive refreshes, and controls are locked while saving.
+- Expanded the suite to 472 Python and 72 frontend tests, with 12 browser checks per profile including 320px layout, keyboard and CSP regressions.
 - Made source packaging preserve the last archive when checkout validation fails and explicitly require PowerShell 7.
 - Added a plain-language project tour, clearer Windows/Linux setup and testing guidance, and a configuration reference separate from the main overview.
 - Grouped the original academic documents, progress records, and figures in `docs/academic/archive/`, preserving the earlier work and repairing references.
