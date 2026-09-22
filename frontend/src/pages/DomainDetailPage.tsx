@@ -6,13 +6,13 @@ import type { DomainDetailResponse, DomainHistoryResponse } from '../api/types'
 import { Button, Card, ConfirmDialog, ErrorState, InlineNotice, LoadingState, PageHeader, StatusBadge } from '../components/ui'
 
 const controls = [
-  ['spf_present', 'SPF', 'Sender Policy Framework'],
-  ['dmarc_present', 'DMARC', 'Domain-based authentication policy'],
-  ['dkim_present', 'DKIM', 'Cryptographic message signing'],
-  ['mta_sts_present', 'MTA-STS', 'Enforced transport security'],
-  ['tls_rpt_present', 'TLS-RPT', 'Transport failure reporting'],
-  ['bimi_present', 'BIMI', 'Verified brand indicator'],
-  ['mx_present', 'MX', 'Mail exchanger records'],
+  ['spf_present', 'SPF', 'Which services can send your email'],
+  ['dmarc_present', 'DMARC', 'How to handle messages that fail checks'],
+  ['dkim_present', 'DKIM', 'A signature to help verify the sender'],
+  ['mta_sts_present', 'MTA-STS', 'Rules for secure email delivery'],
+  ['tls_rpt_present', 'TLS-RPT', 'Reports about secure delivery problems'],
+  ['bimi_present', 'BIMI', 'Your brand logo in supporting inboxes'],
+  ['mx_present', 'MX', 'Where incoming email is delivered'],
 ] as const
 
 function canonicalResult(input: Record<string, unknown>): Record<string, unknown> {
@@ -27,8 +27,9 @@ function canonicalResult(input: Record<string, unknown>): Record<string, unknown
 }
 
 export function DomainDetailPage() {
-  const { domain: routeDomain = '' } = useParams()
-  const domain = decodeURIComponent(routeDomain)
+  // Router parameters are already decoded. A second decode can throw for a
+  // literal percent sign, preventing the API's normal validation error state.
+  const { domain = '' } = useParams()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [deletedRecords, setDeletedRecords] = useState<number | null>(null)
@@ -103,7 +104,7 @@ export function DomainDetailPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Domain intelligence"
+        eyebrow="Your domain in detail"
         title={domain}
         description={`Latest saved scan from ${displayDate(result.scanned_at)}.`}
         actions={<div className="button-row"><Button onClick={() => rescan.mutate()} disabled={rescan.isPending}>{rescan.isPending ? 'Rescanning…' : 'Rescan now'}</Button><a className="button button--secondary" href={`/api/report/pdf/${encodeURIComponent(domain)}`}>Download PDF</a></div>}
@@ -114,7 +115,7 @@ export function DomainDetailPage() {
       <section className="detail-hero" aria-label="Domain score">
         <Card><p className="eyebrow">Security grade</p><div className="detail-grade"><StatusBadge value={grade} /><strong>{score}<small>/100</small></strong></div></Card>
         <Card><p className="eyebrow">Highest severity</p><h2><StatusBadge value={String(result.severity ?? 'Unknown')} /></h2><p>{String(result.advice ?? 'No additional guidance recorded.')}</p></Card>
-        <Card><p className="eyebrow">History</p><h2>{history.data?.count ?? 0} scans</h2><p>Source: {detail.data.source}</p></Card>
+        <Card><p className="eyebrow">History</p><h2>{history.isError ? 'Unavailable' : history.isLoading ? 'Loading…' : `${history.data?.count ?? 0} scans`}</h2><p>Source: {detail.data.source}</p></Card>
       </section>
 
       <Card>
@@ -124,7 +125,7 @@ export function DomainDetailPage() {
 
       <Card>
         <div className="section-heading"><div><p className="eyebrow">Timeline</p><h2>Scan history</h2></div><Button variant="danger" type="button" onClick={() => setDeleteOpen(true)} disabled={!history.data?.count}>Delete history</Button></div>
-        {history.isLoading ? <LoadingState label="Loading history" /> : history.data?.history.length ? (
+        {history.isLoading ? <LoadingState label="Loading history" /> : history.isError ? <InlineNotice tone="warning">Scan history could not be loaded. Your saved results have not been deleted. <Button type="button" variant="ghost" onClick={() => void history.refetch()}>Retry history</Button></InlineNotice> : history.data?.history.length ? (
           <div className="table-wrap"><table><caption className="sr-only">Scan history for {domain}</caption><thead><tr><th>Date</th><th>Grade</th><th>Score</th><th>Severity</th><th>Violations</th></tr></thead><tbody>{history.data.history.map((entry, index) => <tr key={String(entry.scan_id ?? `${entry.scanned_at}-${index}`)}><td>{displayDate(entry.scanned_at)}</td><td><StatusBadge value={String(entry.grade ?? '—')} /></td><td>{asNumber(entry.score, 0)}</td><td><StatusBadge value={String(entry.severity ?? 'Unknown')} /></td><td>{asNumber(entry.violation_count, 0)}</td></tr>)}</tbody></table></div>
         ) : <p>No historical scans are available.</p>}
       </Card>

@@ -70,6 +70,53 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  launcher-smoke:
+    name: Clean startup (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: ["22.12.0", "24"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: NorthFlux clean checkout
+      - uses: actions/setup-python@v7
+        id: launch-python
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: NorthFlux clean checkout/requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: NorthFlux clean checkout/frontend/package-lock.json
+      - name: Prepare clean Windows checkout using the public launcher
+        if: runner.os == 'Windows'
+        env:
+          NORTHFLUX_PYTHON: ${{ steps.launch-python.outputs.python-path }}
+        shell: cmd
+        run: call "NorthFlux clean checkout\START.bat" --setup-only
+      - name: Verify Windows cached startup, readiness, and React assets
+        if: runner.os == 'Windows'
+        env:
+          NORTHFLUX_PYTHON: ${{ steps.launch-python.outputs.python-path }}
+        shell: cmd
+        run: call "NorthFlux clean checkout\START.bat" --smoke-test --port 18081
+      - name: Prepare clean Linux checkout using the public launcher
+        if: runner.os == 'Linux'
+        env:
+          NORTHFLUX_PYTHON: ${{ steps.launch-python.outputs.python-path }}
+        run: sh './NorthFlux clean checkout/start.sh' --setup-only
+      - name: Verify Linux cached startup, readiness, and React assets
+        if: runner.os == 'Linux'
+        env:
+          NORTHFLUX_PYTHON: ${{ steps.launch-python.outputs.python-path }}
+        run: sh './NorthFlux clean checkout/start.sh' --smoke-test --port 18081
+
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -101,7 +148,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   ui-e2e:
-    runs-on: ubuntu-latest
+    name: Browser UI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     needs: [backend-test, frontend-test]
     env:
@@ -122,17 +174,30 @@ jobs:
       - name: Install locked frontend dependencies
         working-directory: frontend
         run: npm ci
-      - name: Install Playwright browsers
+      - name: Install Linux Playwright browsers
+        if: runner.os == 'Linux'
         working-directory: frontend
         run: npx playwright install --with-deps chromium firefox webkit
-      - name: Run browser UI tests
+      - name: Install Windows Chromium
+        if: runner.os == 'Windows'
         working-directory: frontend
-        run: npm run test:e2e
+        run: npx playwright install chromium
+      - name: Build production frontend for browser tests
+        working-directory: frontend
+        run: npm run build
+      - name: Run Linux browser and mobile UI tests
+        if: runner.os == 'Linux'
+        working-directory: frontend
+        run: npx playwright test
+      - name: Run Windows Chromium UI tests
+        if: runner.os == 'Windows'
+        working-directory: frontend
+        run: npx playwright test --project=chromium
       - name: Upload Playwright evidence
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-evidence
+          name: playwright-evidence-${{ runner.os }}
           path: |
             frontend/playwright-report
             frontend/test-results
@@ -192,7 +257,7 @@ jobs:
 
   release-hygiene:
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, quality, secret-scan, ui-e2e, container]
+    needs: [backend-test, frontend-test, launcher-smoke, quality, secret-scan, ui-e2e, container]
     steps:
       - uses: actions/checkout@v7
       - name: Create clean source release archive

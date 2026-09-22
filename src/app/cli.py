@@ -79,7 +79,7 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
             print(
                 "\n&#9888;&#65039;  Cloudflare API not configured. Set CF_API_TOKEN and CF_ZONE_ID environment variables."
             )
-            print("   See docs/INTEGRATION_GUIDE.md for setup instructions.")
+            print("   See docs/INTEGRATIONS.md for setup instructions.")
         return 0
 
     # Validate connection

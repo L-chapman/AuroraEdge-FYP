@@ -113,7 +113,7 @@ function SpfGenerator() {
   const result = useMemo(() => generateSpf(input), [input])
 
   return (
-    <GeneratorCard title="SPF record" description="Authorise known sending services and IP address ranges.">
+    <GeneratorCard title="SPF record" description="List the services and addresses allowed to send email for your domain.">
       <form onSubmit={(event) => event.preventDefault()} noValidate>
         <div className="dns-generator-field">
           <label htmlFor="spf-domain">Domain</label>
@@ -155,7 +155,7 @@ function DmarcGenerator() {
   const result = useMemo(() => generateDmarc(input), [input])
 
   return (
-    <GeneratorCard title="DMARC record" description="Define message handling and optional reporting destinations.">
+    <GeneratorCard title="DMARC record" description="Tell receiving mail services what to do with messages that fail your checks.">
       <form onSubmit={(event) => event.preventDefault()} noValidate>
         <div className="dns-generator-field">
           <label htmlFor="dmarc-domain">Domain</label>
@@ -209,7 +209,7 @@ function MtaStsGenerator() {
   const result = useMemo(() => generateMtaSts(input), [input])
 
   return (
-    <GeneratorCard title="MTA-STS policy" description="Generate the discovery record and HTTPS policy file together.">
+    <GeneratorCard title="MTA-STS policy" description="Ask supporting mail services to use secure connections when delivering to your domain.">
       <form onSubmit={(event: FormEvent) => event.preventDefault()} noValidate>
         <div className="dns-generator-field">
           <label htmlFor="mta-domain">Domain</label>
@@ -262,7 +262,7 @@ function TlsRptGenerator() {
   const result = useMemo(() => generateTlsRpt(input), [input])
 
   return (
-    <GeneratorCard title="TLS-RPT record" description="Send aggregate reports about SMTP TLS delivery failures.">
+    <GeneratorCard title="TLS-RPT record" description="Choose where to receive reports about problems with secure email delivery.">
       <form onSubmit={(event) => event.preventDefault()} noValidate>
         <div className="dns-generator-field">
           <label htmlFor="tls-domain">Domain</label>
@@ -289,7 +289,7 @@ function BimiGenerator() {
   const result = useMemo(() => generateBimi(input), [input])
 
   return (
-    <GeneratorCard title="BIMI record" description="Publish a BIMI logo location and, where available, a mark certificate.">
+    <GeneratorCard title="BIMI record" description="Provide a brand logo for supporting inboxes, with a certificate where required.">
       <form onSubmit={(event) => event.preventDefault()} noValidate>
         <div className="dns-generator-field-row">
           <div className="dns-generator-field">
@@ -317,7 +317,7 @@ function BimiGenerator() {
 
 export function GeneratorPage() {
   return (
-    <main className="dns-generator-page">
+    <div className="dns-generator-page page-stack">
       <header className="dns-generator-page__header">
         <p className="dns-generator-page__eyebrow">Configuration workspace</p>
         <h1>DNS record generator</h1>
@@ -332,7 +332,7 @@ export function GeneratorPage() {
         <TlsRptGenerator />
         <BimiGenerator />
       </div>
-    </main>
+    </div>
   )
 }
 

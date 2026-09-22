@@ -1,5 +1,7 @@
 # NorthFlux Security architecture
 
+For a non-technical introduction, start with the [project tour](PROJECT_TOUR.md). This guide is the deeper code map for developers and reviewers: the browser presents results, the Python service collects and evaluates evidence, and a local database keeps history. The browser and command-line interface use the same underlying scanning and rules code.
+
 NorthFlux Security is a single-instance FastAPI application with a React browser client, CLI, SQLite persistence, scheduled scanning, report generation, and an optional Cloudflare integration. The production container builds the frontend separately and runs only Python plus the compiled static assets.
 
 ## System context

@@ -1,2 +1,6 @@
 # Large generated-style files — suppress expensive diff computation
 src/app/dashboard.py diff=nodiff
+
+# Both launch wrappers must work from a checkout made on either supported OS.
+*.sh text eol=lf
+*.bat text eol=crlf

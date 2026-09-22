@@ -53,10 +53,10 @@ function ResultCard({ result, onFix }: { result: ScanResult; onFix: (domain: str
         })}
       </ul>
       {evaluation.violations ? (
-        <details className="details-panel"><summary>Violations and guidance</summary><p>{Array.isArray(evaluation.violations) ? evaluation.violations.join(', ') : evaluation.violations}</p>{evaluation.advice ? <p>{evaluation.advice}</p> : null}</details>
+        <details className="details-panel"><summary>Findings and guidance</summary><p>{Array.isArray(evaluation.violations) ? evaluation.violations.join(', ') : evaluation.violations}</p>{evaluation.advice ? <p>{evaluation.advice}</p> : null}</details>
       ) : null}
       {result.remediation?.length ? (
-        <details className="details-panel"><summary>{result.remediation.length} recommended remediation step{result.remediation.length === 1 ? '' : 's'}</summary><ul>{result.remediation.map((item, index) => <li key={`${String(item.rule ?? item.type ?? 'step')}-${index}`}><strong>{String(item.type ?? item.rule ?? 'Recommendation')}</strong>{item.how_to_fix || item.why ? <p>{String(item.how_to_fix ?? item.why)}</p> : null}</li>)}</ul></details>
+        <details className="details-panel"><summary>{result.remediation.length} recommended improvement{result.remediation.length === 1 ? '' : 's'}</summary><ul>{result.remediation.map((item, index) => <li key={`${String(item.rule ?? item.type ?? 'step')}-${index}`}><strong>{String(item.type ?? item.rule ?? 'Recommendation')}</strong>{item.how_to_fix || item.why ? <p>{String(item.how_to_fix ?? item.why)}</p> : null}</li>)}</ul></details>
       ) : null}
       <div className="button-row">
         <Link className="button button--secondary" to={`/domain/${encodeURIComponent(result.domain)}`}>View detail</Link>
@@ -133,7 +133,7 @@ export function ScanPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="On-demand analysis" title="Scan email security controls" description="Check one domain or submit a single, rate-limit-safe batch of up to 20 domains." />
+      <PageHeader eyebrow="A fresh look" title="Scan email security controls" description="Check one domain or up to 20 together. Get a clear summary of the email protections in place and where to improve." />
       <Card>
         <div className="segmented" role="tablist" aria-label="Scan mode">
           <button type="button" role="tab" aria-selected={mode === 'single'} onClick={() => setMode('single')}>Single domain</button>
@@ -141,7 +141,7 @@ export function ScanPage() {
         </div>
         <form onSubmit={submit} noValidate className="form-stack">
           {mode === 'single' ? (
-            <Field label="Domain" htmlFor="scan-domain" hint="Paste a domain or URL; NorthFlux will safely normalise it.">
+            <Field label="Domain" htmlFor="scan-domain" hint="Enter a domain or paste a website address. NorthFlux will use just the domain name.">
               <input id="scan-domain" value={single} onChange={(event) => setSingle(event.target.value)} placeholder="example.com" autoComplete="url" />
             </Field>
           ) : (
@@ -152,8 +152,8 @@ export function ScanPage() {
           <fieldset className="option-grid">
             <legend>Scan options</legend>
             <label><input type="checkbox" checked={saveHistory} onChange={(event) => setSaveHistory(event.target.checked)} /><span><strong>Save to scan history</strong><small>Required for PDF reports and historical comparisons.</small></span></label>
-            <label><input type="checkbox" checked={manageDomains} onChange={(event) => setManageDomains(event.target.checked)} /><span><strong>Add to continuous monitoring</strong><small>Explicitly enrol successful domains in My Domains.</small></span></label>
-            <label><input type="checkbox" checked={includeGuidance} onChange={(event) => setIncludeGuidance(event.target.checked)} /><span><strong>Generate remediation guidance</strong><small>Recommendations only; no DNS records are changed.</small></span></label>
+            <label><input type="checkbox" checked={manageDomains} onChange={(event) => setManageDomains(event.target.checked)} /><span><strong>Add to continuous monitoring</strong><small>Add successfully scanned domains to your managed list.</small></span></label>
+            <label><input type="checkbox" checked={includeGuidance} onChange={(event) => setIncludeGuidance(event.target.checked)} /><span><strong>Generate remediation guidance</strong><small>Suggested improvements only; no DNS records are changed.</small></span></label>
           </fieldset>
           {formError ? <InlineNotice tone="danger">{formError}</InlineNotice> : null}
           {requestError ? <InlineNotice tone="danger">{requestError}</InlineNotice> : null}

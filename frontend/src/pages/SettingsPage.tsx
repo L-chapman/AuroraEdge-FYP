@@ -1,12 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { ApiError, apiRequest, asBoolean } from '../api/client'
 import type { Bootstrap, SettingsResponse } from '../api/types'
 import { Button, Card, ConfirmDialog, ErrorState, Field, InlineNotice, LoadingState, PageHeader, StatusBadge } from '../components/ui'
 import { buildSettingsPayload } from './settingsPayload'
+
+// Keep validation compatible with our no-eval CSP, including Zod's feature probe.
+// This must run before creating an object schema, not only when parsing a form.
+z.config({ jitless: true })
 
 const settingsSchema = z.object({
   org_name: z.string().trim().max(120, 'Organisation name must be 120 characters or fewer.'),
@@ -26,24 +30,37 @@ function settingString(settings: Record<string, string | boolean | number>, key:
 }
 
 export function SettingsPage() {
-  const [clearOpen, setClearOpen] = useState(false)
-  const [message, setMessage] = useState('')
-  const [cloudflareResult, setCloudflareResult] = useState<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean> } | null>(null)
-  const queryClient = useQueryClient()
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => apiRequest<SettingsResponse>('/api/settings') })
   const bootstrapQuery = useQuery({ queryKey: ['bootstrap'], queryFn: () => apiRequest<Bootstrap>('/api/v1/bootstrap') })
+  const retry = () => { void Promise.all([settingsQuery.refetch(), bootstrapQuery.refetch()]) }
+
+  // Mount the editor only when both initial responses exist. Rendering blank
+  // controls and resetting them in an effect can interrupt the first edit.
+  if (!settingsQuery.data || !bootstrapQuery.data) {
+    if (settingsQuery.isLoading || bootstrapQuery.isLoading) return <LoadingState label="Loading configuration" />
+    return <ErrorState message="Settings and runtime security mode could not be loaded safely." action={<Button onClick={retry}>Try again</Button>} />
+  }
+
+  return <SettingsEditor settings={settingsQuery.data.settings} production={bootstrapQuery.data.runtime.production} unavailable={settingsQuery.isError || bootstrapQuery.isError} onRetry={retry} />
+}
+
+function SettingsEditor({ settings, production, unavailable, onRetry }: {
+  settings: SettingsResponse['settings']
+  production: boolean
+  unavailable: boolean
+  onRetry: () => void
+}) {
+  const [clearOpen, setClearOpen] = useState(false)
+  const [message, setMessage] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [cloudflareResult, setCloudflareResult] = useState<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean> } | null>(null)
+  const queryClient = useQueryClient()
   const form = useForm<SettingsForm>({
     resolver: zodResolver(settingsSchema),
+    disabled: saving || unavailable,
+    // React Hook Form caches these defaults at mount. A background refresh
+    // must never reset a draft, move the caret, or replace selected text.
     defaultValues: {
-      org_name: '', alert_email: '', monitor_interval: '24', monitoring_enabled: false,
-      automatic_remediation: false, cf_zone_id: '', cf_account_id: '', cf_api_token: '',
-    },
-  })
-
-  useEffect(() => {
-    const settings = settingsQuery.data?.settings
-    if (!settings) return
-    form.reset({
       org_name: settingString(settings, 'org_name'),
       alert_email: settingString(settings, 'alert_email'),
       monitor_interval: (['6', '12', '24', '48', '168'].includes(settingString(settings, 'monitor_interval')) ? settingString(settings, 'monitor_interval') : '24') as SettingsForm['monitor_interval'],
@@ -52,20 +69,24 @@ export function SettingsPage() {
       cf_zone_id: settingString(settings, 'cf_zone_id'),
       cf_account_id: settingString(settings, 'cf_account_id'),
       cf_api_token: '',
-    })
-  }, [form, settingsQuery.data])
+    },
+  })
 
   const save = useMutation({
+    onMutate: () => { setSaving(true) },
     mutationFn: (values: SettingsForm) => apiRequest<{ ok: boolean; saved: string[] }>('/api/settings', {
       method: 'POST',
       body: buildSettingsPayload(values),
     }),
-    onSuccess: async (result) => {
+    onSuccess: async (result, values) => {
       setCloudflareResult(null)
       setMessage(`Saved ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'}.`)
-      form.setValue('cf_api_token', '')
+      // The server confirmed this submission. Use it as the new clean baseline
+      // and clear the write-only token without waiting for another read.
+      form.reset({ ...values, cf_api_token: '' })
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['settings'] }), queryClient.invalidateQueries({ queryKey: ['dashboard'] }), queryClient.invalidateQueries({ queryKey: ['bootstrap'] })])
     },
+    onSettled: () => { setSaving(false) },
   })
 
   const testCloudflare = useMutation({
@@ -82,18 +103,13 @@ export function SettingsPage() {
     },
   })
 
-  if (settingsQuery.isLoading || bootstrapQuery.isLoading) return <LoadingState label="Loading configuration" />
-  if (settingsQuery.isError || bootstrapQuery.isError || !settingsQuery.data || !bootstrapQuery.data) {
-    return <ErrorState message="Settings and runtime security mode could not be loaded safely." action={<Button onClick={() => { void Promise.all([settingsQuery.refetch(), bootstrapQuery.refetch()]) }}>Try again</Button>} />
-  }
-
-  const production = bootstrapQuery.data.runtime.production
-  const configured = asBoolean(settingsQuery.data.settings.cf_api_token_configured)
+  const configured = asBoolean(settings.cf_api_token_configured)
   const mutationError = save.error ?? testCloudflare.error ?? clearData.error
 
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Platform administration" title="Settings" description="Configure monitoring and integrations without exposing runtime credentials to the browser." />
+      <PageHeader eyebrow="Make it yours" title="Settings" description="Choose when your domains are checked, connect optional services, and manage your workspace data." />
+      {unavailable ? <InlineNotice tone="warning">Settings could not be refreshed safely. Your draft is preserved; reload the saved settings before making changes. <Button type="button" variant="ghost" onClick={onRetry}>Retry settings</Button></InlineNotice> : null}
       {message ? <InlineNotice tone="success">{message}</InlineNotice> : null}
       {mutationError ? <InlineNotice tone="danger">{mutationError instanceof ApiError ? mutationError.detail : 'The operation failed.'}</InlineNotice> : null}
       <form className="page-stack" onSubmit={form.handleSubmit((values) => save.mutate(values))} noValidate>
@@ -130,16 +146,16 @@ export function SettingsPage() {
             <Field label="Account ID" htmlFor="cf-account"><input id="cf-account" autoComplete="off" {...form.register('cf_account_id')} /></Field>
             {!production ? <Field label="API token" htmlFor="cf-token" hint="The current token is never displayed. Leave blank to keep it unchanged."><input id="cf-token" type="password" autoComplete="new-password" {...form.register('cf_api_token')} /></Field> : null}
           </div>
-          <div className="button-row"><Button type="button" variant="secondary" disabled={testCloudflare.isPending} onClick={() => { setCloudflareResult(null); testCloudflare.mutate() }}>{testCloudflare.isPending ? 'Testing saved configuration…' : 'Test saved connection'}</Button></div>
+          <div className="button-row"><Button type="button" variant="secondary" disabled={testCloudflare.isPending || unavailable || save.isPending} onClick={() => { setCloudflareResult(null); testCloudflare.mutate() }}>{testCloudflare.isPending ? 'Testing saved configuration…' : 'Test saved connection'}</Button></div>
           {cloudflareResult ? <InlineNotice tone={cloudflareResult.ok ? 'success' : 'warning'}><strong>{cloudflareResult.ok ? 'Connection verified.' : 'Connection unavailable.'}</strong> {cloudflareResult.message}{cloudflareResult.zone_name ? ` Zone: ${cloudflareResult.zone_name}.` : ''}</InlineNotice> : null}
         </Card>
 
-        <div className="sticky-actions"><Button type="submit" disabled={save.isPending || !form.formState.isDirty}>{save.isPending ? 'Saving…' : 'Save settings'}</Button><span aria-live="polite">{form.formState.isDirty ? 'Unsaved changes' : 'Settings up to date'}</span></div>
+        <div className="sticky-actions"><Button type="submit" disabled={save.isPending || unavailable || !form.formState.isDirty}>{save.isPending ? 'Saving…' : 'Save settings'}</Button><span aria-live="polite">{form.formState.isDirty ? 'Unsaved changes' : 'No unsaved edits'}</span></div>
       </form>
 
       <Card className="danger-zone">
         <div><p className="eyebrow">Danger zone</p><h2>Delete operational data</h2><p>Remove scan history, managed domains, and alerts while preserving configuration.</p></div>
-        <Button variant="danger" type="button" onClick={() => setClearOpen(true)}>Clear all scan data</Button>
+        <Button variant="danger" type="button" disabled={unavailable || save.isPending} onClick={() => setClearOpen(true)}>Clear all scan data</Button>
       </Card>
       <ConfirmDialog open={clearOpen} title="Clear all NorthFlux scan data?" description="This permanently deletes results, history, managed domains, alerts, and generated reports. Settings and audit logs remain. This cannot be undone." confirmLabel="Permanently clear data" error={clearData.error instanceof ApiError ? clearData.error.detail : clearData.error ? 'Scan data could not be cleared.' : undefined} dangerous busy={clearData.isPending} onCancel={() => { if (!clearData.isPending) setClearOpen(false) }} onConfirm={() => clearData.mutate()} />
     </div>

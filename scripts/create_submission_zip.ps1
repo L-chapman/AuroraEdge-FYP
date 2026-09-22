@@ -1,7 +1,11 @@
+#requires -Version 7.0
+
 param(
     [string]$OutputZip = "",
     [switch]$AllowDirty
 )
+
+$ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
@@ -10,6 +14,9 @@ if ([string]::IsNullOrWhiteSpace($OutputZip)) {
 }
 
 $OutputZip = [System.IO.Path]::GetFullPath($OutputZip)
+if ([System.IO.Path]::GetExtension($OutputZip) -ne ".zip") {
+    throw "The output path must name a .zip file."
+}
 $ChecksumPath = "$OutputZip.sha256"
 $DistDir = Split-Path -Parent $OutputZip
 $PackageRoot = "NorthFlux_Security"
@@ -95,7 +102,7 @@ function Get-RelativePathSafe {
         return $relative
     }
 
-    return Split-Path -Leaf $target
+    throw "Release input is outside the project: $target"
 }
 
 function Test-ExcludedPath {
@@ -147,15 +154,6 @@ function Test-ExcludedPath {
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-if (Test-Path $OutputZip) {
-    Remove-Item -LiteralPath $OutputZip -Force
-}
-if (Test-Path $ChecksumPath) {
-    Remove-Item -LiteralPath $ChecksumPath -Force
-}
-
-New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
-
 $files = @()
 
 if (-not (Test-Path (Join-Path $ProjectRoot ".git")) -or -not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -192,7 +190,12 @@ if (-not $files -or $files.Count -eq 0) {
     throw "No release files remain after applying the safety exclusions."
 }
 
-$zip = [System.IO.Compression.ZipFile]::Open($OutputZip, [System.IO.Compression.ZipArchiveMode]::Create)
+# Validate the checkout before touching the last good release. Build beside it,
+# then replace the output only once the new archive and checksum are complete.
+New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
+$TemporaryZip = Join-Path $DistDir (".northflux-" + [guid]::NewGuid().ToString("N") + ".zip")
+$TemporaryChecksum = "$TemporaryZip.sha256"
+$zip = [System.IO.Compression.ZipFile]::Open($TemporaryZip, [System.IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($file in $files) {
         $relativePath = Get-RelativePathSafe -TargetPath $file.FullName
@@ -209,13 +212,15 @@ finally {
     $zip.Dispose()
 }
 
-$archiveHash = (Get-FileHash -LiteralPath $OutputZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$archiveHash = (Get-FileHash -LiteralPath $TemporaryZip -Algorithm SHA256).Hash.ToLowerInvariant()
 $checksumLine = "$archiveHash  $(Split-Path -Leaf $OutputZip)`n"
 [System.IO.File]::WriteAllText(
-    $ChecksumPath,
+    $TemporaryChecksum,
     $checksumLine,
     [System.Text.UTF8Encoding]::new($false)
 )
+Move-Item -LiteralPath $TemporaryZip -Destination $OutputZip -Force
+Move-Item -LiteralPath $TemporaryChecksum -Destination $ChecksumPath -Force
 
 Write-Host "Created clean NorthFlux release ZIP:" -ForegroundColor Green
 Write-Host "  $OutputZip"
