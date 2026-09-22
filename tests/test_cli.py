@@ -82,7 +82,7 @@ def test_markdown_external_values_cannot_create_markup_or_extra_rows(tmp_path):
 
 
 @pytest.mark.parametrize("rich_output", [False, True])
-def test_database_save_failure_keeps_one_successful_scan_row(monkeypatch, caplog, rich_output):
+def test_database_save_failure_keeps_one_successful_scan_row(tmp_path, monkeypatch, caplog, rich_output):
     if rich_output and not cli.HAS_RICH:
         pytest.skip("Rich is not installed")
     monkeypatch.setattr(cli, "HAS_RICH", rich_output)
@@ -112,6 +112,9 @@ def test_database_save_failure_keeps_one_successful_scan_row(monkeypatch, caplog
     database.complete_scan.assert_called_once_with("test-scan", 2)
     assert scan.call_count == 2
     scan.assert_any_call("example.com", check_starttls=True)
+    report_path = tmp_path / "storage-warning.md"
+    cli.write_markdown(rows, report_path, "2026-09-22")
+    assert "not saved to the database" in report_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("rich_output", [False, True])
@@ -150,3 +153,72 @@ def test_scan_failure_returns_one_incomplete_row_without_saving(monkeypatch, ric
     assert rows[0][1] == {"error": "scan failed", "scan_incomplete": True}
     assert rows[0][2]["severity"] == "CRITICAL"
     database.save_result.assert_not_called()
+
+
+@pytest.mark.parametrize("flag_location", ["result", "evaluation"])
+def test_incomplete_csv_labels_state_and_omits_provisional_grades(tmp_path, flag_location):
+    from app.analysis import calculate_statistics
+
+    result = {"spf_present": False, "notes": "DNS lookup timed out"}
+    evaluation = {"score": 95, "grade": "A+", "severity": "ERROR", "advice": "Retry the scan"}
+    (result if flag_location == "result" else evaluation)["scan_incomplete"] = True
+    rows = [("partial.example.com", result, evaluation),
+            ("complete.example.com", {"spf_present": False, "spf_lookups": 0},
+             {"score": 0, "grade": "F", "severity": "HIGH"})]
+    path = tmp_path / "results.csv"
+
+    cli.write_csv(rows, path)
+
+    with path.open(encoding="utf-8", newline="") as report:
+        exported = list(csv.DictReader(report))
+    partial, complete = exported
+    assert partial["scan_incomplete"] == "True"
+    assert partial["grade"] == ""
+    assert partial["score"] == ""
+    assert "DNS lookup timed out" in partial["notes"]
+    assert "Incomplete scan" in partial["notes"]
+    assert partial["advice"] == "Retry the scan"
+    assert partial["spf_present"] == "False"
+    assert complete["scan_incomplete"] == "False"
+    assert complete["grade"] == "F"
+    assert complete["score"] == "0"
+    assert complete["spf_lookups"] == "0"
+    assert complete["spf_present"] == "False"
+    assert evaluation["grade"] == "A+"  # Do not mutate the scanner's observations.
+    statistics = calculate_statistics(exported)
+    assert statistics["score_avg"] == statistics["score_min"] == statistics["score_max"] == 0
+
+
+@pytest.mark.parametrize("include_complete", [False, True])
+def test_incomplete_markdown_has_no_grade_and_does_not_affect_statistics(tmp_path, include_complete):
+    rows = [("partial.example.com", {"scan_incomplete": True, "spf_present": False,
+             "notes": "DNS <script> failed|lookup\nRetry later"},
+             {"score": 95, "grade": "A+", "severity": "ERROR",
+              "advice": "[Review](https://example.invalid) before changes"})]
+    if include_complete:
+        rows.append(("complete.example.com", {"spf_present": False},
+                     {"score": 0, "grade": "F", "severity": "HIGH"}))
+    path = tmp_path / "results.md"
+
+    cli.write_markdown(rows, path, "2026-09-22")
+
+    report = path.read_text(encoding="utf-8")
+    assert "| partial.example.com | Incomplete | Not available | ERROR |" in report
+    assert "| Incomplete Scans | 1 |" in report
+    assert "| A+ | 0 |" in report
+    assert "| ERROR | 1 |" in report
+    if include_complete:
+        assert "| Average Score | 0.0 |" in report
+        assert "| Min Score | 0 |" in report
+        assert "| Max Score | 0 |" in report
+        assert "| complete.example.com | F | 0 | HIGH | N |" in report
+        assert "| F | 1 |" in report
+    else:
+        for metric in ("Average Score", "Min Score", "Max Score"):
+            assert f"| {metric} | Not available |" in report
+        assert "| F | 0 |" in report
+    assert "95" not in report
+    assert "Scan Notes & Advice" in report
+    assert "DNS &lt;script&gt; failed\\|lookup<br>Retry later" in report
+    assert "\\[Review\\]\\(https://example.invalid\\) before changes" in report
+    assert "<script>" not in report

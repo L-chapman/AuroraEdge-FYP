@@ -224,6 +224,24 @@ def scan_domains(
     return results
 
 
+def _incomplete_result(result: Dict, evaluation: Dict) -> bool:
+    """Either source can carry the scanner's incomplete-state flag."""
+    return bool(result.get("scan_incomplete") or evaluation.get("scan_incomplete"))
+
+
+def _report_notes(result: Dict, evaluation: Dict) -> str:
+    """Retain uncertainty, scan failures and storage warnings in saved reports."""
+    notes = []
+    if _incomplete_result(result, evaluation):
+        notes.append("Incomplete scan: no grade or score assigned. Retry before relying on these observations.")
+    for value in (result.get("notes"), result.get("error")):
+        if value is not None and value != "":
+            text = str(value)
+            if text not in notes:
+                notes.append(text)
+    return "; ".join(notes)
+
+
 def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
     """Write results to CSV file using csv.writer for safe escaping."""
     csv_cols = [
@@ -253,13 +271,18 @@ def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
         "starttls_worst",
         "notes",
         "advice",
+        "scan_incomplete",
     ]
 
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv_mod.writer(f)
         writer.writerow(csv_cols)
         for domain, res, ev in rows:
-            combined = {**res, **ev, "domain": domain}
+            incomplete = _incomplete_result(res, ev)
+            combined = {**res, **ev, "domain": domain, "scan_incomplete": incomplete,
+                        "notes": _report_notes(res, ev)}
+            if incomplete:
+                combined.update(grade=None, score=None)
             writer.writerow([
                 "" if combined.get(col) is None else str(combined[col]) for col in csv_cols
             ])
@@ -283,28 +306,33 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         "",
         "## Summary Statistics",
         "",
+        "Score summaries and grade distribution include only complete scans.",
+        "",
     ]
 
     # Calculate statistics
-    scores = [ev.get("score", 0) for _, _, ev in rows]
-    avg_score = sum(scores) / len(scores) if scores else 0
+    complete_rows = [row for row in rows if not _incomplete_result(row[1], row[2])]
+    scores = [ev.get("score", 0) for _, _, ev in complete_rows]
+    avg_score = f"{sum(scores) / len(scores):.1f}" if scores else "Not available"
 
-    severity_counts = {"OK": 0, "INFO": 0, "WARN": 0, "HIGH": 0, "CRITICAL": 0}
+    severity_counts = {"OK": 0, "INFO": 0, "WARN": 0, "HIGH": 0, "CRITICAL": 0, "ERROR": 0}
     grade_counts = {"A+": 0, "A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
 
-    for _, _, ev in rows:
+    for _, res, ev in rows:
         sev = ev.get("severity", "OK")
-        grade = ev.get("grade", "F")
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
-        grade_counts[grade] = grade_counts.get(grade, 0) + 1
+        if not _incomplete_result(res, ev):
+            grade = ev.get("grade", "F")
+            grade_counts[grade] = grade_counts.get(grade, 0) + 1
 
     lines.extend(
         [
             "| Metric | Value |",
             "|--------|-------|",
-            f"| Average Score | {avg_score:.1f} |",
-            f"| Min Score | {min(scores) if scores else 0} |",
-            f"| Max Score | {max(scores) if scores else 0} |",
+            f"| Average Score | {avg_score} |",
+            f"| Min Score | {min(scores) if scores else 'Not available'} |",
+            f"| Max Score | {max(scores) if scores else 'Not available'} |",
+            f"| Incomplete Scans | {len(rows) - len(complete_rows)} |",
             "",
             "### Grade Distribution",
             "",
@@ -324,7 +352,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
             "|----------|-------|",
         ]
     )
-    for sev in ["OK", "INFO", "WARN", "HIGH", "CRITICAL"]:
+    for sev in ["OK", "INFO", "WARN", "HIGH", "CRITICAL", "ERROR"]:
         lines.append(f"| {sev} | {severity_counts.get(sev, 0)} |")
 
     # Detailed results table
@@ -339,6 +367,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
     )
 
     for domain, res, ev in rows:
+        incomplete = _incomplete_result(res, ev)
         spf = "Y" if res.get("spf_present") else "N"
         dmarc = res.get("dmarc_policy", "N") if res.get("dmarc_present") else "N"
         dkim = "Y" if res.get("dkim_present") else "N"
@@ -346,9 +375,19 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         tls = "Y" if res.get("tls_rpt_present") else "N"
         violations = ev.get("violation_count", 0)
 
-        cells = (domain, ev.get("grade", "F"), ev.get("score", 0), ev.get("severity", "OK"),
+        cells = (domain, "Incomplete" if incomplete else ev.get("grade", "F"),
+                 "Not available" if incomplete else ev.get("score", 0), ev.get("severity", "OK"),
                  spf, dmarc, dkim, sts, tls, violations)
         lines.append("| " + " | ".join(_markdown_cell(cell) for cell in cells) + " |")
+
+    note_rows = [(domain, _report_notes(res, ev), ev.get("advice") or "")
+                 for domain, res, ev in rows]
+    note_rows = [row for row in note_rows if row[1] or row[2]]
+    if note_rows:
+        lines.extend(["", "## Scan Notes & Advice", "",
+                      "| Domain | Notes | Advice |", "|--------|-------|--------|"])
+        for row in note_rows:
+            lines.append("| " + " | ".join(_markdown_cell(cell) for cell in row) + " |")
 
     # Common violations section
     violation_counts = {}

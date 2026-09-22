@@ -92,7 +92,7 @@ Evidence: [frontend tests](TESTING.md#frontend-unit-and-component-suite), [brows
 
 Visual PDF review found long details running outside the page and saved BIMI fields missing from the report. Details now wrap, stored raw evidence is merged with authoritative database fields, metadata is escaped, and incomplete reports clearly omit the grade. Record-presence labels say “Found”, not “PASS”: existence is not proof of a secure policy. Very long details have an explicit truncation notice.
 
-CSV exports preserve `0`, `False` and empty values separately. Markdown escapes external text that could otherwise create extra rows or HTML. CLI storage failures no longer create a second contradictory scan row or discard completed reports; they preserve the result with a warning. Chart/statistics handling rejects non-finite scores and uses the configured report folder.
+CSV exports preserve `0`, `False` and empty values separately. Incomplete CSV rows have an explicit flag and no score/grade; Markdown marks them incomplete and excludes them from score summaries and grade distributions. Both retain uncertainty notes and storage warnings. Markdown escapes external text that could otherwise create extra rows or HTML. CLI storage failures no longer create a second contradictory scan row or discard completed reports; they preserve the result with a warning. Chart/statistics handling rejects non-finite scores and uses the configured report folder.
 
 Evidence: [PDF tests](../tests/test_pdf_reports.py), [CLI tests](../tests/test_cli.py), [analysis tests](../tests/test_analysis.py). Complete and incomplete PDF samples were rendered and visually inspected during the local review.
 
@@ -110,7 +110,7 @@ Local validation uses Windows, Python 3.12.10 and Node.js 24. The final evidence
 
 | Check | Local review evidence |
 |---|---|
-| Python tests | 610 passed; 2 platform/privilege-dependent packaging cases skipped on this Windows host |
+| Python tests | 614 passed; 2 platform/privilege-dependent packaging cases skipped on this Windows host |
 | Frontend unit/component tests | 111 passed across 16 files |
 | Browser tests | 39 passed: 13 each in Chromium, WebKit and mobile Chromium; Linux CI is required for Firefox |
 | Frontend quality | Type checking, lint, production build and scoped coverage checks |
@@ -123,7 +123,7 @@ The measured backend coverage is approximately **65% including branches**, not 1
 
 The local test framework emits an upstream deprecation warning; package audits can emit cache warnings while rebuilding stale cache entries. Those are not passing evidence for unsupported environments, but neither is an upstream warning automatically an application crash. No known dependency vulnerability was reported by the completed audits in this review. Recheck before subsequent releases.
 
-Windows Firefox could not launch on this machine in the earlier local checks; it must not be counted as passed here. CI additionally covers Python 3.10/3.12 on Windows and Ubuntu, clean launch with Node 22.12/24, Linux's four browser profiles, Windows Chromium, and the restricted production container. The same backend suite runs 612 cases on Ubuntu, 611 with one filename-related skip on Windows CI, and 607 with five packaging-tool skips inside the restricted container. See [Testing](TESTING.md) for commands and the exact supported matrix.
+Windows Firefox could not launch on this machine in the earlier local checks; it must not be counted as passed here. CI additionally covers Python 3.10/3.12 on Windows and Ubuntu, clean launch with Node 22.12/24, Linux's four browser profiles, Windows Chromium, and the restricted production container. The same backend suite runs 616 cases on Ubuntu, 615 with one filename-related skip on Windows CI, and 611 with five packaging-tool skips inside the restricted container. See [Testing](TESTING.md) for commands and the exact supported matrix.
 
 ## What should improve next
 
