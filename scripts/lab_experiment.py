@@ -15,7 +15,7 @@ Requirements:
     - A test domain you control in Cloudflare
     - Network access for DNS queries
 
-Reference: docs/VERIFICATION_REPORT.md Section 5
+Reference: docs/academic/archive/VERIFICATION_REPORT.md Section 5
 """
 import argparse
 import json

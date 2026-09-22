@@ -42,10 +42,10 @@ export function StatusBadge({ value }: { value: string | number | null | undefin
   return <span className={`status-badge status-badge--${tone}`}>{label}</span>
 }
 
-export function Metric({ label, value, detail }: { label: string; value: ReactNode; detail?: string }) {
+export function Metric({ label, value, detail, icon }: { label: string; value: ReactNode; detail?: string; icon?: ReactNode }) {
   return (
     <Card className="metric">
-      <p className="metric__label">{label}</p>
+      <div className="metric__heading"><p className="metric__label">{label}</p>{icon}</div>
       <p className="metric__value">{value}</p>
       {detail ? <p className="metric__detail">{detail}</p> : null}
     </Card>

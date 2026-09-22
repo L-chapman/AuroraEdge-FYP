@@ -1,10 +1,13 @@
 .git
-.github
 .venv
 .venv-*
 venv
 .pytest_cache
 .mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+coverage.xml
 **/__pycache__
 *.py[cod]
 *.db
@@ -57,7 +60,6 @@ logs/
 reports/
 state/
 dist/
-docs/
 
 # Frontend dependencies, caches, build output, and test evidence are rebuilt
 # in dedicated image stages from the lockfile and source.

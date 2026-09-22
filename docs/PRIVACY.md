@@ -6,7 +6,7 @@ Local state can contain domain names, scan timestamps, findings, organisation se
 
 In production, Cloudflare tokens, global API keys, and the associated account email are read from the runtime environment and are not copied into SQLite. If an older database contains one of those values, NorthFlux ignores it; once a replacement environment value is supplied, the legacy stored value is removed.
 
-The Settings action **Clear All Scan Data** removes stored scan history, managed-domain and alert data, and generated files under the configured reports directory. It deliberately preserves application settings and log files. Per-domain deletion removes that domain's stored history and resets its managed-domain scan metadata, but it does not erase audit or application logs. Operators must manage retained settings and logs separately when their retention policy requires deletion.
+The Settings action **Clear All Scan Data** removes stored scan history, managed-domain and alert data, and recognised scan-report files in the configured report locations. It is not a general folder cleaner: unrelated files, unrecognised filenames, and arbitrary nested folders are preserved. Application settings and log files are also preserved. Per-domain deletion removes that domain's stored history and resets its managed-domain scan metadata, but it does not erase audit or application logs. Operators must manage retained settings and logs separately when their retention policy requires deletion.
 
 Operators should:
 

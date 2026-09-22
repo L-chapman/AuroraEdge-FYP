@@ -8,6 +8,10 @@ import type { Bootstrap, SettingsResponse } from '../api/types'
 import { Button, Card, ConfirmDialog, ErrorState, Field, InlineNotice, LoadingState, PageHeader, StatusBadge } from '../components/ui'
 import { buildSettingsPayload } from './settingsPayload'
 
+// Keep validation compatible with our no-eval CSP, including Zod's feature probe.
+// This must run before creating an object schema, not only when parsing a form.
+z.config({ jitless: true })
+
 const settingsSchema = z.object({
   org_name: z.string().trim().max(120, 'Organisation name must be 120 characters or fewer.'),
   alert_email: z.union([z.literal(''), z.email('Enter a valid email address.')]),
@@ -93,7 +97,7 @@ export function SettingsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Platform administration" title="Settings" description="Configure monitoring and integrations without exposing runtime credentials to the browser." />
+      <PageHeader eyebrow="Make it yours" title="Settings" description="Choose when your domains are checked, connect optional services, and manage your workspace data." />
       {message ? <InlineNotice tone="success">{message}</InlineNotice> : null}
       {mutationError ? <InlineNotice tone="danger">{mutationError instanceof ApiError ? mutationError.detail : 'The operation failed.'}</InlineNotice> : null}
       <form className="page-stack" onSubmit={form.handleSubmit((values) => save.mutate(values))} noValidate>

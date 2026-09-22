@@ -11,17 +11,18 @@
   color: var(--generator-text);
   margin: 0 auto;
   max-width: 92rem;
-  padding: clamp(1rem, 3vw, 2rem);
+  padding: 0;
+  width: 100%;
 }
 
 .dns-generator-page__header {
-  margin-bottom: 1.5rem;
+  margin-bottom: clamp(.4rem, 2vw, 1.5rem);
   max-width: 52rem;
 }
 
 .dns-generator-page__header h1 {
-  font-size: clamp(1.8rem, 4vw, 2.5rem);
-  line-height: 1.15;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.06;
   margin: 0.25rem 0 0.75rem;
 }
 
@@ -50,10 +51,10 @@
 
 .dns-generator-card {
   align-self: start;
-  background: var(--generator-surface);
+  background: linear-gradient(145deg, rgb(21 31 49 / 94%), rgb(13 20 34 / 95%));
   border: 1px solid var(--generator-border);
   border-radius: 1rem;
-  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 18%);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 3%) inset;
   padding: clamp(1rem, 2vw, 1.5rem);
 }
 

@@ -1,16 +1,40 @@
 # NorthFlux Security deployment
 
-This guide describes the supported single-instance Docker deployment. NorthFlux currently embeds its scheduler and uses SQLite, so run exactly one application worker and one container against a given state volume.
+This guide covers two different needs: trying NorthFlux on your own computer, and keeping it running as a private service. A local launch does not make a server safe to expose to the Internet.
 
-## Prerequisites
+For a lasting installation, the supported design is one Docker container. NorthFlux runs scheduled checks inside the application and stores its data in a local SQLite database. Run exactly one application worker and one container against the same stored data; multiple copies are not supported.
+
+## Try it on Windows or Linux
+
+Install Python 3.10 or newer and Node.js 22.12 or newer, including npm. Linux also needs Python's `venv` support, often supplied by the distribution's `python3-venv` package. You need Internet access for the first dependency installation and live domain checks, and a writable project folder. A minimum version is not a claim that every newer version or operating system has been tested; see [Testing](TESTING.md) for the evidence.
+
+From the downloaded or cloned project folder:
+
+```powershell
+# Windows PowerShell
+.\START.bat
+```
+
+```bash
+# Linux
+sh ./start.sh
+```
+
+The launcher prepares a private Python environment, installs the declared dependencies, builds the React interface, and starts the local service. Stop it with Ctrl+C. Files created during setup and use are kept out of Git. The local launch has no sign-in requirement unless you supply `DASH_TOKEN`; use it only on your own trusted computer.
+
+For a machine without a desktop browser, use `python start.py --no-browser --port 8080` (or `python3` on Linux). `--setup-only` installs and builds without starting the server. `--smoke-test` starts a short, isolated check of the built interface and storage readiness, with temporary data and Cloudflare credentials removed, then stops. These are local review tools, not a production service manager. Inherited production mode is rejected by the ordinary local launcher; use the production setup below instead.
+
+The local application is reached at `http://127.0.0.1:8080`; it is not available to other computers. If the port is already in use, choose another with `--port`, rather than stopping an unrelated program. If Python, Node, or npm cannot be found, reopen the terminal after installing them. An interrupted package download can normally be retried by rerunning the launcher. If a `.venv` came from another operating system or is broken, follow the launcher's advice to rename it as a backup before trying again. Do not disable firewall, certificate, or security checks to make installation succeed.
+
+## Production prerequisites
 
 - Docker Engine with Compose v2
 - A private host or VM with persistent storage
-- A TLS reverse proxy for any access beyond localhost
+- An HTTPS reverse proxy for access beyond the same computer (a trusted front-end service that handles encrypted browser connections)
 - A long random dashboard token
 - Optional least-privilege Cloudflare credentials for authorised remediation
 
-The supported Docker build compiles the React application in an isolated Node.js stage. Node.js is not required on the deployment host and is not present in the final image. A source-based deployment without Docker additionally requires Node.js 22.12 or newer to create `frontend/dist`.
+The Docker build prepares the React interface in a separate build stage. Node.js is not required on the deployment host and is not present in the final image. Docker must be configured to run Linux containers, including on Windows. A source-based deployment without Docker additionally requires Node.js 22.12 or newer to create `frontend/dist`.
 
 ## Configure
 
@@ -54,7 +78,7 @@ python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080 --workers 1
 
 ## Reverse proxy
 
-Terminate HTTPS at Nginx, Caddy, Traefik, or an equivalent trusted proxy. Forward to `http://127.0.0.1:8080`, retain the original host and forwarding headers, and restrict direct access to the application port.
+Use Nginx, Caddy, Traefik, or an equivalent trusted proxy to provide HTTPS. Forward to `http://127.0.0.1:8080`, retain the original host and forwarding headers, and restrict direct access to the application port. The exact proxy and certificate setup depends on the host and domain; it is not included in the local launcher.
 
 The production login cookie is marked `Secure`, so browser access must use HTTPS. NorthFlux checks the browser `Origin` and a per-session CSRF token on state-changing cookie-authenticated requests. Preserve `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto`, or set `NORTHFLUX_PUBLIC_ORIGIN` to the exact external HTTPS origin. Do not expose Uvicorn directly to the Internet.
 
@@ -66,7 +90,7 @@ Production Cloudflare secrets are read only from the runtime environment. During
 
 ## Persistent data
 
-The Compose file uses Docker-managed volumes so the non-root application user receives correctly owned storage on Linux, Windows, and macOS:
+The Compose file uses Docker-managed volumes rather than host-folder ownership assumptions. These are persistent storage areas managed by Docker:
 
 | Volume | Container path | Contents |
 |---|---|---|
@@ -76,7 +100,7 @@ The Compose file uses Docker-managed volumes so the non-root application user re
 
 Non-Compose service deployments can place these paths elsewhere with `NORTHFLUX_STATE_DIR`, `NORTHFLUX_REPORTS_DIR`, and `NORTHFLUX_LOGS_DIR`. Relative values resolve from the project root; absolute values are recommended in service definitions. All three locations must be writable by the NorthFlux process and protected from other users.
 
-Back up the three volumes together while the application container is stopped. The command below writes the archive to a host `backups/` directory and does not modify the volumes:
+Back up the three volumes together while the application container is stopped. Run the example below in a Linux shell on the Docker host. It writes the archive to a host `backups/` directory and does not modify the volumes:
 
 ```bash
 mkdir -p backups
@@ -120,3 +144,28 @@ Monitoring and automatic remediation are separate settings and are disabled by d
 6. Enable automatic remediation only after the audit log and recovery path have been verified.
 
 DKIM remains manual because provider-specific selector targets and public keys cannot be inferred safely from MX records alone.
+
+## Configuration reference
+
+Environment variables are settings supplied to the running application. Keep secret values in the protected service configuration, not in source code. Compose reads its own `.env` file; the Python application and local launcher do not automatically read `.env` during a manual launch.
+
+| Variable | What it controls | Guidance |
+|---|---|---|
+| `NORTHFLUX_ENV` | Local or production mode | Use `production` for a lasting server installation |
+| `NORTHFLUX_PORT` | Host port for Compose or the local launcher | Defaults to `8080`; the container still listens on `8080`. The launcher also accepts `--port`. |
+| `DASH_TOKEN` | Secret used to sign in and access the API | Required in production; use a random value of at least 32 characters |
+| `NORTHFLUX_PUBLIC_ORIGIN` | Public browser address used by anti-forgery checks | Set to the exact external HTTPS origin if the proxy cannot supply it |
+| `NORTHFLUX_LOG_LEVEL` | How much detail is logged | `INFO` is the normal default |
+| `NORTHFLUX_STATE_DIR` | Database folder | Defaults to `state/`; use private, persistent storage |
+| `NORTHFLUX_REPORTS_DIR` | Generated report folder | Defaults to `reports/`; use private, persistent storage |
+| `NORTHFLUX_LOGS_DIR` | Application and DNS audit log folder | Defaults to `logs/`; use private, persistent storage |
+| `NORTHFLUX_SERVE_REACT` | Whether to serve the compiled React interface | Enabled automatically in production and by the local launcher |
+| `NORTHFLUX_FRONTEND_DIST` | Location of the compiled interface | Defaults to `frontend/dist`; normally leave unchanged |
+| `NORTHFLUX_DEMO_MODE` | Legacy demonstration behaviour | Disabled by default and unavailable in production; not needed for normal setup |
+| `CF_API_TOKEN` | Scoped Cloudflare credential | Use a secret manager or protected service environment; optional for read-only scans |
+| `CF_ZONE_ID` | Cloudflare zone authorised for changes | Required for DNS fixes |
+| `CF_ACCOUNT_ID` | Cloudflare account | Required for Worker deployment |
+| `CF_API_KEY` / `CF_EMAIL` | Legacy Cloudflare sign-in method | Prefer a scoped API token |
+| `NORTHFLUX_PYTHON` | Python command used by the launch wrappers | Optional; normally leave unset |
+
+The old `AURORAEDGE_LOG_LEVEL` setting is retained for compatibility. Absolute storage paths are recommended in service definitions. Restart the service after changing environment settings, and do not pass secret values in a public screenshot or bug report.

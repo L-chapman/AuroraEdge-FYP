@@ -17,6 +17,9 @@ __pycache__/
 venv/
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
 coverage/
 htmlcov/
 coverage.xml
@@ -24,7 +27,7 @@ coverage.xml
 logs/
 reports/
 *.log
-# Node (optional)
+# React dependencies and generated output
 node_modules/
 npm-debug.log*
 frontend/node_modules/

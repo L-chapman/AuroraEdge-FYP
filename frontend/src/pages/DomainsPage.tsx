@@ -89,9 +89,9 @@ export function DomainsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader eyebrow="Continuous monitoring" title="Managed domains" description="Track posture over time and respond to authentication drift before it affects delivery or trust." />
+      <PageHeader eyebrow="Your domains" title="Managed domains" description="Keep track of your domains, compare past checks, and review changes to their email protections." />
       <Card>
-        <div className="section-heading"><div><p className="eyebrow">Onboard safely</p><h2>Add a business domain</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">Start with a domain</p><h2>Add a business domain</h2></div></div>
         <form className="inline-form" onSubmit={submit} noValidate>
           <Field label="Domain" htmlFor="managed-domain" error={error || undefined}>
             <input id="managed-domain" value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="example.com" />
@@ -109,7 +109,7 @@ export function DomainsPage() {
       <Card>
         <div className="section-heading"><div><p className="eyebrow">Portfolio</p><h2>{domainsQuery.data.count} monitored domain{domainsQuery.data.count === 1 ? '' : 's'}</h2></div></div>
         {domainsQuery.data.domains.length === 0 ? (
-          <EmptyState title="No domains under management" description="Add your first domain above, or run an on-demand scan without enrolling it." action={<Link className="button button--secondary" to="/scan">Open scanner</Link>} />
+          <EmptyState title="No domains under management" description="Add your first domain above, or run a one-off scan without adding it to monitoring." action={<Link className="button button--secondary" to="/scan">Open scanner</Link>} />
         ) : (
           <div className="domain-card-grid">
             {domainsQuery.data.domains.map((item) => (

@@ -8,7 +8,7 @@ async function signIn(page: Page) {
   await page.getByLabel('Operator token').fill(token)
   await page.getByRole('button', { name: 'Sign in securely' }).click()
   await expect(page).toHaveURL(/\/$/)
-  await expect(page.getByRole('heading', { name: 'Your email security posture' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Email security, at a glance' })).toBeVisible()
 }
 
 async function clearData(page: Page) {
@@ -60,7 +60,7 @@ test('rejects a bad token, signs in without browser storage, and signs out', asy
   await page.getByLabel('Operator token').fill(token)
   await page.getByRole('button', { name: 'Sign in securely' }).click()
   await expect(page).toHaveURL(/\/$/)
-  await expect(page.getByRole('heading', { name: 'Your email security posture' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Email security, at a glance' })).toBeVisible()
   expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 })
 
   // Expired cookies must invalidate the cached React session as soon as a

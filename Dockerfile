@@ -59,8 +59,10 @@ FROM runtime AS test
 
 USER root
 ENV NORTHFLUX_ENV=development
-COPY requirements-dev.txt pyproject.toml verify_system.py ./
-COPY tests ./tests
+# Tests cover the source launchers and documentation links as well as the API.
+# .dockerignore excludes local data, secrets and generated dependencies. Only
+# this test stage receives the review files; production still derives from runtime.
+COPY . ./
 RUN python -m pip install --no-cache-dir -r requirements-dev.txt \
     && chown -R northflux:northflux /app
 USER northflux

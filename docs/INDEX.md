@@ -1,21 +1,22 @@
-# NorthFlux Security documentation
+# NorthFlux Security guides
 
-Use the current product documents for installation and operation:
+Start with the guide that matches what you want to do. The everyday guides explain the product in plain language; the architecture and testing guides provide the detail needed to review the code.
 
-| Document | Purpose |
+| I want to… | Read this |
 |---|---|
-| [README](../README.md) | Product overview, quick start, configuration, and status |
-| [Architecture](ARCHITECTURE.md) | Components, data flow, safety boundaries, and refactor plan |
-| [Deployment](DEPLOYMENT.md) | Docker, reverse proxy, persistence, backup, update, and rollback |
-| [Security policy](../SECURITY.md) | Reporting and deployment security expectations |
-| [Testing guide](TESTING.md) | Manual and automated verification workflows |
-| [Integrations](INTEGRATIONS.md) | Cloudflare, proxy, and mail-system boundaries |
-| [Privacy](PRIVACY.md) | Data scope, operator responsibility, and privacy boundaries |
-| [Contributing](../CONTRIBUTING.md) | Development and review expectations |
-| [Changelog](../CHANGELOG.md) | NorthFlux release changes |
+| Understand the project and try it locally | [Main README](../README.md) |
+| Review the features and the engineering behind them | [Project tour](PROJECT_TOUR.md) |
+| Run a private, lasting installation | [Deployment](DEPLOYMENT.md) |
+| See what has actually been tested, or run the checks | [Testing](TESTING.md) |
+| Understand the code and design decisions | [Architecture](ARCHITECTURE.md) |
+| Connect Cloudflare or a mail system | [Integrations](INTEGRATIONS.md) |
+| Understand what data is kept | [Privacy](PRIVACY.md) |
+| Report a security concern | [Security policy](../SECURITY.md) |
+| Make a contribution | [Contributing](../CONTRIBUTING.md) |
+| See what changed | [Changelog](../CHANGELOG.md) |
 
-## Historical project evidence
+## Earlier project work
 
-NorthFlux was previously named AuroraEdge and later served as Leon Chapman's final-year project. The original specification, academic notebook, stage notes, progress logs, reports, competitor analysis, and submission records are retained as historical evidence. Start with the [academic archive guide](academic/README.md).
+NorthFlux began as AuroraEdge and later became Leon Chapman's final-year project. The original specification, notebook, development stages, studies, and figures are preserved together in the [academic archive](academic/README.md). Nothing there is required to install the current application.
 
-Historical snapshots can contain stale setup advice or feature descriptions. Follow the current documents above when operating the application.
+Archived material describes earlier versions and may contain outdated commands or claims. Use the guides above for the current product.
