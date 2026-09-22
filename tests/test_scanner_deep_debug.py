@@ -258,4 +258,3 @@ def test_negative_dns_answers_are_not_operational_failure(monkeypatch, isolated_
     assert scanner.scan_domain("example.com")["scan_incomplete"] is False
 def test_retired_sorbs_service_is_not_queried():
     assert "dnsbl.sorbs.net" not in scanner._DNSBL_ZONES
-
