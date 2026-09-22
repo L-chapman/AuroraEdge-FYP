@@ -12,6 +12,7 @@ from app.scanner import scan_domain, is_valid_domain
 from app.rules import evaluate, generate_remediation
 from app.database import get_database
 from app.dns_fix import get_cloudflare_client
+from app.runtime_paths import INDEXED_REPORTS_DIR
 
 logger = logging.getLogger("northflux.cli")
 
@@ -495,8 +496,11 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
     parser.add_argument("--domains", help="Path to text file with one domain per line")
     parser.add_argument(
         "--outdir",
-        default="reports/indexed",
-        help="Output folder for reports (default: reports/indexed)",
+        default=str(INDEXED_REPORTS_DIR),
+        help=(
+            "Output folder for reports "
+            "(default: NORTHFLUX_REPORTS_DIR/indexed or reports/indexed)"
+        ),
     )
     parser.add_argument(
         "--starttls",

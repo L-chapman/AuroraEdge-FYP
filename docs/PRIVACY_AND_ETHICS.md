@@ -1,5 +1,7 @@
 # AuroraEdge — Privacy, Legal & Ethics Policy
 
+> **Historical academic snapshot:** This April 2026 policy describes the AuroraEdge prototype. It does not describe NorthFlux Security 4.0 session cookies, deployment defaults, retention choices, licensing, or the current legal-risk framing. Use the current [`PRIVACY.md`](PRIVACY.md) and [`DEPLOYMENT.md`](DEPLOYMENT.md) before operating the product.
+
 *Version 3.3 — April 2026*
 *Final Year Project — Leon Chapman*
 

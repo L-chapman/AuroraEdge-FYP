@@ -1,5 +1,7 @@
 ﻿# Implementation Markers Log
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../../README.md) and [`testing guide`](../TESTING.md).
+
 ### Mark (2025-11-06 15:22:29Z)
 - Stage 2 • Substage 2.0 — SPF recursion & DMARC strength
 

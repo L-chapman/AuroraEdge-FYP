@@ -1,5 +1,7 @@
 # Final Testing, Documentation & Submission Progress Record
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../../README.md) and [`testing guide`](../TESTING.md).
+
 ## Comprehensive Testing (06-12 Jan 2026)
 **Focus**: Comprehensive Testing
 

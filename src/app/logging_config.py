@@ -8,9 +8,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
+from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
+
 # Paths
-ROOT = Path(__file__).resolve().parents[2]
-LOG_DIR = ROOT / "logs"
+ROOT = PROJECT_ROOT
+LOG_DIR = LOGS_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Log files

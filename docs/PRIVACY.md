@@ -1,10 +1,12 @@
 # NorthFlux Security privacy and operating boundaries
 
-NorthFlux Security evaluates public DNS records, public MTA-STS policy files, public mail-routing information, and externally visible SMTP transport behaviour. It does not log in to mailboxes, read messages, collect message bodies, or test credentials.
+NorthFlux Security evaluates public DNS records, public MTA-STS policy files, public mail-routing information, and externally visible SMTP transport behaviour. It does not log in to mailboxes, read messages, collect message bodies, or test mailbox credentials.
 
-Local state can contain domain names, scan timestamps, findings, organisation settings, contact details entered by an operator, Cloudflare identifiers, and—in local development—Cloudflare credentials entered through Settings. Reports and logs can contain the same domain-security information.
+Local state can contain domain names, scan timestamps, findings, organisation settings, contact details entered by an operator, Cloudflare identifiers, and—in local development—Cloudflare credentials entered through Settings. Reports and logs can contain the same domain-security information. The `NORTHFLUX_STATE_DIR`, `NORTHFLUX_REPORTS_DIR`, and `NORTHFLUX_LOGS_DIR` settings can relocate these stores but do not encrypt or redact them.
 
 In production, Cloudflare tokens, global API keys, and the associated account email are read from the runtime environment and are not copied into SQLite. If an older database contains one of those values, NorthFlux ignores it; once a replacement environment value is supplied, the legacy stored value is removed.
+
+The Settings action **Clear All Scan Data** removes stored scan history, managed-domain and alert data, and generated files under the configured reports directory. It deliberately preserves application settings and log files. Per-domain deletion removes that domain's stored history and resets its managed-domain scan metadata, but it does not erase audit or application logs. Operators must manage retained settings and logs separately when their retention policy requires deletion.
 
 Operators should:
 
@@ -18,6 +20,10 @@ Operators should:
 
 NorthFlux does not make a categorical legal determination about scanning. Its technical scope is limited to public-facing configuration checks and explicitly authorised DNS changes.
 
-The application is self-hosted. It does not intentionally send scan history or application analytics to the project maintainer. Network requests required for operation go to the target domain's public services, DNS resolvers, configured Cloudflare APIs, and any external resources explicitly used by the dashboard such as the Chart.js CDN.
+The application is self-hosted. It does not intentionally send scan history or application analytics to the project maintainer. Network requests required for operation go to the target domain's public services, DNS resolvers, and configured Cloudflare APIs.
+
+The production React frontend is built from repository-pinned dependencies and serves its scripts, styles, and fonts from the NorthFlux origin. It does not load browser analytics, third-party fonts, or frontend CDNs, and its Content Security Policy restricts browser connections to the application origin. The deprecated development fallback still references a Chart.js CDN; it is not the supported production interface.
+
+The frontend bundle is public application code. Never place Cloudflare credentials, dashboard tokens, personal data, or environment-specific secrets in `frontend/`, Vite build variables, or `frontend/dist`. Authentication exchanges the operator token for an HttpOnly server session; the React client does not persist that token in local or session storage. A non-HttpOnly CSRF companion cookie is readable by the client by design and is not an authentication credential.
 
 For a public demonstration, disable Cloudflare credentials and automatic remediation, use a dedicated non-sensitive dataset, and avoid exposing internal domain names or infrastructure details.

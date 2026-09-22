@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from collections import Counter
 
+from app.runtime_paths import REPORTS_DIR
+
 logger = logging.getLogger("northflux.analysis")
 
 # Try to import plotting libraries (optional)
@@ -24,7 +26,7 @@ except ImportError:
 
 # Project paths
 ROOT = Path(__file__).resolve().parents[2]
-REPORTS_ROOT = ROOT / "reports"
+REPORTS_ROOT = REPORTS_DIR
 REPORTS = REPORTS_ROOT / "indexed"
 FIGURES = ROOT / "docs" / "figures"
 

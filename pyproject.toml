@@ -1,6 +1,6 @@
 [project]
 name = "northflux-security"
-version = "3.2.0"
+version = "4.0.0"
 description = "Self-hosted email security assessment and remediation platform"
 requires-python = ">=3.10"
 

@@ -1,3 +1,27 @@
+FROM node:24-alpine AS frontend-dependencies
+
+WORKDIR /frontend
+
+# Copy dependency manifests first so Docker can reuse the npm install layer.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+
+FROM frontend-dependencies AS frontend-build
+
+COPY frontend/ ./
+RUN npm run build
+
+
+FROM frontend-dependencies AS frontend-test
+
+COPY frontend/ ./
+RUN npm run typecheck \
+    && npm run lint \
+    && npm run test:coverage \
+    && npm run build
+
+
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
@@ -16,6 +40,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
+COPY --from=frontend-build --chown=northflux:northflux /frontend/dist ./frontend/dist
 
 RUN mkdir -p /app/state /app/reports/indexed /app/reports/archive /app/logs /tmp/matplotlib \
     && chown -R northflux:northflux /app/state /app/reports /app/logs /tmp/matplotlib

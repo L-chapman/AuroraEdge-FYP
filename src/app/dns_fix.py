@@ -5,8 +5,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+
+from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
 
 # Optional requests import for Cloudflare API calls
 try:
@@ -28,8 +29,8 @@ CF_API_KEY = os.environ.get("CF_API_KEY", "")
 CF_EMAIL = os.environ.get("CF_EMAIL", "")
 
 # Audit log path (rotated, max 2 MB, 3 backups)
-ROOT = Path(__file__).resolve().parents[2]
-AUDIT_LOG = ROOT / "logs" / "dns_audit.log"
+ROOT = PROJECT_ROOT
+AUDIT_LOG = LOGS_DIR / "dns_audit.log"
 AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
 _audit_handler = RotatingFileHandler(
     AUDIT_LOG, maxBytes=2_000_000, backupCount=3, encoding="utf-8"

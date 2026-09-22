@@ -1,9 +1,11 @@
 ﻿# AuroraEdge Development Status Log
 
+> **Historical academic snapshot:** This file records the pre-migration final-year project and is not current operating guidance. For NorthFlux Security 4.0 setup and verification, use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## How To Use This Log
 
 - Use this file for the full development timeline, platform status, and test coverage breakdown.
-- Use `README.md` and `docs/TESTING_GUIDE.md` for setup and evaluation steps.
+- Use `README.md` and `docs/TESTING.md` for current setup and evaluation steps.
 - Treat the sections below as project evidence rather than first-time user guidance.
 
 ## Project Timeline (September 2025 - February 2026)

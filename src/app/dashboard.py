@@ -16,6 +16,7 @@ import threading
 import tempfile
 import html as html_lib
 import time as _time
+import importlib.util
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -24,10 +25,33 @@ from urllib.parse import parse_qs
 
 from app.branding import DEMO_DOMAIN, PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_VERSION
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Query
+from fastapi import FastAPI, Depends, HTTPException, Request, Query, Response
 from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.api_models import (
+    AlertResponse,
+    AuthState,
+    BootstrapResponse,
+    CapabilityMetadata,
+    DashboardResponse,
+    DashboardSettings,
+    DashboardStats,
+    LoginRequest,
+    ManagedDomainResponse,
+    OperatorMetadata,
+    ProductMetadata,
+    RuntimeMetadata,
+    ScoreStatistics,
+)
+from app.runtime_paths import (
+    INDEXED_REPORTS_DIR,
+    LOGS_DIR,
+    PROJECT_ROOT,
+    REPORTS_DIR,
+    STATE_DIR,
+)
 
 # Keep uvicorn INFO logs on stdout so PowerShell does not treat them as errors.
 _stdout_handler = logging.StreamHandler(sys.stdout)
@@ -266,6 +290,11 @@ async def lifespan(application: FastAPI):
         raise RuntimeError("DASH_TOKEN is required when NORTHFLUX_ENV=production")
     if _is_production() and len(configured_token) < 32:
         raise RuntimeError("DASH_TOKEN must be at least 32 characters in production")
+    if _is_production() and not _react_frontend_available():
+        raise RuntimeError(
+            "The compiled React frontend is required in production; "
+            "run `npm ci && npm run build` in frontend/ or use the production image"
+        )
     for runtime_dir in (STATE, REPORTS, REPORTS_ROOT / "archive", LOGS_ROOT):
         runtime_dir.mkdir(parents=True, exist_ok=True)
     # Expand the default thread-pool so multiple DNS scans can run concurrently
@@ -285,7 +314,10 @@ async def lifespan(application: FastAPI):
                 logger.info("Database cleared for fresh session (clear_on_start=true)")
             else:
                 logger.info("Keeping previous scan data (clear_on_start=false)")
-            if _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE")):
+            if (
+                not _is_production()
+                and _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
+            ):
                 db.set_setting("demo_domain", DEMO_DOMAIN)
                 db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
                 logger.info("Demo mode enabled; seeded managed domain: %s", DEMO_DOMAIN)
@@ -331,17 +363,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["X-XSS-Protection"] = "1; mode=block"
-        # CSP: allow inline styles/scripts (needed for single-file dashboard),
-        # Chart.js CDN, and data: URIs for favicons.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "frame-ancestors 'none'"
-        )
+        if _react_frontend_enabled():
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+                "object-src 'none'; base-uri 'self'; form-action 'self'; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Development fallback for the deprecated single-file interface.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+            )
         return response
 
 
@@ -447,12 +484,40 @@ async def _custom_http_exception(request: Request, exc: StarletteHTTPException):
     )
 
 
-# Project root and reports directory
-ROOT = Path(__file__).resolve().parents[2]
-REPORTS_ROOT = ROOT / "reports"
-REPORTS = REPORTS_ROOT / "indexed"
-STATE = ROOT / "state"
-LOGS_ROOT = ROOT / "logs"
+# Project root and environment-overridable runtime directories
+ROOT = PROJECT_ROOT
+REPORTS_ROOT = REPORTS_DIR
+REPORTS = INDEXED_REPORTS_DIR
+STATE = STATE_DIR
+LOGS_ROOT = LOGS_DIR
+FRONTEND_DIST = Path(
+    os.environ.get("NORTHFLUX_FRONTEND_DIST", str(ROOT / "frontend" / "dist"))
+).resolve()
+
+
+def _react_frontend_enabled() -> bool:
+    """Use the compiled SPA in production or when explicitly requested."""
+    configured = os.environ.get("NORTHFLUX_SERVE_REACT")
+    return _is_enabled(configured) if configured is not None else _is_production()
+
+
+def _react_frontend_available() -> bool:
+    return _react_frontend_enabled() and (FRONTEND_DIST / "index.html").is_file()
+
+
+def _spa_index_response():
+    if not _react_frontend_enabled():
+        return None
+    if not (FRONTEND_DIST / "index.html").is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="The compiled React frontend is unavailable",
+        )
+    return FileResponse(
+        FRONTEND_DIST / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _env(name: str, default: str = "") -> str:
@@ -499,6 +564,9 @@ def require_token(req: Request):
 @app.get("/login", response_class=HTMLResponse)
 def login_page():
     """Render the operator login page when token authentication is enabled."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     if not _env("DASH_TOKEN", "").strip():
         return RedirectResponse("/", status_code=303)
     return HTMLResponse(
@@ -522,6 +590,9 @@ background:#38bdf8;color:#082f49;font-weight:700;cursor:pointer}.error{color:#fc
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy_page():
     """Publish the essential operator and visitor privacy boundaries."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     return HTMLResponse(
         """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -597,6 +668,314 @@ def logout(request: Request):
     response.delete_cookie(_SESSION_COOKIE)
     response.delete_cookie(_CSRF_COOKIE)
     return response
+
+
+def _auth_state(request: Request) -> AuthState:
+    """Describe the request's existing authority without creating a session."""
+
+    configured_token = _env("DASH_TOKEN", "").strip()
+    if not configured_token:
+        return AuthState(
+            required=False,
+            authenticated=not _is_production(),
+            expires_at=None,
+        )
+
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and hmac.compare_digest(
+        auth.split(" ", 1)[1], configured_token
+    ):
+        return AuthState(required=True, authenticated=True, expires_at=None)
+
+    query_token = request.query_params.get("token")
+    if (
+        not _is_production()
+        and query_token
+        and hmac.compare_digest(query_token, configured_token)
+    ):
+        return AuthState(required=True, authenticated=True, expires_at=None)
+
+    session = _get_session(
+        request.cookies.get(_SESSION_COOKIE, ""),
+        configured_token,
+    )
+    if not session:
+        return AuthState(required=True, authenticated=False, expires_at=None)
+
+    expires_at = datetime.fromtimestamp(session["expires_at"], tz=timezone.utc)
+    return AuthState(required=True, authenticated=True, expires_at=expires_at)
+
+
+def _parse_api_timestamp(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalise_score(value: object, *, optional: bool = False) -> Optional[int]:
+    if value is None and optional:
+        return None
+    try:
+        return max(0, min(100, int(value or 0)))
+    except (TypeError, ValueError):
+        return None if optional else 0
+
+
+def _normalise_grade(value: object, *, optional: bool = False):
+    grade = str(value or "").upper()
+    if grade in {"A+", "A", "B", "C", "D", "F"}:
+        return grade
+    return None if optional else "F"
+
+
+def _dashboard_settings(db) -> DashboardSettings:
+    interval_text = str(db.get_setting("monitor_interval", "24") or "24").strip()
+    try:
+        interval = int(interval_text)
+    except ValueError:
+        interval = 24
+    if interval not in {6, 12, 24, 48, 168}:
+        interval = 24
+    return DashboardSettings(
+        monitor_interval_hours=interval,
+        monitoring_enabled=_is_enabled(db.get_setting("monitoring_enabled", "false")),
+        automatic_remediation=_is_enabled(
+            db.get_setting("automatic_remediation", "false")
+        ),
+    )
+
+
+@app.get("/api/v1/auth/session", response_model=AuthState)
+def api_v1_auth_session(request: Request):
+    """Return browser authentication state without exposing credential material."""
+
+    return _auth_state(request)
+
+
+@app.post("/api/v1/auth/login", response_model=AuthState)
+def api_v1_auth_login(payload: LoginRequest, request: Request, response: Response):
+    """Exchange a JSON access token for the existing browser session cookies."""
+
+    configured_token = _env("DASH_TOKEN", "").strip()
+    if not configured_token:
+        raise HTTPException(status_code=409, detail="Authentication is not enabled")
+
+    client_key = _login_rate_check(request)
+    if not hmac.compare_digest(payload.token, configured_token):
+        _record_login_failure(client_key)
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
+    _clear_login_failures(client_key)
+    session_id, csrf_token = _create_session(configured_token)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    response.set_cookie(
+        _CSRF_COOKIE,
+        csrf_token,
+        httponly=False,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    session = _get_session(session_id, configured_token)
+    expires_at = datetime.fromtimestamp(session["expires_at"], tz=timezone.utc)
+    return AuthState(required=True, authenticated=True, expires_at=expires_at)
+
+
+@app.post(
+    "/api/v1/auth/logout",
+    response_model=AuthState,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_auth_logout(request: Request, response: Response):
+    """Revoke the current browser session and clear its authentication cookies."""
+
+    session_id = request.cookies.get(_SESSION_COOKIE, "")
+    if session_id:
+        with _session_lock:
+            _sessions.pop(session_id, None)
+    response.delete_cookie(_SESSION_COOKIE)
+    response.delete_cookie(_CSRF_COOKIE)
+    return AuthState(
+        required=bool(_env("DASH_TOKEN", "").strip()),
+        authenticated=False,
+        expires_at=None,
+    )
+
+
+@app.get(
+    "/api/v1/bootstrap",
+    response_model=BootstrapResponse,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_bootstrap(request: Request):
+    """Return the non-secret product and runtime metadata needed by the SPA."""
+
+    settings = DashboardSettings(
+        monitor_interval_hours=24,
+        monitoring_enabled=False,
+        automatic_remediation=False,
+    )
+    org_name = "Your Organisation"
+    if HAS_DB:
+        try:
+            db = get_database()
+            settings = _dashboard_settings(db)
+            org_name = str(db.get_setting("org_name", org_name) or org_name)
+        except Exception:
+            logger.exception("Could not load API bootstrap settings")
+
+    production = _is_production()
+    return BootstrapResponse(
+        product=ProductMetadata(
+            name=PRODUCT_NAME,
+            version=PRODUCT_VERSION,
+            description=PRODUCT_DESCRIPTION,
+        ),
+        auth=_auth_state(request),
+        runtime=RuntimeMetadata(
+            production=production,
+            demo_mode=(
+                not production
+                and _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
+            ),
+        ),
+        capabilities=CapabilityMetadata(
+            scanner=HAS_SCANNER,
+            database=HAS_DB,
+            dns_fix=HAS_DNS_FIX,
+            pdf=importlib.util.find_spec("reportlab") is not None,
+            monitoring_enabled=settings.monitoring_enabled,
+            automatic_remediation=settings.automatic_remediation,
+        ),
+        operator=OperatorMetadata(org_name=org_name),
+    )
+
+
+@app.get(
+    "/api/v1/dashboard",
+    response_model=DashboardResponse,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_dashboard():
+    """Return a typed, normalised dashboard snapshot for the React client."""
+
+    if not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        db = get_database()
+        with db.snapshot():
+            raw_domains = db.get_managed_domains()
+            raw_alerts = db.get_alerts(unacknowledged_only=True, limit=5)
+            alert_count = db.get_alert_count()
+            raw_stats = db.get_statistics()
+            settings = _dashboard_settings(db)
+    except Exception:
+        logger.exception("Could not build API dashboard snapshot")
+        raise HTTPException(status_code=500, detail="Failed to load dashboard")
+
+    domains = []
+    for record in raw_domains:
+        domain, error = _sanitize_domain(record.get("domain"))
+        if error:
+            logger.warning("Skipping invalid managed domain in API response: %s", error)
+            continue
+        domains.append(
+            ManagedDomainResponse(
+                id=int(record.get("id") or 0),
+                domain=domain,
+                added_at=_parse_api_timestamp(record.get("added_at")),
+                is_active=bool(record.get("is_active")),
+                last_scan_at=_parse_api_timestamp(record.get("last_scan_at")),
+                last_grade=_normalise_grade(record.get("last_grade"), optional=True),
+                last_score=_normalise_score(record.get("last_score"), optional=True),
+                previous_grade=_normalise_grade(
+                    record.get("previous_grade"), optional=True
+                ),
+                previous_score=_normalise_score(
+                    record.get("previous_score"), optional=True
+                ),
+                notes=str(record.get("notes") or ""),
+            )
+        )
+
+    alerts = []
+    for record in raw_alerts:
+        domain, error = _sanitize_domain(record.get("domain"))
+        if error:
+            logger.warning("Skipping invalid alert domain in API response: %s", error)
+            continue
+        alerts.append(
+            AlertResponse(
+                id=int(record.get("id") or 0),
+                domain=domain,
+                alert_type=str(record.get("alert_type") or ""),
+                severity=str(record.get("severity") or "INFO").upper(),
+                message=str(record.get("message") or ""),
+                details=str(record.get("details") or ""),
+                created_at=_parse_api_timestamp(record.get("created_at")),
+                acknowledged=bool(record.get("acknowledged")),
+                acknowledged_at=_parse_api_timestamp(record.get("acknowledged_at")),
+            )
+        )
+
+    scores = [domain.last_score for domain in domains if domain.last_score is not None]
+    grade_distribution = {
+        grade: sum(1 for domain in domains if domain.last_grade == grade)
+        for grade in ("A+", "A", "B", "C", "D", "F")
+    }
+    passing_domains = sum(1 for score in scores if score >= 70)
+    raw_score_stats = raw_stats.get("score_stats") or {}
+    severity_distribution = {
+        str(severity or "UNKNOWN"): int(count or 0)
+        for severity, count in (raw_stats.get("severity_distribution") or {}).items()
+    }
+    return DashboardResponse(
+        stats=DashboardStats(
+            total_scans=max(0, int(raw_stats.get("total_scans") or 0)),
+            unique_domains=max(0, int(raw_stats.get("unique_domains") or 0)),
+            total_results=max(0, int(raw_stats.get("total_results") or 0)),
+            score_stats=ScoreStatistics(
+                avg_score=(
+                    float(raw_score_stats["avg_score"])
+                    if raw_score_stats.get("avg_score") is not None
+                    else None
+                ),
+                min_score=(
+                    _normalise_score(raw_score_stats.get("min_score"), optional=True)
+                ),
+                max_score=(
+                    _normalise_score(raw_score_stats.get("max_score"), optional=True)
+                ),
+            ),
+            severity_distribution=severity_distribution,
+            total_domains=len(domains),
+            average_score=round(sum(scores) / len(scores)) if scores else 0,
+            passing_domains=passing_domains,
+            failing_domains=len(scores) - passing_domains,
+            grade_distribution=grade_distribution,
+            alert_count=int(alert_count),
+        ),
+        domains=domains,
+        alerts=alerts,
+        settings=settings,
+    )
 
 
 def list_csvs() -> List[Path]:
@@ -737,8 +1116,7 @@ def readiness():
     if HAS_DB:
         try:
             db = get_database()
-            db.conn.execute("SELECT 1").fetchone()
-            checks["database"] = True
+            checks["database"] = db.ping()
         except Exception:
             logger.exception("Readiness database check failed")
     ready = all(checks.values())
@@ -834,26 +1212,35 @@ def api_summary():
 @app.get("/api/domain/{domain}", dependencies=[Depends(require_token)])
 def api_domain(domain: str):
     """Get latest result for a specific domain &#8212; checks DB first, falls back to CSV."""
+    clean, error = _sanitize_domain(domain)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
     # Try database first
     if HAS_DB:
         try:
             db = get_database()
-            history = db.get_domain_history(domain, limit=1)
+            history = db.get_domain_history(clean, limit=1)
             if history:
-                return {"domain": domain, "result": history[0], "source": "database"}
+                return {"domain": clean, "result": history[0], "source": "database"}
         except Exception:
-            pass
+            logger.exception("Failed to retrieve the latest result for %s", clean)
+            raise HTTPException(status_code=500, detail="Failed to retrieve domain data")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scan data found for {clean}. Try scanning it first.",
+        )
 
-    # Fallback to CSV
+    # Legacy fallback for installations running without database support.
     csv_file, _ = _latest_pair()
     if csv_file:
         rows = load_csv(csv_file)
         for row in rows:
-            if row.get("domain", "").lower() == domain.lower():
-                return {"domain": domain, "result": row, "source": "csv"}
+            if row.get("domain", "").lower() == clean:
+                return {"domain": clean, "result": row, "source": "csv"}
 
     raise HTTPException(
-        status_code=404, detail=f"No scan data found for {domain}. Try scanning it first."
+        status_code=404, detail=f"No scan data found for {clean}. Try scanning it first."
     )
 
 
@@ -969,7 +1356,7 @@ def api_tool_comparison():
 
 
 @app.get("/api/history/{domain}", dependencies=[Depends(require_token)])
-def api_history(domain: str, limit: int = 20):
+def api_history(domain: str, limit: int = Query(20, ge=1, le=100)):
     """Get historical scan results for a domain."""
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
@@ -1000,14 +1387,96 @@ def api_delete_history(domain: str):
     return {"ok": True, "domain": clean, "deleted_records": deleted}
 
 
+_GENERATED_REPORT_NAME = re.compile(
+    r"^(?:northflux|auroraedge|stage\d+)_results_\d{8}_\d{6}\.(?:csv|md)$",
+    re.IGNORECASE,
+)
+_OWNED_REPORT_DIRECTORIES = ("indexed", "archive")
+
+
+def _validated_reports_root(configured_root: Path) -> Path:
+    """Resolve a reports root while rejecting paths that own other app data."""
+    if configured_root.is_symlink():
+        raise RuntimeError("The reports directory cannot be a symbolic link")
+
+    reports_root = configured_root.resolve()
+    filesystem_root = Path(reports_root.anchor).resolve()
+    protected_paths = {
+        filesystem_root,
+        Path.home().resolve(),
+        PROJECT_ROOT.resolve(),
+        STATE.resolve(),
+        LOGS_ROOT.resolve(),
+        FRONTEND_DIST.resolve(),
+    }
+    if any(
+        reports_root == protected or protected.is_relative_to(reports_root)
+        for protected in protected_paths
+    ):
+        raise RuntimeError("The configured reports directory is unsafe")
+    if reports_root.exists() and not reports_root.is_dir():
+        raise RuntimeError("The configured reports path is not a directory")
+    return reports_root
+
+
+def _clear_generated_reports() -> int:
+    """Delete only recognised generated reports from app-owned locations.
+
+    NorthFlux currently writes timestamped CSV/Markdown pairs. The previous
+    AuroraEdge and numbered project-stage prefixes are retained so upgrades
+    can clear known legacy reports.
+    Unrelated files and nested directories are never traversed or removed.
+    """
+    reports_root = _validated_reports_root(REPORTS_ROOT)
+    if not reports_root.exists():
+        return 0
+
+    owned_directories = [
+        reports_root,
+        *(reports_root / name for name in _OWNED_REPORT_DIRECTORIES),
+    ]
+    for directory in owned_directories:
+        if directory.is_symlink():
+            raise RuntimeError("An owned reports directory cannot be a symbolic link")
+        if directory.exists() and not directory.is_dir():
+            raise RuntimeError("An owned reports path is not a directory")
+
+    generated_reports = [
+        path
+        for directory in owned_directories
+        if directory.exists()
+        for path in directory.iterdir()
+        if _GENERATED_REPORT_NAME.fullmatch(path.name)
+        and (path.is_file() or path.is_symlink())
+    ]
+    for report in generated_reports:
+        report.unlink()
+
+    (reports_root / "indexed").mkdir(parents=True, exist_ok=True)
+    (reports_root / "archive").mkdir(parents=True, exist_ok=True)
+    return len(generated_reports)
+
+
 @app.post("/api/data/clear", dependencies=[Depends(require_token)])
 def api_clear_all_data():
-    """Clear all scan data (results, domains, alerts). Preserves settings."""
+    """Clear database scan data and generated reports. Preserve settings/logs."""
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
     db = get_database()
+    try:
+        deleted_reports = _clear_generated_reports()
+    except (OSError, RuntimeError):
+        logger.exception("Refused or failed to clear the configured reports directory")
+        raise HTTPException(
+            status_code=500,
+            detail="Reports could not be cleared; scan data was not changed",
+        )
     db.clear_scan_data()
-    return {"ok": True, "message": "All scan data cleared. Settings preserved."}
+    return {
+        "ok": True,
+        "deleted_reports": deleted_reports,
+        "message": "All scan data and generated reports cleared. Settings preserved.",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1027,12 +1496,17 @@ def api_rescan_domain(request: Request, domain: str):
     """
     if not HAS_SCANNER:
         raise HTTPException(status_code=501, detail="Scanner module not available")
+    if not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
 
     _rate_check(request)
 
     clean, err = _sanitize_domain(domain)
     if err:
         raise HTTPException(status_code=400, detail=err)
+
+    db = get_database()
+    data_generation = db.get_data_generation()
 
     # Perform the scan
     scan_result = scan_domain(clean, check_starttls=False)
@@ -1042,17 +1516,18 @@ def api_rescan_domain(request: Request, domain: str):
     grade = evaluation.get("grade", "F")
     score = evaluation.get("score", 0)
 
-    # Persist to DB
-    if HAS_DB:
-        try:
-            db = get_database()
-            scan_id = db.start_scan(notes=f"Rescan of {clean}")
-            db.save_result(scan_id, clean, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
-            # Update managed-domain record (no-op if domain isn't managed)
-            db.update_managed_domain_scan(clean, grade, score)
-        except Exception as e:
-            logger.warning(f"Rescan DB save failed for {clean}: {e}")
+    persisted = db.write_scan_results(
+        [(clean, scan_result, evaluation)],
+        notes=f"Rescan of {clean}",
+        expected_generation=data_generation,
+        save_history=True,
+        update_managed=True,
+    )
+    if not persisted:
+        raise HTTPException(
+            status_code=409,
+            detail="Scan data changed during the rescan; retry the request",
+        )
 
     # Generate remediation
     remediation_list = []
@@ -1088,6 +1563,7 @@ def api_rescan_domain(request: Request, domain: str):
         "scan": scan_result,
         "evaluation": evaluation,
         "remediation": remediation_list,
+        "saved": True,
     }
 
 
@@ -1256,8 +1732,9 @@ def api_managed_domains():
     if not HAS_DB:
         return {"domains": [], "error": "Database not available"}
     db = get_database()
-    domains = db.get_managed_domains()
-    alert_count = db.get_alert_count()
+    with db.snapshot():
+        domains = db.get_managed_domains()
+        alert_count = db.get_alert_count()
     return {"domains": domains, "count": len(domains), "alert_count": alert_count}
 
 
@@ -1277,55 +1754,122 @@ async def api_add_managed_domain(request: Request):
     if err:
         raise HTTPException(status_code=400, detail=err)
     db = get_database()
-    result = db.add_managed_domain(domain, body.get("notes", ""))
+    notes = str(body.get("notes") or "")[:500]
+    data_generation = db.get_data_generation()
+    result = {"ok": True, "domain": domain}
 
     # Run initial scan immediately
-    if HAS_SCANNER:
+    if not HAS_SCANNER:
+        if not db.add_managed_domain_if_generation(domain, notes, data_generation):
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; retry the request",
+            )
+        return result
+
+    try:
+        scan_result = await asyncio.to_thread(scan_domain, domain, False)
+        scan_result["domain"] = domain
+        evaluation = evaluate(scan_result)
+    except Exception:
+        logger.exception("Initial onboarding scan failed for %s", domain)
+        if not db.add_managed_domain_if_generation(domain, notes, data_generation):
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; retry the request",
+            )
+        result["initial_scan"] = {
+            "error": "Initial scan could not be completed. Try a rescan."
+        }
+        return result
+
+    persisted = db.write_scan_results(
+        [(domain, scan_result, evaluation)],
+        notes=f"Onboarding scan for {domain}",
+        expected_generation=data_generation,
+        save_history=True,
+        manage_domains=True,
+        update_managed=True,
+        managed_notes=notes,
+    )
+    if not persisted:
+        raise HTTPException(
+            status_code=409,
+            detail="Scan data changed during onboarding; retry the request",
+        )
+
+    grade = evaluation.get("grade", "F")
+    score = evaluation.get("score", 0)
+    result["initial_scan"] = {
+        "grade": grade,
+        "score": score,
+        "severity": evaluation.get("severity", "OK"),
+    }
+
+    # DNS changes require both the global safety setting and an explicit opt-in
+    # on this individual onboarding request.
+    remediation_requested = _is_enabled(
+        body.get("automatic_remediation"), default=False
+    )
+    if remediation_requested and _is_enabled(
+        db.get_setting("automatic_remediation", "false")
+    ):
+        if db.get_data_generation() != data_generation:
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; remediation cancelled",
+            )
         try:
-            scan_result = scan_domain(domain, check_starttls=False)
-            scan_result["domain"] = domain
-            evaluation = evaluate(scan_result)
-            grade = evaluation.get("grade", "F")
-            score = evaluation.get("score", 0)
-            db.update_managed_domain_scan(domain, grade, score)
-            # Save to results DB
-            scan_id = db.start_scan(notes=f"Onboarding scan for {domain}")
-            db.save_result(scan_id, domain, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
-            result["initial_scan"] = {
-                "grade": grade, "score": score,
-                "severity": evaluation.get("severity", "OK")
+            fix_result = await asyncio.to_thread(_auto_fix_domain, domain, scan_result)
+            result["auto_fix"] = fix_result
+        except Exception:
+            logger.exception("Onboarding remediation failed for %s", domain)
+            fix_result = {"applied": [], "failed": [{"message": "Remediation failed"}]}
+            result["auto_fix"] = fix_result
+    else:
+        fix_result = {
+            "applied": [],
+            "failed": [],
+            "skipped_reason": "Automatic remediation is disabled",
+        }
+
+    # If fixes were applied, rescan and save the updated baseline as history.
+    if fix_result.get("applied"):
+        await asyncio.sleep(2)
+        try:
+            rescan = await asyncio.to_thread(scan_domain, domain, False)
+            rescan["domain"] = domain
+            re_eval = evaluate(rescan)
+            post_fix_saved = db.write_scan_results(
+                [(domain, rescan, re_eval)],
+                notes=f"Post-remediation onboarding scan for {domain}",
+                expected_generation=data_generation,
+                save_history=True,
+                update_managed=True,
+            )
+            if not post_fix_saved:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Scan data changed during onboarding; "
+                        "the post-remediation result was not saved"
+                    ),
+                )
+            new_grade = re_eval.get("grade", grade)
+            new_score = re_eval.get("score", score)
+            result["post_fix_scan"] = {
+                "grade": new_grade,
+                "score": new_score,
+                "severity": re_eval.get("severity", "OK"),
+                "improved": new_score > score,
             }
-
-            # Remediation is a separate, explicit operator opt-in.
-            if _is_enabled(db.get_setting("automatic_remediation", "false")):
-                fix_result = _auto_fix_domain(domain, scan_result)
-                result["auto_fix"] = fix_result
-            else:
-                fix_result = {
-                    "applied": [],
-                    "failed": [],
-                    "skipped_reason": "Automatic remediation is disabled",
-                }
-
-            # If fixes were applied, rescan to get updated grade
-            if fix_result.get("applied"):
-                import time
-                time.sleep(2)  # Brief pause for DNS propagation
-                rescan = scan_domain(domain, check_starttls=False)
-                rescan["domain"] = domain
-                re_eval = evaluate(rescan)
-                new_grade = re_eval.get("grade", grade)
-                new_score = re_eval.get("score", score)
-                db.update_managed_domain_scan(domain, new_grade, new_score)
-                result["post_fix_scan"] = {
-                    "grade": new_grade, "score": new_score,
-                    "severity": re_eval.get("severity", "OK"),
-                    "improved": new_score > score,
-                }
-
-        except Exception as e:
-            result["initial_scan"] = {"error": str(e)}
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Post-remediation scan failed for %s", domain)
+            result["post_fix_scan"] = {
+                "error": "Post-remediation scan could not be completed."
+            }
 
     return result
 
@@ -1491,6 +2035,7 @@ def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
 
 
 @app.get("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
+@app.post("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
 def api_test_cloudflare():
     """Test the current Cloudflare connection using stored credentials.
 
@@ -1538,10 +2083,6 @@ def api_test_cloudflare():
                 perms["workers"] = wr.json().get("success", False)
             except Exception:
                 pass
-
-        # Auto-store account ID if we discovered it and it wasn't saved
-        if account_id and not db.get_setting("cf_account_id"):
-            db.set_setting("cf_account_id", account_id)
 
     # Build feature availability summary
     features = []
@@ -1617,26 +2158,31 @@ async def _monitoring_loop():
             # Apply CF settings in case they were updated
             _apply_cf_settings(db)
 
-            scan_id = db.start_scan(
-                notes=f"Scheduled monitoring of {len(domains)} domain(s)"
-            )
+            data_generation = db.get_data_generation()
 
             for d in domains:
                 domain = d["domain"]
                 try:
-                    scan_result = scan_domain(domain, check_starttls=False)
+                    scan_result = await asyncio.to_thread(scan_domain, domain, False)
                     scan_result["domain"] = domain
                     evaluation = evaluate(scan_result)
                     grade = evaluation.get("grade", "F")
                     score = evaluation.get("score", 0)
 
-                    # Save result
-                    db.save_result(scan_id, domain, scan_result, evaluation)
+                    persisted = db.write_scan_results(
+                        [(domain, scan_result, evaluation)],
+                        notes=f"Scheduled monitoring scan for {domain}",
+                        expected_generation=data_generation,
+                        save_history=True,
+                        update_managed=True,
+                    )
+                    if not persisted:
+                        logger.info("Monitoring cycle cancelled after scan data changed")
+                        break
 
-                    # Update managed domain and detect drift
-                    prev = db.update_managed_domain_scan(domain, grade, score)
-                    prev_grade = prev.get("previous_grade")
-                    prev_score = prev.get("previous_score")
+                    # Detect drift against the snapshot read at cycle start.
+                    prev_grade = d.get("last_grade")
+                    prev_score = d.get("last_score")
 
                     # Drift detection: grade worsened
                     if prev_grade and prev_grade != grade:
@@ -1651,6 +2197,7 @@ async def _monitoring_loop():
                                 severity="HIGH" if new_idx >= 4 else "WARN",
                                 message=f"{domain} grade dropped from {prev_grade} to {grade}",
                                 details=f"Score changed from {prev_score} to {score}",
+                                expected_generation=data_generation,
                             )
                         elif new_idx < old_idx:
                             # Grade improved
@@ -1660,13 +2207,19 @@ async def _monitoring_loop():
                                 severity="INFO",
                                 message=f"{domain} grade improved from {prev_grade} to {grade}",
                                 details=f"Score changed from {prev_score} to {score}",
+                                expected_generation=data_generation,
                             )
 
                     # Remediation requires a separate explicit operator opt-in.
                     if grade not in ("A+", "A") and _is_enabled(
                         db.get_setting("automatic_remediation", "false")
                     ):
-                        fix_result = _auto_fix_domain(domain, scan_result)
+                        if db.get_data_generation() != data_generation:
+                            logger.info("Automatic remediation cancelled after scan data changed")
+                            break
+                        fix_result = await asyncio.to_thread(
+                            _auto_fix_domain, domain, scan_result
+                        )
                         if fix_result.get("applied"):
                             fix_types = [f["type"] for f in fix_result["applied"]]
                             db.create_alert(
@@ -1675,28 +2228,39 @@ async def _monitoring_loop():
                                 severity="INFO",
                                 message=f"Auto-fixed {domain}: {', '.join(fix_types)}",
                                 details=f"Applied {len(fix_result['applied'])} fix(es) automatically",
+                                expected_generation=data_generation,
                             )
                             # Rescan after fix to update grade
                             await asyncio.sleep(2)
-                            rescan = scan_domain(domain, check_starttls=False)
+                            rescan = await asyncio.to_thread(scan_domain, domain, False)
                             rescan["domain"] = domain
                             re_eval = evaluate(rescan)
-                            new_grade = re_eval.get("grade", grade)
-                            new_score = re_eval.get("score", score)
-                            db.update_managed_domain_scan(domain, new_grade, new_score)
+                            post_fix_saved = db.write_scan_results(
+                                [(domain, rescan, re_eval)],
+                                notes=f"Scheduled post-remediation scan for {domain}",
+                                expected_generation=data_generation,
+                                save_history=True,
+                                update_managed=True,
+                            )
+                            if not post_fix_saved:
+                                logger.info(
+                                    "Post-remediation result discarded after scan data changed"
+                                )
+                                break
 
-                except Exception as e:
+                except Exception:
+                    logger.exception("Scheduled monitoring failed for %s", domain)
                     db.create_alert(
                         domain=domain,
                         alert_type="scan_error",
                         severity="HIGH",
-                        message=f"Failed to scan {domain}: {str(e)}",
+                        message=f"Failed to scan {domain}",
+                        details="Review the server log for the internal error.",
+                        expected_generation=data_generation,
                     )
 
                 # Small delay between domains to avoid rate limiting
                 await asyncio.sleep(2)
-
-            db.complete_scan(scan_id, len(domains))
 
         except Exception as e:
             logger.error(f"Monitoring loop error: {e}")
@@ -2501,6 +3065,10 @@ document.addEventListener('DOMContentLoaded', () => {
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def home():
     """Main dashboard page with real-time updates."""
+
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
 
     # &#9472;&#9472; Gather managed-domain data from the DB &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
     domains_list: list = []
@@ -4243,24 +4811,29 @@ async def api_scan(request: Request):
     if len(domains) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 domains per request")
 
-    save_to_db = body.get("save_to_db", True)
-    show_remediation = body.get("remediation", True)
+    save_to_db = _is_enabled(body.get("save_to_db"), default=True)
+    manage_domains = _is_enabled(body.get("manage_domains"), default=False)
+    show_remediation = _is_enabled(body.get("remediation"), default=True)
 
     results = []
+    persist_entries = []
     db = None
-    scan_id = None
+    data_generation = None
 
-    if save_to_db and HAS_DB:
+    if (save_to_db or manage_domains) and not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
+    if save_to_db or manage_domains:
         try:
             db = get_database()
-            scan_id = db.start_scan(notes=f"Dashboard scan of {len(domains)} domain(s)")
+            data_generation = db.get_data_generation()
         except Exception:
-            db = None
+            logger.exception("Could not prepare scan persistence")
+            raise HTTPException(status_code=500, detail="Could not prepare scan storage")
 
     for raw_domain in domains:
         domain, d_err = _sanitize_domain(raw_domain)
         if d_err:
-            results.append({"domain": "(invalid)", "error": d_err})
+            results.append({"domain": "(invalid)", "error": d_err, "saved": False})
             continue
 
         try:
@@ -4274,13 +4847,14 @@ async def api_scan(request: Request):
             except asyncio.TimeoutError:
                 results.append({
                     "domain": domain,
-                    "error": f"Scan timed out after {int(SCAN_TIMEOUT)}s &#8212; domain may not exist. Check for typos and try again."
+                    "error": f"Scan timed out after {int(SCAN_TIMEOUT)}s &#8212; domain may not exist. Check for typos and try again.",
+                    "saved": False,
                 })
                 continue
 
             scan_notes = scan_result.get("notes", "")
             if "Domain not found" in scan_notes or "Invalid domain" in scan_notes:
-                results.append({"domain": domain, "error": scan_notes})
+                results.append({"domain": domain, "error": scan_notes, "saved": False})
                 continue
 
             evaluation = evaluate(scan_result)
@@ -4310,41 +4884,50 @@ async def api_scan(request: Request):
                 evaluation["severity_urgency"] = severity_info.get("urgency", "")
                 evaluation["severity_color"] = severity_info.get("color", "#6b7280")
 
-            if db and scan_id:
-                db.save_result(scan_id, domain, scan_result, evaluation)
+            payload = {
+                "domain": domain,
+                "scan": scan_result,
+                "evaluation": evaluation,
+                "remediation": remediation_list,
+                "saved": False,
+            }
+            results.append(payload)
+            persist_entries.append((domain, scan_result, evaluation, payload))
 
-            # Auto-add to managed domains so it appears on the dashboard
-            if db:
-                grade = evaluation.get("grade", "F")
-                score = evaluation.get("score", 0)
-                db.add_managed_domain(domain, notes="Added via scan")
-                db.update_managed_domain_scan(domain, grade, score)
-
+        except Exception:
+            logger.exception("Scan failed for %s", domain)
             results.append(
                 {
                     "domain": domain,
-                    "scan": scan_result,
-                    "evaluation": evaluation,
-                    "remediation": remediation_list,
+                    "error": "The scan could not be completed. Check the domain and try again.",
+                    "saved": False,
                 }
             )
 
-        except Exception as e:
-            results.append(
-                {
-                    "domain": domain,
-                    "scan": {"error": str(e)},
-                    "evaluation": {"severity": "ERROR", "score": 0, "grade": "F"},
-                    "remediation": [],
-                }
-            )
-
-    if db and scan_id:
-        db.complete_scan(scan_id, len(results))
+    persistence_applied = True
+    if db and persist_entries:
+        persistence_applied = db.write_scan_results(
+            [(domain, scan, evaluation) for domain, scan, evaluation, _ in persist_entries],
+            notes=f"Dashboard scan of {len(domains)} domain(s)",
+            expected_generation=data_generation,
+            save_history=save_to_db,
+            manage_domains=manage_domains,
+            update_managed=manage_domains,
+            managed_notes="Added via scan",
+        )
+    for _domain, _scan, _evaluation, payload in persist_entries:
+        payload["saved"] = bool(save_to_db and persistence_applied)
 
     ok = [r for r in results if "error" not in r]
-    status = "success" if ok else "error"
-    return {"status": status, "count": len(results), "results": results}
+    status = "success" if len(ok) == len(results) else "partial" if ok else "error"
+    return {
+        "status": status,
+        "count": len(results),
+        "results": results,
+        "persistence_skipped": bool(
+            (save_to_db or manage_domains) and not persistence_applied
+        ),
+    }
 
 
 @app.post("/api/apply-fix", dependencies=[Depends(require_token)])
@@ -4392,6 +4975,10 @@ async def api_apply_fix(request: Request):
     domain, d_err = _sanitize_domain(body.get("domain"))
     if d_err:
         raise HTTPException(status_code=400, detail=d_err)
+    persistence_db = get_database() if HAS_DB else None
+    data_generation = (
+        persistence_db.get_data_generation() if persistence_db else None
+    )
 
     # OWNERSHIP CHECK: refuse to modify DNS for domains outside the configured zone
     owned, ownership_msg = cf.verify_domain_ownership(domain)
@@ -4462,6 +5049,7 @@ async def api_apply_fix(request: Request):
     # so we can report the *actual* improvement (or surface propagation lag).
     post_fix_eval = {}
     verification_note = ""
+    history_saved = False
     cf_verified = []  # records confirmed via Cloudflare API
     if applied_fixes:
         import time
@@ -4545,16 +5133,25 @@ async def api_apply_fix(request: Request):
                     "moment to see the updated grade."
                 )
             # Persist improved result if better
-            if HAS_DB and post_score >= pre_score:
+            if persistence_db and post_score >= pre_score:
                 try:
-                    db = get_database()
-                    sid = db.start_scan(notes="Post-fix verification")
-                    db.save_result(sid, domain, post_scan, post_fix_eval)
-                    db.complete_scan(sid, 1)
+                    history_saved = persistence_db.write_scan_results(
+                        [(domain, post_scan, post_fix_eval)],
+                        notes="Post-fix verification",
+                        expected_generation=data_generation,
+                        save_history=True,
+                        update_managed=True,
+                    )
+                    if not history_saved:
+                        verification_note += (
+                            " The verification result was not saved because scan data "
+                            "was cleared during remediation."
+                        )
                 except Exception:
-                    pass
-        except Exception as ve:
-            verification_note = f"Post-fix verification scan failed: {ve}"
+                    logger.exception("Could not persist post-fix verification for %s", domain)
+        except Exception:
+            logger.exception("Post-fix verification scan failed for %s", domain)
+            verification_note = "Post-fix verification scan failed. Review server logs."
 
     # Use post-fix evaluation if available, otherwise pre-fix
     final_eval = post_fix_eval if post_fix_eval else pre_fix_eval
@@ -4583,6 +5180,7 @@ async def api_apply_fix(request: Request):
         "pre_fix_grade": pre_fix_eval.get("grade", ""),
         "pre_fix_score": pre_fix_eval.get("score", 0),
         "verification": verification_note,
+        "history_saved": history_saved,
         "cf_verified": cf_verified,
         "cloudflare_zone": msg,
     }
@@ -4623,6 +5221,7 @@ async def api_demo_reset(request: Request):
 
     db = get_database()
     db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
+    data_generation = db.get_data_generation()
 
     # Ensure runtime Cloudflare settings are synced and present.
     try:
@@ -4728,16 +5327,19 @@ async def api_demo_reset(request: Request):
             grade = evaluation.get("grade", "F")
             score = evaluation.get("score", 0)
             severity = evaluation.get("severity", "OK")
-            db.update_managed_domain_scan(DEMO_DOMAIN, grade, score)
-
-            scan_id = db.start_scan(notes=f"Demo {action} verification scan for {DEMO_DOMAIN}")
-            db.save_result(scan_id, DEMO_DOMAIN, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
+            saved = db.write_scan_results(
+                [(DEMO_DOMAIN, scan_result, evaluation)],
+                notes=f"Demo {action} verification scan for {DEMO_DOMAIN}",
+                expected_generation=data_generation,
+                save_history=True,
+                update_managed=True,
+            )
             scan_summary = {
                 "grade": grade,
                 "score": score,
                 "severity": severity,
                 "violations": evaluation.get("violation_count", 0),
+                "saved": saved,
             }
         except Exception:
             # Keep reset flow successful even if verification scan fails.
@@ -4793,6 +5395,9 @@ async def api_fix_status():
 @app.get("/test", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def test_hub():
     """Interactive testing hub for scanning domains."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     demo_mode_enabled = _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
     demo_display = "block" if demo_mode_enabled else "none"
     demo_example = f"{DEMO_DOMAIN} (demo), " if demo_mode_enabled else ""
@@ -4986,6 +5591,9 @@ microsoft.com
     dependencies=[Depends(require_token)],
 )
 def domain_detail(domain: str):
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Detailed view for a specific domain &#8212; pulls from DB, falls back to CSV."""
     domain, domain_error = _sanitize_domain(domain)
     if domain_error:
@@ -5013,30 +5621,8 @@ def domain_detail(domain: str):
                     break
 
     if not result:
-        # Auto-scan the domain instead of showing a 404
-        if HAS_SCANNER:
-            try:
-                scan_result = scan_domain(domain, check_starttls=False)
-                scan_result["domain"] = domain
-                evaluation = evaluate(scan_result)
-                # Merge scan + evaluation into result dict for the page
-                result = {**scan_result, **evaluation}
-                # Persist to DB for future visits
-                if HAS_DB:
-                    try:
-                        db = get_database()
-                        scan_id = db.start_scan(notes=f"Auto-scan from domain page: {domain}")
-                        db.save_result(scan_id, domain, scan_result, evaluation)
-                        db.complete_scan(scan_id, 1)
-                        db.update_managed_domain_scan(domain, evaluation.get("grade", "F"), evaluation.get("score", 0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-    if not result:
-        # Redirect to scan page if scanner unavailable or scan failed
-        return RedirectResponse(url=f"/test?domain={domain}", status_code=303)
+        # Navigation is read-only; an explicit action starts a scan.
+        return RedirectResponse(url=f"/scan?domain={domain}", status_code=303)
 
     result = _escape_record(result)
 
@@ -5419,6 +6005,9 @@ def _footer_html() -> str:
 
 @app.get("/domains", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def domains_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Managed domains page \u2014 the core of the SME experience."""
     # Get managed domains and alerts
     domains_list = []
@@ -5950,6 +6539,9 @@ def domains_page():
 
 @app.get("/generator", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def generator_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Interactive DNS record generator for SPF, DMARC, DKIM, MTA-STS, TLS-RPT, and BIMI."""
     html = f"""
 <!DOCTYPE html>
@@ -6167,6 +6759,9 @@ def generator_page():
 
 @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def settings_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Application settings page &#8212; Cloudflare credentials, monitoring config."""
     settings = {}
     if HAS_DB:
@@ -6854,3 +7449,35 @@ def settings_page():
 </html>
 """
     return HTMLResponse(html)
+
+
+@app.get("/assets/{asset_path:path}", include_in_schema=False)
+def react_asset(asset_path: str):
+    """Serve a fingerprinted React asset without allowing path traversal."""
+    assets_root = (FRONTEND_DIST / "assets").resolve()
+    candidate = (assets_root / asset_path).resolve()
+    try:
+        candidate.relative_to(assets_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not _react_frontend_available() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(
+        candidate,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/{spa_path:path}", include_in_schema=False)
+def react_spa_fallback(spa_path: str):
+    """Return the SPA for browser deep links, never for API-like paths."""
+    reserved = {
+        "api", "download", "health", "ready", "docs", "redoc", "openapi.json"
+    }
+    first_segment = spa_path.split("/", 1)[0]
+    if first_segment in reserved:
+        raise HTTPException(status_code=404, detail="Not found")
+    response = _spa_index_response()
+    if response is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return response

@@ -10,28 +10,55 @@ if ([string]::IsNullOrWhiteSpace($OutputZip)) {
 }
 
 $OutputZip = [System.IO.Path]::GetFullPath($OutputZip)
+$ChecksumPath = "$OutputZip.sha256"
 $DistDir = Split-Path -Parent $OutputZip
 $PackageRoot = "NorthFlux_Security"
 
 $ExcludedFolderNames = @(
+    ".cache",
+    ".aws",
+    ".azure",
+    ".e2e-data",
     ".git",
     ".git (1)",
+    ".mypy_cache",
+    ".nyc_output",
+    ".secrets",
+    ".ssh",
     ".venv",
+    ".vite",
     ".pytest_cache",
     ".vscode",
     "__pycache__",
+    "blob-report",
+    "coverage",
     "dist",
+    "htmlcov",
     "logs",
     "node_modules",
+    "playwright-report",
     "reports",
-    "state"
+    "state",
+    "test-results"
 )
 
 $ExcludedRelativePaths = @()
 
 $ExcludedFileNames = @(
-    "Thumbs.db",
-    ".DS_Store"
+    ".coverage",
+    ".DS_Store",
+    ".eslintcache",
+    ".npmrc",
+    ".pypirc",
+    "coverage.xml",
+    "credentials",
+    "credentials.json",
+    "id_dsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_rsa",
+    "junit.xml",
+    "Thumbs.db"
 )
 
 $ExcludedExtensions = @(
@@ -41,9 +68,13 @@ $ExcludedExtensions = @(
     ".crt",
     ".pfx",
     ".p12",
+    ".der",
     ".jks",
     ".keystore",
-    ".kdbx"
+    ".kdbx",
+    ".p7b",
+    ".p7c",
+    ".tsbuildinfo"
 )
 
 function Get-RelativePathSafe {
@@ -87,7 +118,9 @@ function Test-ExcludedPath {
     if (
         $leaf -eq ".env" -or
         ($leaf.StartsWith(".env.") -and $leaf -ne ".env.example") -or
-        $leaf.EndsWith(".local.cmd")
+        $leaf.EndsWith(".local.cmd") -or
+        ($leaf.StartsWith("service-account", [System.StringComparison]::OrdinalIgnoreCase) -and
+            [System.IO.Path]::GetExtension($leaf) -eq ".json")
     ) {
         return $true
     }
@@ -108,6 +141,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 if (Test-Path $OutputZip) {
     Remove-Item -LiteralPath $OutputZip -Force
+}
+if (Test-Path $ChecksumPath) {
+    Remove-Item -LiteralPath $ChecksumPath -Force
 }
 
 New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
@@ -165,10 +201,19 @@ finally {
     $zip.Dispose()
 }
 
+$archiveHash = (Get-FileHash -LiteralPath $OutputZip -Algorithm SHA256).Hash.ToLowerInvariant()
+$checksumLine = "$archiveHash  $(Split-Path -Leaf $OutputZip)`n"
+[System.IO.File]::WriteAllText(
+    $ChecksumPath,
+    $checksumLine,
+    [System.Text.UTF8Encoding]::new($false)
+)
+
 Write-Host "Created clean NorthFlux release ZIP:" -ForegroundColor Green
 Write-Host "  $OutputZip"
+Write-Host "  $ChecksumPath"
 Write-Host ""
 Write-Host "The ZIP follows Git-tracked project files; -AllowDirty explicitly includes reviewed, non-ignored untracked files." -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "Excluded from the ZIP:" -ForegroundColor Cyan
-Write-Host "  .venv, .git, .git (1), .pytest_cache, .vscode, __pycache__, dist, logs, reports, state, local environments, private-key files, nested zip files"
+Write-Host "  VCS/virtual environments, runtime data, Node dependencies, build and test output, local environments, credential files, private-key material, and nested archives"

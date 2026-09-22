@@ -1,5 +1,7 @@
 # Stage 8 - Scoring System (0-100) + Letter Grades
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## Overview
 Stage 8 added the scoring system. It evaluates a domain's email security setup and returns both a numeric score (0-100) and a letter grade (A+ to F).
 

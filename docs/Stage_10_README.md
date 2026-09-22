@@ -1,5 +1,7 @@
 # Stage 10 - Remediation Recommendations Engine
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## Overview
 Stage 10 deliverable: Implemented an intelligent remediation engine that generates actionable recommendations for fixing email security misconfigurations.
 

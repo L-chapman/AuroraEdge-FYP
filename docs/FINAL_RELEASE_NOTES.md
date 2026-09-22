@@ -4,7 +4,7 @@
 
 ## Release Snapshot
 
-- Final application version in the current codebase: **3.1**
+- Application version recorded in the April 2026 snapshot: **3.1**
 - Dashboard/API route handlers: **36**
 - Final automated test result rechecked on **2026-04-14** with `python -m pytest -q`: **397 passed, 0 skipped**
 - Smoke-test script: `verify_system.py` now supports `--domain` and `--offline`

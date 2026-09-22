@@ -110,17 +110,37 @@ def test_onboarding_does_not_remediate_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(
         dashboard,
         "evaluate",
-        lambda result: {"grade": "F", "score": 10, "severity": "HIGH", "violations": []},
+        lambda result: {
+            "grade": "F",
+            "score": 10,
+            "severity": "HIGH",
+            "violations": "Missing controls",
+            "violation_count": 1,
+        },
     )
     remediation = MagicMock()
     monkeypatch.setattr(dashboard, "_auto_fix_domain", remediation)
 
-    response = TestClient(dashboard.app).post(
+    client = TestClient(dashboard.app)
+    response = client.post(
         "/api/managed-domains", json={"domain": "example.com"}
     )
 
     assert response.status_code == 200
+    assert response.json()["initial_scan"] == {
+        "grade": "F",
+        "score": 10,
+        "severity": "HIGH",
+    }
     assert "auto_fix" not in response.json()
+    history = database.get_domain_history("example.com")
+    assert len(history) == 1
+    assert history[0]["grade"] == "F"
+    assert history[0]["score"] == 10
+    detail = client.get("/api/domain/EXAMPLE.COM")
+    assert detail.status_code == 200
+    assert detail.json()["domain"] == "example.com"
+    assert detail.json()["source"] == "database"
     remediation.assert_not_called()
     database.close()
 

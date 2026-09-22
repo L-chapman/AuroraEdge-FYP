@@ -51,7 +51,7 @@ if not defined PY (
     exit /b 1
 )
 echo [OK] Found %PY% %PY_VER%
-echo [1/4] Python ready.
+echo [1/5] Python ready.
 echo [*] Please wait while NorthFlux Security prepares the local environment.
 echo     First launch can take a minute or two while dependencies are checked.
 
@@ -65,7 +65,7 @@ if defined CF_API_TOKEN if defined CF_ZONE_ID (
 )
 
 REM ── Create / repair virtual environment ────────────────────────────
-echo [2/4] Setting up environment...
+echo [2/5] Setting up environment...
 set "VENV_DIR=%cd%\.venv"
 set "VENV_ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
@@ -137,9 +137,9 @@ if "!SKIP_INSTALL!"=="1" (
     )
 )
 if "!SKIP_INSTALL!"=="1" (
-    echo [3/4] Dependencies already up to date.
+    echo [3/5] Python dependencies already up to date.
 ) else (
-    echo [3/4] Installing dependencies...
+    echo [3/5] Installing Python dependencies...
     echo     Live install output is shown below so you can see progress.
     echo [*] Upgrading pip...
     "%VENV_PY%" -m pip install --upgrade pip
@@ -162,8 +162,56 @@ if "!SKIP_INSTALL!"=="1" (
     echo !REQ_STAMP!>"%REQ_CACHE%"
 )
 
+REM -- Build the React dashboard ------------------------------------------------
+echo [4/5] Preparing React dashboard...
+where node >nul 2>&1
+if errorlevel 1 goto :node_missing
+where npm >nul 2>&1
+if errorlevel 1 goto :node_missing
+node -e "const [major,minor]=process.versions.node.split('.').map(Number);process.exit(major>22||(major===22&&minor>=12)?0:1)"
+if errorlevel 1 (
+    echo [ERROR] NorthFlux requires Node.js 22.12 or newer to build the React dashboard.
+    echo         Install the current Node.js LTS release from https://nodejs.org/
+    pause
+    exit /b 1
+)
+if not exist "frontend\package-lock.json" (
+    echo [ERROR] Frontend dependency lockfile is missing.
+    pause
+    exit /b 1
+)
+for %%F in ("frontend\package-lock.json") do set "NPM_STAMP=%%~tF-%%~zF"
+set "NPM_CACHE=%VENV_DIR%\npm_stamp.txt"
+set "SKIP_NPM_INSTALL=0"
+if exist "%NPM_CACHE%" if exist "frontend\node_modules" (
+    set /p CACHED_NPM_STAMP=<"%NPM_CACHE%"
+    if "!CACHED_NPM_STAMP!"=="!NPM_STAMP!" set "SKIP_NPM_INSTALL=1"
+)
+pushd frontend
+if "!SKIP_NPM_INSTALL!"=="0" (
+    echo [*] Installing locked frontend dependencies...
+    call npm ci
+    if errorlevel 1 (
+        popd
+        echo [ERROR] Frontend dependency install failed.
+        pause
+        exit /b 1
+    )
+)
+echo [*] Building the production React application...
+call npm run build
+if errorlevel 1 (
+    popd
+    echo [ERROR] React dashboard build failed.
+    pause
+    exit /b 1
+)
+popd
+if "!SKIP_NPM_INSTALL!"=="0" echo !NPM_STAMP!>"%NPM_CACHE%"
+
 REM ── Environment variables ──────────────────────────────────────────
 set "PYTHONPATH=%cd%\src"
+set "NORTHFLUX_SERVE_REACT=true"
 
 REM ── Create data directories ────────────────────────────────────────
 if not exist "reports" mkdir reports
@@ -186,7 +234,7 @@ echo ===================================================================
 echo  Setup Complete!
 echo ===================================================================
 echo.
-echo [4/4] Starting Web Dashboard on port %PORT% ...
+echo [5/5] Starting Web Dashboard on port %PORT% ...
 echo.
 echo     Dashboard : http://127.0.0.1:%PORT%
 echo     Test Hub  : http://127.0.0.1:%PORT%/test
@@ -209,6 +257,12 @@ echo Goodbye!
 pause
 
 goto :eof
+
+:node_missing
+echo [ERROR] Node.js and npm were not found.
+echo         Install Node.js 22.12 or newer from https://nodejs.org/ and re-run START.bat.
+pause
+exit /b 1
 
 :probe_python
 set "PY_CANDIDATE=%~1"

@@ -1,16 +1,21 @@
 name: CI
 
-on:
+"on":
   push:
-    branches: [main, master]
+    branches: [main, master, "codex/**"]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  backend-test:
     strategy:
       fail-fast: false
       matrix:
@@ -20,23 +25,56 @@ jobs:
     env:
       PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
-      - name: Run tests
+      - name: Run backend tests
         run: python -m pytest -q --cov=app --cov-report=term-missing
       - name: Run offline smoke test
         run: python verify_system.py --offline
 
+  frontend-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm ci
+      - name: Type-check frontend
+        run: npm run typecheck
+      - name: Lint frontend
+        run: npm run lint
+      - name: Run frontend unit and component tests
+        run: npm run test:coverage
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+      - name: Build production frontend
+        run: npm run build
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          if-no-files-found: ignore
+          retention-days: 7
+
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -46,16 +84,145 @@ jobs:
         run: ruff check .
       - name: Security static analysis
         run: bandit -q -r src/app -lll
-      - name: Audit declared dependencies
+      - name: Audit declared Python dependencies
         run: |
           pip-audit -r requirements.txt
           pip-audit -r requirements-dev.txt
 
-  container:
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Test inside container image
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Scan the complete Git history for secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ui-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [backend-test, frontend-test]
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run browser UI tests
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Upload Playwright evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-evidence
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  container:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, quality]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test frontend build stage
+        run: docker build --target frontend-test --tag northflux-security:frontend-test .
+      - name: Test backend inside container image
         run: docker build --target test --tag northflux-security:test .
       - name: Build production container image
         run: docker build --target production --tag northflux-security:ci .
+      - name: Verify production image contents and user
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' northflux-security:ci)" = "northflux"
+          docker run --rm --entrypoint sh northflux-security:ci -c \
+            'test -f /app/frontend/dist/index.html && ! command -v node && test ! -d /app/frontend/node_modules'
+      - name: Smoke-test hardened production container
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name=northflux-ci-smoke
+          cleanup() {
+            docker logs "$container_name" 2>/dev/null || true
+            docker stop --time 10 "$container_name" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          docker run --rm -d \
+            --name "$container_name" \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --tmpfs /app/state:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999,mode=0750 \
+            --tmpfs /app/reports:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999,mode=0750 \
+            --tmpfs /app/logs:rw,noexec,nosuid,nodev,size=64m,uid=999,gid=999,mode=0750 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -e NORTHFLUX_ENV=production \
+            -e DASH_TOKEN=northflux-ci-smoke-token-never-use-in-production \
+            -p 127.0.0.1:18080:8080 \
+            northflux-security:ci
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/ready >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "true"
+          curl --fail --silent --show-error http://127.0.0.1:18080/health >/dev/null
+          docker exec "$container_name" sh -c 'test "$(id -u)" != "0"'
+
+  release-hygiene:
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, quality, secret-scan, ui-e2e, container]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create clean source release archive
+        shell: pwsh
+        run: ./scripts/create_submission_zip.ps1
+      - name: Verify archive inclusions and exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=dist/NorthFlux_Security.zip
+          test -f "$archive"
+          test -f "$archive.sha256"
+          (cd dist && sha256sum --check NorthFlux_Security.zip.sha256)
+          unzip -Z1 "$archive" > /tmp/northflux-archive-entries.txt
+          grep -Fx 'NorthFlux_Security/frontend/package.json' /tmp/northflux-archive-entries.txt
+          grep -Fx 'NorthFlux_Security/frontend/package-lock.json' /tmp/northflux-archive-entries.txt
+          if grep -E '(^|/)(\.aws|\.azure|\.e2e-data|\.git|\.secrets|\.ssh|\.venv|node_modules|dist|coverage|playwright-report|test-results|logs|reports|state)(/|$)|(^|/)(credentials(\.json)?|id_(dsa|ecdsa|ed25519|rsa)|service-account[^/]*\.json)$|\.(key|pem|pfx|p12|jks|keystore|kdbx)$' /tmp/northflux-archive-entries.txt; then
+            echo 'Release archive contains a prohibited path.' >&2
+            exit 1
+          fi
+          if grep -E '(^|/)\.env($|\.)' /tmp/northflux-archive-entries.txt | grep -vE '(^|/)\.env\.example$'; then
+            echo 'Release archive contains a local environment file.' >&2
+            exit 1
+          fi
+      - name: Upload source release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: northflux-security-source
+          path: |
+            dist/NorthFlux_Security.zip
+            dist/NorthFlux_Security.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

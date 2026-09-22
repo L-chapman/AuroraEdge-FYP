@@ -1,5 +1,7 @@
 # Core Scanner Development Progress Record
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../../README.md) and [`testing guide`](../TESTING.md).
+
 ## Stage 1 - DNS Scanner Skeleton (30 Sep - 06 Oct 2025)
 **Stage 1**: DNS Scanner Skeleton
 

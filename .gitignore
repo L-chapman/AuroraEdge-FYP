@@ -22,11 +22,18 @@ htmlcov/
 coverage.xml
 # Logs & reports
 logs/
-reports/*.tmp
+reports/
 *.log
 # Node (optional)
 node_modules/
 npm-debug.log*
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/*.tsbuildinfo
+frontend/.e2e-data/
 # Env & secrets
 .env
 .env.*
@@ -35,12 +42,31 @@ npm-debug.log*
 *.pem
 *.crt
 *.pfx
+*.p12
+*.jks
+*.keystore
+*.kdbx
+.npmrc
+.pypirc
+.aws/
+.azure/
+.secrets/
+.ssh/
+credentials
+credentials.json
+service-account*.json
+id_dsa
+id_ecdsa
+id_ed25519
+id_rsa
 # State / database (auto-created)
-state/*.db
-state/*.db-wal
-state/*.db-shm
-state/cf_secrets.local.cmd
-state/*.local.cmd
+state/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.local.cmd
 # Build artifacts
 dist/
 build/

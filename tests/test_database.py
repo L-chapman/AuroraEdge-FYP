@@ -8,7 +8,9 @@ clean up, causing PermissionError.
 """
 import gc
 import shutil
+import sqlite3
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pytest
 
@@ -69,6 +71,17 @@ def test_database_init_and_save():
         # Query domain history
         history = db.get_domain_history("example.com")
         assert len(history) == 1
+
+        # FastAPI can request the latest result and its history at the same
+        # time. The shared SQLite connection must serialise those reads.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            concurrent_history = list(
+                pool.map(
+                    lambda _index: db.get_domain_history("example.com"),
+                    range(512),
+                )
+            )
+        assert all(len(rows) == 1 for rows in concurrent_history)
 
         # Query scans
         scans = db.get_scans()
@@ -145,5 +158,181 @@ def test_score_zero_tracking():
         row = cur.fetchone()
         assert row["worst_score"] == 0, f"worst_score should be 0, got {row['worst_score']}"
         assert row["best_score"] == 50, f"best_score should be 50, got {row['best_score']}"
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_clear_invalidates_inflight_scan_persistence():
+    """A scan started before a clear must not repopulate deleted data."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        generation = db.get_data_generation()
+        db.clear_scan_data()
+        saved = db.write_scan_results(
+            [("example.com", {"spf_present": True}, {
+                "severity": "INFO", "score": 80, "grade": "B",
+                "violations": "", "violation_count": 0,
+            })],
+            notes="stale scan",
+            expected_generation=generation,
+        )
+        assert saved is False
+        assert db.get_domain_history("example.com") == []
+        assert db.get_scans() == []
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_deleting_history_resets_managed_domain_metadata():
+    """A monitored domain must not retain a deleted grade or score."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        generation = db.get_data_generation()
+        assert db.write_scan_results(
+            [("example.com", {"spf_present": True}, {
+                "severity": "INFO", "score": 95, "grade": "A",
+                "violations": "", "violation_count": 0,
+            })],
+            notes="managed baseline",
+            expected_generation=generation,
+            save_history=True,
+            manage_domains=True,
+            update_managed=True,
+            managed_notes="Primary domain",
+        )
+        assert db.delete_domain_history("example.com") == 1
+        managed = db.get_managed_domains()
+        assert len(managed) == 1
+        assert managed[0]["last_scan_at"] is None
+        assert managed[0]["last_grade"] is None
+        assert managed[0]["last_score"] is None
+        assert db.get_domain_history("example.com") == []
+        assert db.get_scans() == []
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_deleting_history_invalidates_inflight_scan_persistence():
+    """An earlier scan must not recreate history after operator deletion."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        generation = db.get_data_generation()
+        assert db.delete_domain_history("example.com") == 0
+        assert db.write_scan_results(
+            [("example.com", {"spf_present": True}, {
+                "severity": "INFO", "score": 80, "grade": "B",
+                "violations": "", "violation_count": 0,
+            })],
+            notes="stale scan",
+            expected_generation=generation,
+        ) is False
+        assert db.get_domain_history("example.com") == []
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_removing_managed_domain_invalidates_inflight_reenrolment():
+    """An earlier enrolment request must not undo an operator removal."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        entry = ("example.com", {"spf_present": True}, {
+            "severity": "INFO", "score": 80, "grade": "B",
+            "violations": "", "violation_count": 0,
+        })
+        assert db.write_scan_results(
+            [entry],
+            notes="initial enrolment",
+            save_history=False,
+            manage_domains=True,
+        )
+        generation = db.get_data_generation()
+        assert db.remove_managed_domain("example.com") is True
+
+        assert db.write_scan_results(
+            [entry],
+            notes="stale enrolment",
+            expected_generation=generation,
+            save_history=False,
+            manage_domains=True,
+        ) is False
+        assert db.get_managed_domains() == []
+        assert db.get_managed_domains(active_only=False)[0]["is_active"] == 0
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_atomic_scan_write_rolls_back_non_sqlite_failure():
+    """Data-shape errors cannot leave a partial scan transaction open."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        with pytest.raises(TypeError):
+            db.write_scan_results(
+                [("example.com", {"unexpected": object()}, {
+                    "severity": "INFO", "score": 80, "grade": "B",
+                    "violations": "", "violation_count": 0,
+                })],
+                notes="invalid scanner payload",
+            )
+        assert db.get_domain_history("example.com") == []
+        assert db.get_scans() == []
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_clear_scan_data_rolls_back_as_one_transaction():
+    """A failed clear cannot leave only part of the operator's data deleted."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        assert db.write_scan_results(
+            [("example.com", {"spf_present": True}, {
+                "severity": "INFO", "score": 80, "grade": "B",
+                "violations": "", "violation_count": 0,
+            })],
+            notes="baseline",
+        )
+        db.conn.execute(
+            """CREATE TRIGGER reject_domain_delete
+               BEFORE DELETE ON domains
+               BEGIN
+                   SELECT RAISE(ABORT, 'blocked by test');
+               END"""
+        )
+        db.conn.commit()
+
+        with pytest.raises(sqlite3.IntegrityError, match="blocked by test"):
+            db.clear_scan_data()
+
+        assert len(db.get_domain_history("example.com")) == 1
+        assert len(db.get_scans()) == 1
+    finally:
+        _cleanup(db, tmpdir)
+
+
+def test_delete_domain_history_rolls_back_as_one_transaction():
+    """A failed domain deletion cannot leave its result rows half-removed."""
+    db, tmpdir = _make_tmp_db()
+    try:
+        assert db.write_scan_results(
+            [("example.com", {"spf_present": True}, {
+                "severity": "INFO", "score": 80, "grade": "B",
+                "violations": "", "violation_count": 0,
+            })],
+            notes="baseline",
+        )
+        db.conn.execute(
+            """CREATE TRIGGER reject_one_domain_delete
+               BEFORE DELETE ON domains
+               WHEN OLD.domain = 'example.com'
+               BEGIN
+                   SELECT RAISE(ABORT, 'blocked by test');
+               END"""
+        )
+        db.conn.commit()
+
+        with pytest.raises(sqlite3.IntegrityError, match="blocked by test"):
+            db.delete_domain_history("example.com")
+
+        assert len(db.get_domain_history("example.com")) == 1
+        assert len(db.get_scans()) == 1
     finally:
         _cleanup(db, tmpdir)

@@ -4,7 +4,7 @@
 
 Cloudflare is optional and is used only for supported DNS remediation and MTA-STS Worker deployment. Read-only scanning works without it.
 
-Prefer a scoped API token limited to the specific authorised zone. Typical DNS remediation requires zone read and DNS edit access. Worker deployment requires additional account-level permissions and should use a separate token when practical.
+Prefer a scoped API token limited to the specific authorised zone. Typical DNS remediation requires zone read and DNS edit access. Worker deployment requires additional account-level permissions. The current runtime accepts one `CF_API_TOKEN`, so strict credential separation requires deploying the Worker outside NorthFlux or temporarily supplying a separately scoped Worker token for an approved deployment and restoring the DNS-only runtime token afterwards. Do not leave broader Worker permissions attached to the normal remediation credential merely for convenience.
 
 Production deployments should inject credentials through the service environment or a secret manager:
 

@@ -1,5 +1,7 @@
 # AuroraEdge Security — Final Project Spec (Jan 2026)
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 **Working Title**
 
 AuroraEdge Security: Designing and Implementing an Automated Email Authentication and Cyber Defence System for Small Organisations
