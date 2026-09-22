@@ -1,2 +1,0 @@
-domain,spf_present,spf_lookup_count,mx_present,mx_count,dmarc_present,dmarc_policy,notes
-example.com,True,0,True,1,True,reject,

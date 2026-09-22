@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="700" viewBox="0 0 1100 700" role="img" aria-labelledby="title desc">
-  <title id="title">AuroraEdge architecture diagram</title>
-  <desc id="desc">A system diagram showing input, dashboard and CLI, scanner, rules engine, database, Cloudflare remediation, and logs and reports.</desc>
+  <title id="title">NorthFlux Security architecture diagram</title>
+  <desc id="desc">A system diagram showing the React interface, FastAPI API and CLI, scanner, rules engine, database, optional Cloudflare remediation, and local outputs.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#2b4c7e" />
@@ -25,9 +25,9 @@
   <text class="small" x="150" y="188" text-anchor="middle">settings, demo flow</text>
 
   <rect class="panel" x="320" y="60" width="220" height="120" />
-  <text class="text" x="430" y="108" text-anchor="middle">Dashboard</text>
-  <text class="small" x="430" y="138" text-anchor="middle">FastAPI pages, APIs,</text>
-  <text class="small" x="430" y="161" text-anchor="middle">test hub, managed domains</text>
+  <text class="text" x="430" y="108" text-anchor="middle">Web Platform</text>
+  <text class="small" x="430" y="138" text-anchor="middle">React/Vite interface,</text>
+  <text class="small" x="430" y="161" text-anchor="middle">FastAPI JSON API</text>
 
   <rect class="panel" x="320" y="220" width="220" height="120" />
   <text class="text" x="430" y="268" text-anchor="middle">CLI</text>
@@ -77,5 +77,5 @@
   <path class="line dash" d="M980 190 L980 250" />
   <path class="line dash" d="M980 390 L980 470" />
 
-  <text class="small" x="70" y="640">AuroraEdge flow: input - interface - scanning - evaluation - storage - supported remediation - evidence output.</text>
+  <text class="small" x="70" y="640">NorthFlux flow: input - React interface or CLI - FastAPI - scanning - evaluation - storage - optional remediation - local output.</text>
 </svg>

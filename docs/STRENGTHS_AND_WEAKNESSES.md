@@ -1,6 +1,8 @@
 # AuroraEdge — Strengths, Weaknesses & Future Work
 
-**Author:** Leon Chapman (50030738)  
+> **Historical research snapshot:** This February 2026 comparison predates the NorthFlux Security migration. Product comparisons and market claims are preserved as academic evidence, are not current marketing claims, and should be independently revalidated before reuse.
+
+**Author:** Leon Chapman
 **Date:** February 2026  
 **Version:** Final Build (397 passed, 0 skipped)
 

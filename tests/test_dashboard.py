@@ -21,10 +21,18 @@ def test_dashboard_health_and_home(tmp_path, monkeypatch):
 
     # Point REPORTS to an empty temp dir -> home should still render OK
     monkeypatch.setattr(dashboard, "REPORTS", tmp_path)
+    monkeypatch.setattr(dashboard, "HAS_DB", False)
     r = client.get("/")
     assert r.status_code == 200
     # Dashboard renders a JS-driven shell; verify it contains the app title
-    assert "AuroraEdge" in r.text
+    assert "NorthFlux Security" in r.text
+    assert "Scheduled Monitoring Off" in r.text
+    assert "Managed Domains" in r.text
+    assert "Monitoring Active" not in r.text
+
+    r = client.get("/privacy")
+    assert r.status_code == 200
+    assert "NorthFlux Security privacy summary" in r.text
 
     # Create CSV/MD files and check endpoints
     csv = tmp_path / "stage7_results_sample.csv"

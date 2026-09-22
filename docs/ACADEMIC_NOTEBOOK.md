@@ -1,5 +1,7 @@
 # AuroraEdge Academic Notebook
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 This notebook captures the academic rationale, design choices, and development log for the automated email authentication and cyber defence system.
 
 ## 1. Purpose and Research Framing

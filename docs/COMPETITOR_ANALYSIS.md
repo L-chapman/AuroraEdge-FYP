@@ -1,5 +1,7 @@
 # AuroraEdge — Competitor Analysis & Feature Gap Assessment
 
+> **Historical research snapshot:** This February 2026 analysis predates the NorthFlux Security migration. Vendor features, licensing descriptions, rankings, and comparative claims are time-sensitive academic evidence—not current product claims—and require fresh primary-source validation before reuse.
+
 *Generated: 2026-02-26 | Research-based analysis for FYP academic comparison*
 
 ## Executive Summary

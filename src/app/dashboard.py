@@ -1,4 +1,4 @@
-"""FastAPI dashboard and API routes for AuroraEdge."""
+"""FastAPI dashboard and API routes for NorthFlux Security."""
 
 import os
 import re
@@ -9,13 +9,49 @@ import asyncio
 import logging
 import subprocess
 import concurrent.futures
+import hmac
+import hashlib
+import secrets
+import threading
+import tempfile
+import html as html_lib
+import time as _time
+import importlib.util
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
+from urllib.parse import parse_qs
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Query
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse
+from app.branding import DEMO_DOMAIN, PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_VERSION
+
+from fastapi import FastAPI, Depends, HTTPException, Request, Query, Response
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, RedirectResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.api_models import (
+    AlertResponse,
+    AuthState,
+    BootstrapResponse,
+    CapabilityMetadata,
+    DashboardResponse,
+    DashboardSettings,
+    DashboardStats,
+    LoginRequest,
+    ManagedDomainResponse,
+    OperatorMetadata,
+    ProductMetadata,
+    RuntimeMetadata,
+    ScoreStatistics,
+)
+from app.runtime_paths import (
+    INDEXED_REPORTS_DIR,
+    LOGS_DIR,
+    PROJECT_ROOT,
+    REPORTS_DIR,
+    STATE_DIR,
+)
 
 # Keep uvicorn INFO logs on stdout so PowerShell does not treat them as errors.
 _stdout_handler = logging.StreamHandler(sys.stdout)
@@ -60,12 +96,11 @@ def _sanitize_domain(raw) -> tuple:
 
 # Database import with fallback
 try:
-    from app.database import get_database, AuroraDatabase
+    from app.database import get_database
 
     HAS_DB = True
 except ImportError:
     HAS_DB = False
-    AuroraDatabase = None
 
 # Scanner and rules imports for live testing
 try:
@@ -81,7 +116,12 @@ except ImportError:
 
 # DNS auto-fix imports
 try:
-    from app.dns_fix import CloudflareDNS, get_cloudflare_client, TOOL_COMPARISON
+    from app.dns_fix import (
+        COMPARISON_DISCLAIMER,
+        CloudflareDNS,
+        TOOL_COMPARISON,
+        get_cloudflare_client,
+    )
 
     HAS_DNS_FIX = True
 except ImportError:
@@ -89,6 +129,7 @@ except ImportError:
     CloudflareDNS = None
     get_cloudflare_client = None
     TOOL_COMPARISON = {}
+    COMPARISON_DISCLAIMER = "Comparison data is unavailable."
 
 # Rule explanations import
 try:
@@ -112,38 +153,150 @@ except ImportError:
         return {}
 
 
-logger = logging.getLogger("auroraedge")
-DEMO_DOMAIN = "auroraedge.co.uk"
+logger = logging.getLogger("northflux")
 DEMO_RESET_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "demo_prep.py"
 
 
-def _bootstrap_cf_settings_from_env(db) -> List[str]:
-    """
-    Seed Cloudflare settings from process environment when DB values are missing.
-    This keeps local demo copies working without committing secrets to files.
-    """
-    mapping = {
-        "cf_api_token": "CF_API_TOKEN",
-        "cf_zone_id": "CF_ZONE_ID",
-        "cf_account_id": "CF_ACCOUNT_ID",
-        "cf_api_key": "CF_API_KEY",
-        "cf_email": "CF_EMAIL",
+def _is_enabled(value: object, default: bool = False) -> bool:
+    """Parse an explicit boolean setting without truthy-string surprises."""
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_production() -> bool:
+    return os.environ.get("NORTHFLUX_ENV", "development").strip().lower() == "production"
+
+
+def _escape(value: object) -> str:
+    """Escape untrusted text before placing it in server-rendered HTML."""
+    return html_lib.escape(str(value if value is not None else ""), quote=True)
+
+
+def _escape_record(record: Dict) -> Dict:
+    return {
+        key: _escape(value) if isinstance(value, str) else value
+        for key, value in record.items()
     }
-    seeded = []
-    for db_key, env_key in mapping.items():
-        existing = (db.get_setting(db_key, "") or "").strip()
-        if existing:
-            continue
-        env_val = (os.environ.get(env_key, "") or "").strip()
-        if env_val:
-            db.set_setting(db_key, env_val)
-            os.environ[env_key] = env_val
-            seeded.append(db_key)
-    return seeded
+
+
+_SESSION_COOKIE = "northflux_session"
+_CSRF_COOKIE = "northflux_csrf"
+_SESSION_TTL_SECONDS = 60 * 60 * 12
+_sessions: Dict[str, Dict] = {}
+_session_lock = threading.Lock()
+
+
+def _token_fingerprint(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _create_session(configured_token: str) -> tuple[str, str]:
+    """Create a unique, expiring browser session bound to the current token."""
+    now = _time.time()
+    session_id = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    with _session_lock:
+        expired = [sid for sid, item in _sessions.items() if item["expires_at"] <= now]
+        for sid in expired:
+            _sessions.pop(sid, None)
+        _sessions[session_id] = {
+            "csrf_token": csrf_token,
+            "expires_at": now + _SESSION_TTL_SECONDS,
+            "token_fingerprint": _token_fingerprint(configured_token),
+        }
+    return session_id, csrf_token
+
+
+def _get_session(session_id: str, configured_token: str) -> Optional[Dict]:
+    if not session_id:
+        return None
+    now = _time.time()
+    with _session_lock:
+        session = _sessions.get(session_id)
+        if not session:
+            return None
+        if session["expires_at"] <= now or not hmac.compare_digest(
+            session["token_fingerprint"], _token_fingerprint(configured_token)
+        ):
+            _sessions.pop(session_id, None)
+            return None
+        return dict(session)
+
+
+def _expected_origin(request: Request) -> str:
+    configured = _env("NORTHFLUX_PUBLIC_ORIGIN", "").strip().rstrip("/")
+    if configured:
+        return configured
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip()
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc)).split(",", 1)[0].strip()
+    return f"{scheme}://{host}"
+
+
+def _require_session_csrf(request: Request, session: Dict) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return
+    origin = request.headers.get("origin", "").rstrip("/")
+    expected_origin = _expected_origin(request)
+    if not origin or not hmac.compare_digest(origin, expected_origin):
+        raise HTTPException(status_code=403, detail="Invalid request origin")
+    header_token = request.headers.get("x-csrf-token", "")
+    cookie_token = request.cookies.get(_CSRF_COOKIE, "")
+    expected_token = session.get("csrf_token", "")
+    if not (
+        header_token
+        and cookie_token
+        and hmac.compare_digest(header_token, expected_token)
+        and hmac.compare_digest(cookie_token, expected_token)
+    ):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+
+
+def _load_cf_runtime_settings(db) -> List[str]:
+    """Load Cloudflare runtime configuration without persisting env secrets."""
+    if not HAS_DNS_FIX:
+        return []
+    import app.dns_fix as dns_mod
+
+    mapping = {
+        "cf_api_token": ("CF_API_TOKEN", "CF_API_TOKEN"),
+        "cf_zone_id": ("CF_ZONE_ID", "CF_ZONE_ID"),
+        "cf_account_id": ("CF_ACCOUNT_ID", "CF_ACCOUNT_ID"),
+        "cf_api_key": ("CF_API_KEY", "CF_API_KEY"),
+        "cf_email": ("CF_EMAIL", "CF_EMAIL"),
+    }
+    secret_keys = {"cf_api_token", "cf_api_key", "cf_email"}
+    loaded = []
+    for db_key, (env_key, module_name) in mapping.items():
+        env_value = (os.environ.get(env_key, "") or "").strip()
+        stored_value = (db.get_setting(db_key, "") or "").strip()
+        if _is_production() and db_key in secret_keys and stored_value and env_value:
+            db.delete_setting(db_key)
+            stored_value = ""
+            logger.info("Removed migrated %s secret from local settings", db_key)
+        value = env_value
+        if not value and not (_is_production() and db_key in secret_keys):
+            value = stored_value
+        setattr(dns_mod, module_name, value)
+        if value:
+            loaded.append(f"{db_key} ({'environment' if env_value else 'settings'})")
+    return loaded
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Modern lifespan handler &#8212; runs startup logic, then yields control."""
+    configured_token = os.environ.get("DASH_TOKEN", "").strip()
+    if _is_production() and not configured_token:
+        raise RuntimeError("DASH_TOKEN is required when NORTHFLUX_ENV=production")
+    if _is_production() and len(configured_token) < 32:
+        raise RuntimeError("DASH_TOKEN must be at least 32 characters in production")
+    if _is_production() and not _react_frontend_available():
+        raise RuntimeError(
+            "The compiled React frontend is required in production; "
+            "run `npm ci && npm run build` in frontend/ or use the production image"
+        )
+    for runtime_dir in (STATE, REPORTS, REPORTS_ROOT / "archive", LOGS_ROOT):
+        runtime_dir.mkdir(parents=True, exist_ok=True)
     # Expand the default thread-pool so multiple DNS scans can run concurrently
     loop = asyncio.get_running_loop()
     loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=8))
@@ -152,18 +305,22 @@ async def lifespan(application: FastAPI):
     if HAS_DB:
         try:
             db = get_database()
-            seeded = _bootstrap_cf_settings_from_env(db)
-            if seeded:
-                logger.info("Loaded Cloudflare settings from environment: %s", ", ".join(seeded))
-            clear = db.get_setting("clear_on_start", "true").lower() in ("true", "1", "yes")
+            loaded_settings = _load_cf_runtime_settings(db)
+            if loaded_settings:
+                logger.info("Loaded Cloudflare runtime settings: %s", ", ".join(loaded_settings))
+            clear = _is_enabled(db.get_setting("clear_on_start", "false"))
             if clear:
                 db.clear_scan_data()
                 logger.info("Database cleared for fresh session (clear_on_start=true)")
             else:
                 logger.info("Keeping previous scan data (clear_on_start=false)")
-            db.set_setting("demo_domain", DEMO_DOMAIN)
-            db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
-            logger.info("Demo domain seeded and managed: %s", DEMO_DOMAIN)
+            if (
+                not _is_production()
+                and _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
+            ):
+                db.set_setting("demo_domain", DEMO_DOMAIN)
+                db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
+                logger.info("Demo mode enabled; seeded managed domain: %s", DEMO_DOMAIN)
         except Exception as e:
             logger.warning("Could not initialise database on startup: %s", e)
 
@@ -180,19 +337,18 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(
-    title="AuroraEdge Security",
-    description="Automated Email Authentication & Cyber Defence System",
-    version="3.1",
+    title=PRODUCT_NAME,
+    description=PRODUCT_DESCRIPTION,
+    version=PRODUCT_VERSION,
     lifespan=lifespan,
+    docs_url=None if _is_production() else "/docs",
+    redoc_url=None if _is_production() else "/redoc",
+    openapi_url=None if _is_production() else "/openapi.json",
 )
 
 
 # ---------------------------------------------------------------------------
 # Security headers middleware  (OWASP recommended)
-# ---------------------------------------------------------------------------
-from starlette.middleware.base import BaseHTTPMiddleware
-
-
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Inject security headers into every HTTP response."""
 
@@ -207,17 +363,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["X-XSS-Protection"] = "1; mode=block"
-        # CSP: allow inline styles/scripts (needed for single-file dashboard),
-        # Chart.js CDN, and data: URIs for favicons.
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: https:; "
-            "font-src 'self'; "
-            "connect-src 'self'; "
-            "frame-ancestors 'none'"
-        )
+        if _react_frontend_enabled():
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+                "object-src 'none'; base-uri 'self'; form-action 'self'; "
+                "frame-ancestors 'none'"
+            )
+        else:
+            # Development fallback for the deprecated single-file interface.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: https:; "
+                "font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+            )
         return response
 
 
@@ -227,10 +388,13 @@ app.add_middleware(SecurityHeadersMiddleware)
 # ---------------------------------------------------------------------------
 # Simple in-memory rate limiter for scan endpoints
 # ---------------------------------------------------------------------------
-import time as _time
 _scan_rate: dict = {}          # ip -> [timestamp, timestamp, ...]
 _SCAN_RATE_WINDOW = 60         # seconds
 _SCAN_RATE_MAX = 10            # max scans per window
+_login_rate: dict = {}         # ip -> failed-login timestamps
+_login_rate_lock = threading.Lock()
+_LOGIN_RATE_WINDOW = 300       # seconds
+_LOGIN_RATE_MAX = 5            # failed attempts per window
 
 
 def _rate_check(request: Request):
@@ -252,23 +416,50 @@ def _rate_check(request: Request):
     _scan_rate[ip] = hits
 
 
+def _login_rate_check(request: Request) -> str:
+    """Return the client key or raise when failed logins exceed the limit."""
+    client_key = request.client.host if request.client else "unknown"
+    now = _time.monotonic()
+    with _login_rate_lock:
+        hits = [
+            timestamp
+            for timestamp in _login_rate.get(client_key, [])
+            if now - timestamp < _LOGIN_RATE_WINDOW
+        ]
+        _login_rate[client_key] = hits
+        if len(hits) >= _LOGIN_RATE_MAX:
+            raise HTTPException(status_code=429, detail="Too many failed sign-in attempts")
+    return client_key
+
+
+def _record_login_failure(client_key: str) -> None:
+    with _login_rate_lock:
+        _login_rate.setdefault(client_key, []).append(_time.monotonic())
+
+
+def _clear_login_failures(client_key: str) -> None:
+    with _login_rate_lock:
+        _login_rate.pop(client_key, None)
+
+
 # ---------------------------------------------------------------------------
 # Custom 404 page &#8212; branded HTML instead of raw JSON
-# ---------------------------------------------------------------------------
-from fastapi.responses import HTMLResponse as _HTMLResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-
 @app.exception_handler(StarletteHTTPException)
 async def _custom_http_exception(request: Request, exc: StarletteHTTPException):
     """Return a branded HTML page for 404 errors, JSON for API errors."""
+    if (
+        exc.status_code == 401
+        and not request.url.path.startswith("/api/")
+        and request.url.path != "/login"
+    ):
+        return RedirectResponse("/login", status_code=303)
     if exc.status_code == 404 and not request.url.path.startswith("/api/"):
-        return _HTMLResponse(
+        return HTMLResponse(
             status_code=404,
             content=f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>404 \u2014 AuroraEdge Security</title>
+<title>404 \u2014 NorthFlux Security</title>
 <style>
   body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0e1a;
          color: #e2e8f0; display: flex; align-items: center; justify-content: center;
@@ -281,7 +472,7 @@ async def _custom_http_exception(request: Request, exc: StarletteHTTPException):
   a:hover {{ text-decoration: underline; }}
 </style></head><body><div class="box">
   <h1>404</h1>
-  <p>The page <code>{request.url.path}</code> was not found.</p>
+  <p>The page <code>{_escape(request.url.path)}</code> was not found.</p>
   <p><a href="/">\u2190 Back to Dashboard</a></p>
 </div></body></html>""",
         )
@@ -293,11 +484,40 @@ async def _custom_http_exception(request: Request, exc: StarletteHTTPException):
     )
 
 
-# Project root and reports directory
-ROOT = Path(__file__).resolve().parents[2]
-REPORTS_ROOT = ROOT / "reports"
-REPORTS = REPORTS_ROOT / "indexed"
-STATE = ROOT / "state"
+# Project root and environment-overridable runtime directories
+ROOT = PROJECT_ROOT
+REPORTS_ROOT = REPORTS_DIR
+REPORTS = INDEXED_REPORTS_DIR
+STATE = STATE_DIR
+LOGS_ROOT = LOGS_DIR
+FRONTEND_DIST = Path(
+    os.environ.get("NORTHFLUX_FRONTEND_DIST", str(ROOT / "frontend" / "dist"))
+).resolve()
+
+
+def _react_frontend_enabled() -> bool:
+    """Use the compiled SPA in production or when explicitly requested."""
+    configured = os.environ.get("NORTHFLUX_SERVE_REACT")
+    return _is_enabled(configured) if configured is not None else _is_production()
+
+
+def _react_frontend_available() -> bool:
+    return _react_frontend_enabled() and (FRONTEND_DIST / "index.html").is_file()
+
+
+def _spa_index_response():
+    if not _react_frontend_enabled():
+        return None
+    if not (FRONTEND_DIST / "index.html").is_file():
+        raise HTTPException(
+            status_code=503,
+            detail="The compiled React frontend is unavailable",
+        )
+    return FileResponse(
+        FRONTEND_DIST / "index.html",
+        media_type="text/html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _env(name: str, default: str = "") -> str:
@@ -309,27 +529,453 @@ def require_token(req: Request):
     """
     Token-based authentication dependency.
 
-    Accepts token via:
-    - Query parameter: ?token=xxx
-    - Authorization header: Bearer xxx
+    Accepts an authenticated session cookie or an Authorization bearer token.
+    Query-string tokens remain available in development for legacy local links.
 
     If DASH_TOKEN is not set, allows open access (development mode).
     """
-    want = _env("DASH_TOKEN", "")
+    want = _env("DASH_TOKEN", "").strip()
     if not want:
-        return  # No token set -> open access (dev only)
+        if _is_production():
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
+        return  # No token set -> open access in local development
 
-    # Check query parameter
-    qtok = req.query_params.get("token")
-    if qtok and qtok == want:
+    # Explicit bearer credentials are not ambient browser authority, so they do
+    # not require a CSRF token.
+    auth = req.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and hmac.compare_digest(auth.split(" ", 1)[1], want):
         return
 
-    # Check Authorization header
-    auth = req.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and auth.split(" ", 1)[1] == want:
+    # Query-string tokens are retained only for legacy local development links.
+    qtok = req.query_params.get("token")
+    if not _is_production() and qtok and hmac.compare_digest(qtok, want):
+        return
+
+    session_id = req.cookies.get(_SESSION_COOKIE, "")
+    session = _get_session(session_id, want)
+    if session:
+        _require_session_csrf(req, session)
+        req.state.session_id = session_id
         return
 
     raise HTTPException(status_code=401, detail="Unauthorised - valid token required")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page():
+    """Render the operator login page when token authentication is enabled."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
+    if not _env("DASH_TOKEN", "").strip():
+        return RedirectResponse("/", status_code=303)
+    return HTMLResponse(
+        """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in - NorthFlux Security</title>
+<style>body{font-family:Segoe UI,system-ui,sans-serif;background:#0a0e1a;color:#e2e8f0;
+display:grid;place-items:center;min-height:100vh;margin:0}.card{width:min(380px,calc(100% - 40px));
+background:#111827;border:1px solid #263248;border-radius:16px;padding:28px;box-shadow:0 20px 50px #0008}
+h1{margin:0 0 8px;font-size:1.5rem}p{color:#94a3b8}label{display:block;margin:20px 0 8px}
+input{box-sizing:border-box;width:100%;padding:12px;border-radius:8px;border:1px solid #334155;
+background:#0f172a;color:#fff}button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;
+background:#38bdf8;color:#082f49;font-weight:700;cursor:pointer}.error{color:#fca5a5}</style></head>
+<body><main class="card"><h1>NorthFlux Security</h1><p>Sign in to manage this instance.</p>
+<form method="post" action="/login"><label for="token">Access token</label>
+<input id="token" name="token" type="password" required autocomplete="current-password">
+<button type="submit">Sign in</button></form></main></body></html>"""
+    )
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_page():
+    """Publish the essential operator and visitor privacy boundaries."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
+    return HTMLResponse(
+        """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy - NorthFlux Security</title>
+<style>body{font-family:Segoe UI,system-ui,sans-serif;background:#0a0e1a;color:#e2e8f0;
+margin:0;padding:40px 20px}.card{box-sizing:border-box;width:min(760px,100%);margin:auto;
+background:#111827;border:1px solid #263248;border-radius:16px;padding:32px;box-shadow:0 20px 50px #0008}
+h1,h2{color:#f8fafc}h1{margin-top:0}h2{font-size:1.05rem;margin-top:28px}p,li{color:#b8c4d6;
+line-height:1.65}a{color:#38bdf8}code{color:#c4b5fd}</style></head><body><main class="card">
+<h1>NorthFlux Security privacy summary</h1>
+<p>NorthFlux is self-hosted software. The operator of this instance controls its deployment, access,
+retention, backups, and any optional integrations.</p>
+<h2>Data processed</h2><p>NorthFlux queries public DNS records and limited public HTTPS and SMTP posture signals.
+It does not read mailboxes or message content. Public records can contain contact addresses, such as DMARC or
+TLS reporting destinations.</p>
+<h2>Local storage</h2><p>Scan history, managed-domain metadata, alerts, settings, reports, and logs are stored on the
+operator's system. NorthFlux does not provide an application-managed vendor cloud or advertising analytics.</p>
+<h2>Credentials and changes</h2><p>Production Cloudflare credentials must be supplied through the runtime environment.
+NorthFlux does not return them through its settings API. DNS changes are opt-in and must be limited to zones the
+operator owns or is explicitly authorised to manage.</p>
+<h2>Your operator</h2><p>Contact the operator of this instance about access, retention, or deletion. Operators should
+document their own legal basis, retention period, processor arrangements, and incident process before handling
+personal data or offering the service to others.</p>
+<p><a href="/">Back to NorthFlux Security</a></p></main></body></html>"""
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login(request: Request):
+    """Exchange the configured access token for an HttpOnly session cookie."""
+    want = _env("DASH_TOKEN", "").strip()
+    client_key = _login_rate_check(request)
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        raw_body.extend(chunk)
+        if len(raw_body) > 4096:
+            _record_login_failure(client_key)
+            raise HTTPException(status_code=413, detail="Sign-in request is too large")
+    body = parse_qs(raw_body.decode("utf-8", errors="replace"), max_num_fields=10)
+    supplied = body.get("token", [""])[0]
+    if not want or not hmac.compare_digest(supplied, want):
+        _record_login_failure(client_key)
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    _clear_login_failures(client_key)
+    session_id, csrf_token = _create_session(want)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    response.set_cookie(
+        _CSRF_COOKIE,
+        csrf_token,
+        httponly=False,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    return response
+
+
+@app.post("/logout", dependencies=[Depends(require_token)])
+def logout(request: Request):
+    session_id = request.cookies.get(_SESSION_COOKIE, "")
+    if session_id:
+        with _session_lock:
+            _sessions.pop(session_id, None)
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(_SESSION_COOKIE)
+    response.delete_cookie(_CSRF_COOKIE)
+    return response
+
+
+def _auth_state(request: Request) -> AuthState:
+    """Describe the request's existing authority without creating a session."""
+
+    configured_token = _env("DASH_TOKEN", "").strip()
+    if not configured_token:
+        return AuthState(
+            required=False,
+            authenticated=not _is_production(),
+            expires_at=None,
+        )
+
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and hmac.compare_digest(
+        auth.split(" ", 1)[1], configured_token
+    ):
+        return AuthState(required=True, authenticated=True, expires_at=None)
+
+    query_token = request.query_params.get("token")
+    if (
+        not _is_production()
+        and query_token
+        and hmac.compare_digest(query_token, configured_token)
+    ):
+        return AuthState(required=True, authenticated=True, expires_at=None)
+
+    session = _get_session(
+        request.cookies.get(_SESSION_COOKIE, ""),
+        configured_token,
+    )
+    if not session:
+        return AuthState(required=True, authenticated=False, expires_at=None)
+
+    expires_at = datetime.fromtimestamp(session["expires_at"], tz=timezone.utc)
+    return AuthState(required=True, authenticated=True, expires_at=expires_at)
+
+
+def _parse_api_timestamp(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _normalise_score(value: object, *, optional: bool = False) -> Optional[int]:
+    if value is None and optional:
+        return None
+    try:
+        return max(0, min(100, int(value or 0)))
+    except (TypeError, ValueError):
+        return None if optional else 0
+
+
+def _normalise_grade(value: object, *, optional: bool = False):
+    grade = str(value or "").upper()
+    if grade in {"A+", "A", "B", "C", "D", "F"}:
+        return grade
+    return None if optional else "F"
+
+
+def _dashboard_settings(db) -> DashboardSettings:
+    interval_text = str(db.get_setting("monitor_interval", "24") or "24").strip()
+    try:
+        interval = int(interval_text)
+    except ValueError:
+        interval = 24
+    if interval not in {6, 12, 24, 48, 168}:
+        interval = 24
+    return DashboardSettings(
+        monitor_interval_hours=interval,
+        monitoring_enabled=_is_enabled(db.get_setting("monitoring_enabled", "false")),
+        automatic_remediation=_is_enabled(
+            db.get_setting("automatic_remediation", "false")
+        ),
+    )
+
+
+@app.get("/api/v1/auth/session", response_model=AuthState)
+def api_v1_auth_session(request: Request):
+    """Return browser authentication state without exposing credential material."""
+
+    return _auth_state(request)
+
+
+@app.post("/api/v1/auth/login", response_model=AuthState)
+def api_v1_auth_login(payload: LoginRequest, request: Request, response: Response):
+    """Exchange a JSON access token for the existing browser session cookies."""
+
+    configured_token = _env("DASH_TOKEN", "").strip()
+    if not configured_token:
+        raise HTTPException(status_code=409, detail="Authentication is not enabled")
+
+    client_key = _login_rate_check(request)
+    if not hmac.compare_digest(payload.token, configured_token):
+        _record_login_failure(client_key)
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
+    _clear_login_failures(client_key)
+    session_id, csrf_token = _create_session(configured_token)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    response.set_cookie(
+        _CSRF_COOKIE,
+        csrf_token,
+        httponly=False,
+        secure=_is_production(),
+        samesite="strict",
+        max_age=_SESSION_TTL_SECONDS,
+    )
+    session = _get_session(session_id, configured_token)
+    expires_at = datetime.fromtimestamp(session["expires_at"], tz=timezone.utc)
+    return AuthState(required=True, authenticated=True, expires_at=expires_at)
+
+
+@app.post(
+    "/api/v1/auth/logout",
+    response_model=AuthState,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_auth_logout(request: Request, response: Response):
+    """Revoke the current browser session and clear its authentication cookies."""
+
+    session_id = request.cookies.get(_SESSION_COOKIE, "")
+    if session_id:
+        with _session_lock:
+            _sessions.pop(session_id, None)
+    response.delete_cookie(_SESSION_COOKIE)
+    response.delete_cookie(_CSRF_COOKIE)
+    return AuthState(
+        required=bool(_env("DASH_TOKEN", "").strip()),
+        authenticated=False,
+        expires_at=None,
+    )
+
+
+@app.get(
+    "/api/v1/bootstrap",
+    response_model=BootstrapResponse,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_bootstrap(request: Request):
+    """Return the non-secret product and runtime metadata needed by the SPA."""
+
+    settings = DashboardSettings(
+        monitor_interval_hours=24,
+        monitoring_enabled=False,
+        automatic_remediation=False,
+    )
+    org_name = "Your Organisation"
+    if HAS_DB:
+        try:
+            db = get_database()
+            settings = _dashboard_settings(db)
+            org_name = str(db.get_setting("org_name", org_name) or org_name)
+        except Exception:
+            logger.exception("Could not load API bootstrap settings")
+
+    production = _is_production()
+    return BootstrapResponse(
+        product=ProductMetadata(
+            name=PRODUCT_NAME,
+            version=PRODUCT_VERSION,
+            description=PRODUCT_DESCRIPTION,
+        ),
+        auth=_auth_state(request),
+        runtime=RuntimeMetadata(
+            production=production,
+            demo_mode=(
+                not production
+                and _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
+            ),
+        ),
+        capabilities=CapabilityMetadata(
+            scanner=HAS_SCANNER,
+            database=HAS_DB,
+            dns_fix=HAS_DNS_FIX,
+            pdf=importlib.util.find_spec("reportlab") is not None,
+            monitoring_enabled=settings.monitoring_enabled,
+            automatic_remediation=settings.automatic_remediation,
+        ),
+        operator=OperatorMetadata(org_name=org_name),
+    )
+
+
+@app.get(
+    "/api/v1/dashboard",
+    response_model=DashboardResponse,
+    dependencies=[Depends(require_token)],
+)
+def api_v1_dashboard():
+    """Return a typed, normalised dashboard snapshot for the React client."""
+
+    if not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    try:
+        db = get_database()
+        with db.snapshot():
+            raw_domains = db.get_managed_domains()
+            raw_alerts = db.get_alerts(unacknowledged_only=True, limit=5)
+            alert_count = db.get_alert_count()
+            raw_stats = db.get_statistics()
+            settings = _dashboard_settings(db)
+    except Exception:
+        logger.exception("Could not build API dashboard snapshot")
+        raise HTTPException(status_code=500, detail="Failed to load dashboard")
+
+    domains = []
+    for record in raw_domains:
+        domain, error = _sanitize_domain(record.get("domain"))
+        if error:
+            logger.warning("Skipping invalid managed domain in API response: %s", error)
+            continue
+        domains.append(
+            ManagedDomainResponse(
+                id=int(record.get("id") or 0),
+                domain=domain,
+                added_at=_parse_api_timestamp(record.get("added_at")),
+                is_active=bool(record.get("is_active")),
+                last_scan_at=_parse_api_timestamp(record.get("last_scan_at")),
+                last_grade=_normalise_grade(record.get("last_grade"), optional=True),
+                last_score=_normalise_score(record.get("last_score"), optional=True),
+                previous_grade=_normalise_grade(
+                    record.get("previous_grade"), optional=True
+                ),
+                previous_score=_normalise_score(
+                    record.get("previous_score"), optional=True
+                ),
+                notes=str(record.get("notes") or ""),
+            )
+        )
+
+    alerts = []
+    for record in raw_alerts:
+        domain, error = _sanitize_domain(record.get("domain"))
+        if error:
+            logger.warning("Skipping invalid alert domain in API response: %s", error)
+            continue
+        alerts.append(
+            AlertResponse(
+                id=int(record.get("id") or 0),
+                domain=domain,
+                alert_type=str(record.get("alert_type") or ""),
+                severity=str(record.get("severity") or "INFO").upper(),
+                message=str(record.get("message") or ""),
+                details=str(record.get("details") or ""),
+                created_at=_parse_api_timestamp(record.get("created_at")),
+                acknowledged=bool(record.get("acknowledged")),
+                acknowledged_at=_parse_api_timestamp(record.get("acknowledged_at")),
+            )
+        )
+
+    scores = [domain.last_score for domain in domains if domain.last_score is not None]
+    grade_distribution = {
+        grade: sum(1 for domain in domains if domain.last_grade == grade)
+        for grade in ("A+", "A", "B", "C", "D", "F")
+    }
+    passing_domains = sum(1 for score in scores if score >= 70)
+    raw_score_stats = raw_stats.get("score_stats") or {}
+    severity_distribution = {
+        str(severity or "UNKNOWN"): int(count or 0)
+        for severity, count in (raw_stats.get("severity_distribution") or {}).items()
+    }
+    return DashboardResponse(
+        stats=DashboardStats(
+            total_scans=max(0, int(raw_stats.get("total_scans") or 0)),
+            unique_domains=max(0, int(raw_stats.get("unique_domains") or 0)),
+            total_results=max(0, int(raw_stats.get("total_results") or 0)),
+            score_stats=ScoreStatistics(
+                avg_score=(
+                    float(raw_score_stats["avg_score"])
+                    if raw_score_stats.get("avg_score") is not None
+                    else None
+                ),
+                min_score=(
+                    _normalise_score(raw_score_stats.get("min_score"), optional=True)
+                ),
+                max_score=(
+                    _normalise_score(raw_score_stats.get("max_score"), optional=True)
+                ),
+            ),
+            severity_distribution=severity_distribution,
+            total_domains=len(domains),
+            average_score=round(sum(scores) / len(scores)) if scores else 0,
+            passing_domains=passing_domains,
+            failing_domains=len(scores) - passing_domains,
+            grade_distribution=grade_distribution,
+            alert_count=int(alert_count),
+        ),
+        domains=domains,
+        alerts=alerts,
+        settings=settings,
+    )
 
 
 def list_csvs() -> List[Path]:
@@ -352,7 +998,7 @@ def load_csv(p: Path) -> List[Dict[str, str]]:
     with p.open("r", encoding="utf-8") as f:
         r = csv.DictReader(f)
         for row in r:
-            # Skip comment/header rows (e.g. '# AuroraEdge Academic Dataset')
+            # Skip comment/header rows in exported or hand-maintained datasets.
             domain = (row.get("domain") or "").strip()
             if domain.startswith("#") or domain.startswith("\ufeff#"):
                 continue
@@ -436,12 +1082,48 @@ def _check_for_updates() -> tuple[bool, float]:
 
 @app.get("/health")
 def health():
-    """Health check endpoint."""
+    """Process liveness endpoint."""
     return {
         "ok": True,
+        "service": PRODUCT_NAME,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "version": "3.1",
+        "version": PRODUCT_VERSION,
     }
+
+
+def _directory_writable(path: Path) -> bool:
+    """Verify a runtime directory with a real, automatically removed probe."""
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path,
+            prefix=".northflux-ready-",
+            delete=True,
+        ):
+            return True
+    except (OSError, ValueError):
+        return False
+
+
+@app.get("/ready")
+def readiness():
+    """Check database availability and writable runtime directories."""
+    checks = {
+        "database": False,
+        "state_writable": _directory_writable(STATE),
+        "reports_writable": _directory_writable(REPORTS_ROOT),
+        "logs_writable": _directory_writable(LOGS_ROOT),
+    }
+    if HAS_DB:
+        try:
+            db = get_database()
+            checks["database"] = db.ping()
+        except Exception:
+            logger.exception("Readiness database check failed")
+    ready = all(checks.values())
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"ok": ready, "checks": checks, "version": PRODUCT_VERSION},
+    )
 
 
 @app.get("/api/stream", dependencies=[Depends(require_token)])
@@ -530,26 +1212,35 @@ def api_summary():
 @app.get("/api/domain/{domain}", dependencies=[Depends(require_token)])
 def api_domain(domain: str):
     """Get latest result for a specific domain &#8212; checks DB first, falls back to CSV."""
+    clean, error = _sanitize_domain(domain)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
     # Try database first
     if HAS_DB:
         try:
             db = get_database()
-            history = db.get_domain_history(domain, limit=1)
+            history = db.get_domain_history(clean, limit=1)
             if history:
-                return {"domain": domain, "result": history[0], "source": "database"}
+                return {"domain": clean, "result": history[0], "source": "database"}
         except Exception:
-            pass
+            logger.exception("Failed to retrieve the latest result for %s", clean)
+            raise HTTPException(status_code=500, detail="Failed to retrieve domain data")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No scan data found for {clean}. Try scanning it first.",
+        )
 
-    # Fallback to CSV
+    # Legacy fallback for installations running without database support.
     csv_file, _ = _latest_pair()
     if csv_file:
         rows = load_csv(csv_file)
         for row in rows:
-            if row.get("domain", "").lower() == domain.lower():
-                return {"domain": domain, "result": row, "source": "csv"}
+            if row.get("domain", "").lower() == clean:
+                return {"domain": clean, "result": row, "source": "csv"}
 
     raise HTTPException(
-        status_code=404, detail=f"No scan data found for {domain}. Try scanning it first."
+        status_code=404, detail=f"No scan data found for {clean}. Try scanning it first."
     )
 
 
@@ -654,14 +1345,18 @@ def api_all_explanations():
 
 @app.get("/api/tools/comparison")
 def api_tool_comparison():
-    """Get tool comparison data for academic analysis."""
+    """Return the labelled legacy feature snapshot."""
     if not HAS_DNS_FIX or not TOOL_COMPARISON:
         return {"tools": {}, "error": "Tool comparison data not available"}
-    return {"tools": TOOL_COMPARISON}
+    return {
+        "status": "legacy_snapshot",
+        "disclaimer": COMPARISON_DISCLAIMER,
+        "tools": TOOL_COMPARISON,
+    }
 
 
 @app.get("/api/history/{domain}", dependencies=[Depends(require_token)])
-def api_history(domain: str, limit: int = 20):
+def api_history(domain: str, limit: int = Query(20, ge=1, le=100)):
     """Get historical scan results for a domain."""
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
@@ -692,14 +1387,96 @@ def api_delete_history(domain: str):
     return {"ok": True, "domain": clean, "deleted_records": deleted}
 
 
+_GENERATED_REPORT_NAME = re.compile(
+    r"^(?:northflux|auroraedge|stage\d+)_results_\d{8}_\d{6}\.(?:csv|md)$",
+    re.IGNORECASE,
+)
+_OWNED_REPORT_DIRECTORIES = ("indexed", "archive")
+
+
+def _validated_reports_root(configured_root: Path) -> Path:
+    """Resolve a reports root while rejecting paths that own other app data."""
+    if configured_root.is_symlink():
+        raise RuntimeError("The reports directory cannot be a symbolic link")
+
+    reports_root = configured_root.resolve()
+    filesystem_root = Path(reports_root.anchor).resolve()
+    protected_paths = {
+        filesystem_root,
+        Path.home().resolve(),
+        PROJECT_ROOT.resolve(),
+        STATE.resolve(),
+        LOGS_ROOT.resolve(),
+        FRONTEND_DIST.resolve(),
+    }
+    if any(
+        reports_root == protected or protected.is_relative_to(reports_root)
+        for protected in protected_paths
+    ):
+        raise RuntimeError("The configured reports directory is unsafe")
+    if reports_root.exists() and not reports_root.is_dir():
+        raise RuntimeError("The configured reports path is not a directory")
+    return reports_root
+
+
+def _clear_generated_reports() -> int:
+    """Delete only recognised generated reports from app-owned locations.
+
+    NorthFlux currently writes timestamped CSV/Markdown pairs. The previous
+    AuroraEdge and numbered project-stage prefixes are retained so upgrades
+    can clear known legacy reports.
+    Unrelated files and nested directories are never traversed or removed.
+    """
+    reports_root = _validated_reports_root(REPORTS_ROOT)
+    if not reports_root.exists():
+        return 0
+
+    owned_directories = [
+        reports_root,
+        *(reports_root / name for name in _OWNED_REPORT_DIRECTORIES),
+    ]
+    for directory in owned_directories:
+        if directory.is_symlink():
+            raise RuntimeError("An owned reports directory cannot be a symbolic link")
+        if directory.exists() and not directory.is_dir():
+            raise RuntimeError("An owned reports path is not a directory")
+
+    generated_reports = [
+        path
+        for directory in owned_directories
+        if directory.exists()
+        for path in directory.iterdir()
+        if _GENERATED_REPORT_NAME.fullmatch(path.name)
+        and (path.is_file() or path.is_symlink())
+    ]
+    for report in generated_reports:
+        report.unlink()
+
+    (reports_root / "indexed").mkdir(parents=True, exist_ok=True)
+    (reports_root / "archive").mkdir(parents=True, exist_ok=True)
+    return len(generated_reports)
+
+
 @app.post("/api/data/clear", dependencies=[Depends(require_token)])
 def api_clear_all_data():
-    """Clear all scan data (results, domains, alerts). Preserves settings."""
+    """Clear database scan data and generated reports. Preserve settings/logs."""
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
     db = get_database()
+    try:
+        deleted_reports = _clear_generated_reports()
+    except (OSError, RuntimeError):
+        logger.exception("Refused or failed to clear the configured reports directory")
+        raise HTTPException(
+            status_code=500,
+            detail="Reports could not be cleared; scan data was not changed",
+        )
     db.clear_scan_data()
-    return {"ok": True, "message": "All scan data cleared. Settings preserved."}
+    return {
+        "ok": True,
+        "deleted_reports": deleted_reports,
+        "message": "All scan data and generated reports cleared. Settings preserved.",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -719,12 +1496,17 @@ def api_rescan_domain(request: Request, domain: str):
     """
     if not HAS_SCANNER:
         raise HTTPException(status_code=501, detail="Scanner module not available")
+    if not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
 
     _rate_check(request)
 
     clean, err = _sanitize_domain(domain)
     if err:
         raise HTTPException(status_code=400, detail=err)
+
+    db = get_database()
+    data_generation = db.get_data_generation()
 
     # Perform the scan
     scan_result = scan_domain(clean, check_starttls=False)
@@ -734,17 +1516,18 @@ def api_rescan_domain(request: Request, domain: str):
     grade = evaluation.get("grade", "F")
     score = evaluation.get("score", 0)
 
-    # Persist to DB
-    if HAS_DB:
-        try:
-            db = get_database()
-            scan_id = db.start_scan(notes=f"Rescan of {clean}")
-            db.save_result(scan_id, clean, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
-            # Update managed-domain record (no-op if domain isn't managed)
-            db.update_managed_domain_scan(clean, grade, score)
-        except Exception as e:
-            logger.warning(f"Rescan DB save failed for {clean}: {e}")
+    persisted = db.write_scan_results(
+        [(clean, scan_result, evaluation)],
+        notes=f"Rescan of {clean}",
+        expected_generation=data_generation,
+        save_history=True,
+        update_managed=True,
+    )
+    if not persisted:
+        raise HTTPException(
+            status_code=409,
+            detail="Scan data changed during the rescan; retry the request",
+        )
 
     # Generate remediation
     remediation_list = []
@@ -780,6 +1563,7 @@ def api_rescan_domain(request: Request, domain: str):
         "scan": scan_result,
         "evaluation": evaluation,
         "remediation": remediation_list,
+        "saved": True,
     }
 
 
@@ -863,7 +1647,7 @@ def api_pdf_report(domain: str):
         title_style = ParagraphStyle("Title2", parent=styles["Title"], fontSize=18, spaceAfter=6)
         subtitle_style = ParagraphStyle("Sub", parent=styles["Normal"], fontSize=10, textColor=colors.grey)
 
-        story.append(Paragraph("AuroraEdge Security Report", title_style))
+        story.append(Paragraph("NorthFlux Security Report", title_style))
         story.append(Paragraph(f"Domain: {clean}", styles["Heading2"]))
         scanned = (result.get("scanned_at") or "Unknown")[:19].replace("T", " ")
         story.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | Last Scan: {scanned}", subtitle_style))
@@ -916,11 +1700,11 @@ def api_pdf_report(domain: str):
         violations = result.get("violations") or "None"
         advice = result.get("advice") or "All checks passed"
         story.append(Paragraph("Violations & Recommendations", styles["Heading3"]))
-        story.append(Paragraph(f"<b>Issues:</b> {violations}", styles["Normal"]))
-        story.append(Paragraph(f"<b>Advice:</b> {advice}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Issues:</b> {_escape(violations)}", styles["Normal"]))
+        story.append(Paragraph(f"<b>Advice:</b> {_escape(advice)}", styles["Normal"]))
         story.append(Spacer(1, 8*mm))
 
-        story.append(Paragraph("Report generated by AuroraEdge &#8212; Automated Email Authentication & Cyber Defence System", subtitle_style))
+        story.append(Paragraph("Report generated by NorthFlux Security", subtitle_style))
 
         doc.build(story)
         buf.seek(0)
@@ -928,7 +1712,7 @@ def api_pdf_report(domain: str):
         return StreamingResponse(
             buf,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="auroraedge_{clean}_{datetime.now(timezone.utc).strftime("%Y%m%d")}.pdf"'}
+            headers={"Content-Disposition": f'attachment; filename="northflux_{clean}_{datetime.now(timezone.utc).strftime("%Y%m%d")}.pdf"'}
         )
     except ImportError:
         raise HTTPException(status_code=501, detail="PDF generation requires 'reportlab'. Install with: pip install reportlab")
@@ -948,8 +1732,9 @@ def api_managed_domains():
     if not HAS_DB:
         return {"domains": [], "error": "Database not available"}
     db = get_database()
-    domains = db.get_managed_domains()
-    alert_count = db.get_alert_count()
+    with db.snapshot():
+        domains = db.get_managed_domains()
+        alert_count = db.get_alert_count()
     return {"domains": domains, "count": len(domains), "alert_count": alert_count}
 
 
@@ -969,48 +1754,122 @@ async def api_add_managed_domain(request: Request):
     if err:
         raise HTTPException(status_code=400, detail=err)
     db = get_database()
-    result = db.add_managed_domain(domain, body.get("notes", ""))
+    notes = str(body.get("notes") or "")[:500]
+    data_generation = db.get_data_generation()
+    result = {"ok": True, "domain": domain}
 
     # Run initial scan immediately
-    if HAS_SCANNER:
+    if not HAS_SCANNER:
+        if not db.add_managed_domain_if_generation(domain, notes, data_generation):
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; retry the request",
+            )
+        return result
+
+    try:
+        scan_result = await asyncio.to_thread(scan_domain, domain, False)
+        scan_result["domain"] = domain
+        evaluation = evaluate(scan_result)
+    except Exception:
+        logger.exception("Initial onboarding scan failed for %s", domain)
+        if not db.add_managed_domain_if_generation(domain, notes, data_generation):
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; retry the request",
+            )
+        result["initial_scan"] = {
+            "error": "Initial scan could not be completed. Try a rescan."
+        }
+        return result
+
+    persisted = db.write_scan_results(
+        [(domain, scan_result, evaluation)],
+        notes=f"Onboarding scan for {domain}",
+        expected_generation=data_generation,
+        save_history=True,
+        manage_domains=True,
+        update_managed=True,
+        managed_notes=notes,
+    )
+    if not persisted:
+        raise HTTPException(
+            status_code=409,
+            detail="Scan data changed during onboarding; retry the request",
+        )
+
+    grade = evaluation.get("grade", "F")
+    score = evaluation.get("score", 0)
+    result["initial_scan"] = {
+        "grade": grade,
+        "score": score,
+        "severity": evaluation.get("severity", "OK"),
+    }
+
+    # DNS changes require both the global safety setting and an explicit opt-in
+    # on this individual onboarding request.
+    remediation_requested = _is_enabled(
+        body.get("automatic_remediation"), default=False
+    )
+    if remediation_requested and _is_enabled(
+        db.get_setting("automatic_remediation", "false")
+    ):
+        if db.get_data_generation() != data_generation:
+            raise HTTPException(
+                status_code=409,
+                detail="Scan data changed during onboarding; remediation cancelled",
+            )
         try:
-            scan_result = scan_domain(domain, check_starttls=False)
-            scan_result["domain"] = domain
-            evaluation = evaluate(scan_result)
-            grade = evaluation.get("grade", "F")
-            score = evaluation.get("score", 0)
-            db.update_managed_domain_scan(domain, grade, score)
-            # Save to results DB
-            scan_id = db.start_scan(notes=f"Onboarding scan for {domain}")
-            db.save_result(scan_id, domain, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
-            result["initial_scan"] = {
-                "grade": grade, "score": score,
-                "severity": evaluation.get("severity", "OK")
-            }
-
-            # AUTO-FIX: apply all DNS fixes immediately &#8212; no human in the loop
-            fix_result = _auto_fix_domain(domain, scan_result)
+            fix_result = await asyncio.to_thread(_auto_fix_domain, domain, scan_result)
             result["auto_fix"] = fix_result
+        except Exception:
+            logger.exception("Onboarding remediation failed for %s", domain)
+            fix_result = {"applied": [], "failed": [{"message": "Remediation failed"}]}
+            result["auto_fix"] = fix_result
+    else:
+        fix_result = {
+            "applied": [],
+            "failed": [],
+            "skipped_reason": "Automatic remediation is disabled",
+        }
 
-            # If fixes were applied, rescan to get updated grade
-            if fix_result.get("applied"):
-                import time
-                time.sleep(2)  # Brief pause for DNS propagation
-                rescan = scan_domain(domain, check_starttls=False)
-                rescan["domain"] = domain
-                re_eval = evaluate(rescan)
-                new_grade = re_eval.get("grade", grade)
-                new_score = re_eval.get("score", score)
-                db.update_managed_domain_scan(domain, new_grade, new_score)
-                result["post_fix_scan"] = {
-                    "grade": new_grade, "score": new_score,
-                    "severity": re_eval.get("severity", "OK"),
-                    "improved": new_score > score,
-                }
-
-        except Exception as e:
-            result["initial_scan"] = {"error": str(e)}
+    # If fixes were applied, rescan and save the updated baseline as history.
+    if fix_result.get("applied"):
+        await asyncio.sleep(2)
+        try:
+            rescan = await asyncio.to_thread(scan_domain, domain, False)
+            rescan["domain"] = domain
+            re_eval = evaluate(rescan)
+            post_fix_saved = db.write_scan_results(
+                [(domain, rescan, re_eval)],
+                notes=f"Post-remediation onboarding scan for {domain}",
+                expected_generation=data_generation,
+                save_history=True,
+                update_managed=True,
+            )
+            if not post_fix_saved:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Scan data changed during onboarding; "
+                        "the post-remediation result was not saved"
+                    ),
+                )
+            new_grade = re_eval.get("grade", grade)
+            new_score = re_eval.get("score", score)
+            result["post_fix_scan"] = {
+                "grade": new_grade,
+                "score": new_score,
+                "severity": re_eval.get("severity", "OK"),
+                "improved": new_score > score,
+            }
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Post-remediation scan failed for %s", domain)
+            result["post_fix_scan"] = {
+                "error": "Post-remediation scan could not be completed."
+            }
 
     return result
 
@@ -1039,15 +1898,17 @@ def api_get_settings():
         return {"settings": {}}
     db = get_database()
     settings = db.get_all_settings()
-    # Mask the CF token for security
-    if "cf_api_token" in settings and settings["cf_api_token"]:
-        token = settings["cf_api_token"]
-        settings["cf_api_token_masked"] = token[:8] + "..." + token[-4:] if len(token) > 12 else "***"
-        del settings["cf_api_token"]
-    if "cf_api_key" in settings and settings["cf_api_key"]:
-        api_key = settings["cf_api_key"]
-        settings["cf_api_key_masked"] = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
-        del settings["cf_api_key"]
+    # Never return secret material or even partial secret values.
+    for setting_key, env_key in (
+        ("cf_api_token", "CF_API_TOKEN"),
+        ("cf_api_key", "CF_API_KEY"),
+        ("cf_email", "CF_EMAIL"),
+    ):
+        stored_value = settings.pop(setting_key, "")
+        env_value = os.environ.get(env_key, "")
+        settings[f"{setting_key}_configured"] = bool(
+            env_value or (stored_value and not _is_production())
+        )
     return {"settings": settings}
 
 
@@ -1068,12 +1929,21 @@ async def api_save_settings(request: Request):
     allowed_keys = [
         "cf_api_token", "cf_zone_id", "cf_account_id",
         "cf_api_key", "cf_email",
-        "monitor_interval", "alert_email", "org_name", "clear_on_start",
+        "monitor_interval", "monitoring_enabled", "automatic_remediation",
+        "alert_email", "org_name", "clear_on_start",
     ]
+    production_secret_keys = {"cf_api_token", "cf_api_key", "cf_email"}
     allowed_intervals = {"6", "12", "24", "48", "168"}
     saved = []
     for key in allowed_keys:
         if key in body:
+            if _is_production() and key in production_secret_keys:
+                if str(body[key]).strip():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{key} must be supplied through the runtime environment in production",
+                    )
+                continue
             if key == "monitor_interval":
                 interval = str(body[key]).strip()
                 if interval not in allowed_intervals:
@@ -1092,31 +1962,8 @@ async def api_save_settings(request: Request):
 
 
 def _apply_cf_settings(db):
-    """Push DB-stored CF credentials into the dns_fix module at runtime."""
-    if not HAS_DNS_FIX:
-        return
-    _bootstrap_cf_settings_from_env(db)
-    import app.dns_fix as dns_mod
-    token = db.get_setting("cf_api_token")
-    zone = db.get_setting("cf_zone_id")
-    account_id = db.get_setting("cf_account_id")
-    api_key = db.get_setting("cf_api_key")
-    email = db.get_setting("cf_email")
-    if token:
-        dns_mod.CF_API_TOKEN = token
-        os.environ["CF_API_TOKEN"] = token
-    if zone:
-        dns_mod.CF_ZONE_ID = zone
-        os.environ["CF_ZONE_ID"] = zone
-    if account_id:
-        dns_mod.CF_ACCOUNT_ID = account_id
-        os.environ["CF_ACCOUNT_ID"] = account_id
-    if api_key:
-        dns_mod.CF_API_KEY = api_key
-        os.environ["CF_API_KEY"] = api_key
-    if email:
-        dns_mod.CF_EMAIL = email
-        os.environ["CF_EMAIL"] = email
+    """Refresh the live Cloudflare module from environment/settings sources."""
+    _load_cf_runtime_settings(db)
 
 
 def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
@@ -1188,6 +2035,7 @@ def _auto_fix_domain(domain: str, scan_result: dict = None) -> dict:
 
 
 @app.get("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
+@app.post("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
 def api_test_cloudflare():
     """Test the current Cloudflare connection using stored credentials.
 
@@ -1235,10 +2083,6 @@ def api_test_cloudflare():
                 perms["workers"] = wr.json().get("success", False)
             except Exception:
                 pass
-
-        # Auto-store account ID if we discovered it and it wasn't saved
-        if account_id and not db.get_setting("cf_account_id"):
-            db.set_setting("cf_account_id", account_id)
 
     # Build feature availability summary
     features = []
@@ -1301,6 +2145,9 @@ async def _monitoring_loop():
                 continue
 
             db = get_database()
+            if not _is_enabled(db.get_setting("monitoring_enabled", "false")):
+                await asyncio.sleep(60)
+                continue
             interval_hours = int(db.get_setting("monitor_interval", "24"))
             domains = db.get_managed_domains()
 
@@ -1311,26 +2158,31 @@ async def _monitoring_loop():
             # Apply CF settings in case they were updated
             _apply_cf_settings(db)
 
-            scan_id = db.start_scan(
-                notes=f"Scheduled monitoring of {len(domains)} domain(s)"
-            )
+            data_generation = db.get_data_generation()
 
             for d in domains:
                 domain = d["domain"]
                 try:
-                    scan_result = scan_domain(domain, check_starttls=False)
+                    scan_result = await asyncio.to_thread(scan_domain, domain, False)
                     scan_result["domain"] = domain
                     evaluation = evaluate(scan_result)
                     grade = evaluation.get("grade", "F")
                     score = evaluation.get("score", 0)
 
-                    # Save result
-                    db.save_result(scan_id, domain, scan_result, evaluation)
+                    persisted = db.write_scan_results(
+                        [(domain, scan_result, evaluation)],
+                        notes=f"Scheduled monitoring scan for {domain}",
+                        expected_generation=data_generation,
+                        save_history=True,
+                        update_managed=True,
+                    )
+                    if not persisted:
+                        logger.info("Monitoring cycle cancelled after scan data changed")
+                        break
 
-                    # Update managed domain and detect drift
-                    prev = db.update_managed_domain_scan(domain, grade, score)
-                    prev_grade = prev.get("previous_grade")
-                    prev_score = prev.get("previous_score")
+                    # Detect drift against the snapshot read at cycle start.
+                    prev_grade = d.get("last_grade")
+                    prev_score = d.get("last_score")
 
                     # Drift detection: grade worsened
                     if prev_grade and prev_grade != grade:
@@ -1345,6 +2197,7 @@ async def _monitoring_loop():
                                 severity="HIGH" if new_idx >= 4 else "WARN",
                                 message=f"{domain} grade dropped from {prev_grade} to {grade}",
                                 details=f"Score changed from {prev_score} to {score}",
+                                expected_generation=data_generation,
                             )
                         elif new_idx < old_idx:
                             # Grade improved
@@ -1354,11 +2207,19 @@ async def _monitoring_loop():
                                 severity="INFO",
                                 message=f"{domain} grade improved from {prev_grade} to {grade}",
                                 details=f"Score changed from {prev_score} to {score}",
+                                expected_generation=data_generation,
                             )
 
-                    # AUTO-FIX: if domain is not A+ grade, attempt fixes
-                    if grade not in ("A+", "A"):
-                        fix_result = _auto_fix_domain(domain, scan_result)
+                    # Remediation requires a separate explicit operator opt-in.
+                    if grade not in ("A+", "A") and _is_enabled(
+                        db.get_setting("automatic_remediation", "false")
+                    ):
+                        if db.get_data_generation() != data_generation:
+                            logger.info("Automatic remediation cancelled after scan data changed")
+                            break
+                        fix_result = await asyncio.to_thread(
+                            _auto_fix_domain, domain, scan_result
+                        )
                         if fix_result.get("applied"):
                             fix_types = [f["type"] for f in fix_result["applied"]]
                             db.create_alert(
@@ -1367,28 +2228,39 @@ async def _monitoring_loop():
                                 severity="INFO",
                                 message=f"Auto-fixed {domain}: {', '.join(fix_types)}",
                                 details=f"Applied {len(fix_result['applied'])} fix(es) automatically",
+                                expected_generation=data_generation,
                             )
                             # Rescan after fix to update grade
                             await asyncio.sleep(2)
-                            rescan = scan_domain(domain, check_starttls=False)
+                            rescan = await asyncio.to_thread(scan_domain, domain, False)
                             rescan["domain"] = domain
                             re_eval = evaluate(rescan)
-                            new_grade = re_eval.get("grade", grade)
-                            new_score = re_eval.get("score", score)
-                            db.update_managed_domain_scan(domain, new_grade, new_score)
+                            post_fix_saved = db.write_scan_results(
+                                [(domain, rescan, re_eval)],
+                                notes=f"Scheduled post-remediation scan for {domain}",
+                                expected_generation=data_generation,
+                                save_history=True,
+                                update_managed=True,
+                            )
+                            if not post_fix_saved:
+                                logger.info(
+                                    "Post-remediation result discarded after scan data changed"
+                                )
+                                break
 
-                except Exception as e:
+                except Exception:
+                    logger.exception("Scheduled monitoring failed for %s", domain)
                     db.create_alert(
                         domain=domain,
                         alert_type="scan_error",
                         severity="HIGH",
-                        message=f"Failed to scan {domain}: {str(e)}",
+                        message=f"Failed to scan {domain}",
+                        details="Review the server log for the internal error.",
+                        expected_generation=data_generation,
                     )
 
                 # Small delay between domains to avoid rate limiting
                 await asyncio.sleep(2)
-
-            db.complete_scan(scan_id, len(domains))
 
         except Exception as e:
             logger.error(f"Monitoring loop error: {e}")
@@ -1411,28 +2283,41 @@ async def _monitoring_loop():
 
 
 def _auth_js() -> str:
-    """Inject a tiny script that extracts the auth token from the URL and
-    patches ``fetch`` / ``EventSource`` / nav links so the token propagates
-    automatically.  This makes the dashboard work correctly when
-    ``DASH_TOKEN`` is set in production.
-    """
-    return """
+    """Provide browser auth, CSRF protection, toasts, and progress helpers."""
+    script = """
 <script>
 (function(){
-    const _tok = new URLSearchParams(window.location.search).get('token') || '';
+    const _allowLegacyToken = __ALLOW_LEGACY_TOKEN__;
+    const _tok = _allowLegacyToken
+        ? (new URLSearchParams(window.location.search).get('token') || '')
+        : '';
+
+    function readCookie(name) {
+        const prefix = name + '=';
+        const item = document.cookie.split('; ').find(row => row.startsWith(prefix));
+        return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+    }
 
     /* ---------- patch fetch ---------- */
     const _origFetch = window.fetch;
     window.fetch = function(url, opts) {
-        if (_tok && typeof url === 'string' && url.startsWith('/api/')) {
-            opts = opts || {};
-            opts.headers = opts.headers || {};
-            if (opts.headers instanceof Headers) {
-                if (!opts.headers.has('Authorization')) opts.headers.set('Authorization', 'Bearer ' + _tok);
-            } else {
-                if (!opts.headers['Authorization']) opts.headers['Authorization'] = 'Bearer ' + _tok;
-            }
+        opts = opts || {};
+        let requestUrl = null;
+        try {
+            requestUrl = new URL(typeof url === 'string' ? url : url.url, window.location.origin);
+        } catch (e) {}
+        const sameOrigin = requestUrl && requestUrl.origin === window.location.origin;
+        const method = String(opts.method || (url instanceof Request ? url.method : 'GET')).toUpperCase();
+        const headers = new Headers(opts.headers || (url instanceof Request ? url.headers : undefined));
+
+        if (_tok && sameOrigin && requestUrl.pathname.startsWith('/api/') && !headers.has('Authorization')) {
+            headers.set('Authorization', 'Bearer ' + _tok);
         }
+        const csrfToken = readCookie('northflux_csrf');
+        if (csrfToken && sameOrigin && !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+            headers.set('X-CSRF-Token', csrfToken);
+        }
+        opts.headers = headers;
         return _origFetch.call(this, url, opts);
     };
 
@@ -1532,6 +2417,9 @@ function hideProgressPopup() {
 }
 </script>
 """
+    return script.replace(
+        "__ALLOW_LEGACY_TOKEN__", "false" if _is_production() else "true"
+    )
 
 
 def _css() -> str:
@@ -1686,18 +2574,6 @@ h1 {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-}
-
-.academic-badge {
-    display: inline-block;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-left: 12px;
-    font-weight: 500;
 }
 
 .header-right { display: flex; align-items: center; gap: 16px; }
@@ -2190,11 +3066,16 @@ document.addEventListener('DOMContentLoaded', () => {
 def home():
     """Main dashboard page with real-time updates."""
 
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
+
     # &#9472;&#9472; Gather managed-domain data from the DB &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
     domains_list: list = []
     alerts: list = []
     alert_count = 0
     org_name = "Your Organisation"
+    monitoring_enabled = False
     if HAS_DB:
         try:
             db = get_database()
@@ -2202,14 +3083,44 @@ def home():
             alerts = db.get_alerts(unacknowledged_only=True, limit=5)
             alert_count = db.get_alert_count()
             org_name = db.get_setting("org_name", "Your Organisation") or "Your Organisation"
+            monitoring_enabled = _is_enabled(
+                db.get_setting("monitoring_enabled", "false")
+            )
         except Exception:
             pass
 
-    # Filter out junk/test payloads from old security tests
-    valid_domains = [d for d in domains_list if ":" not in d["domain"]
-                     and "/" not in d["domain"]
-                     and "javascript" not in d["domain"].lower()]
+    org_name = _escape(org_name)
+
+    # Revalidate persisted records at the rendering boundary. This protects the
+    # page even if an older database predates the API's current validation.
+    valid_domains = []
+    allowed_grades = {"A+", "A", "B", "C", "D", "F"}
+    for record in domains_list:
+        clean_domain, domain_error = _sanitize_domain(record.get("domain"))
+        if domain_error:
+            continue
+        clean_record = dict(record)
+        clean_record["domain"] = clean_domain
+        clean_record["last_grade"] = str(record.get("last_grade") or "F").upper()
+        if clean_record["last_grade"] not in allowed_grades:
+            clean_record["last_grade"] = "F"
+        try:
+            clean_record["last_score"] = max(0, min(100, int(record.get("last_score") or 0)))
+        except (TypeError, ValueError):
+            clean_record["last_score"] = 0
+        try:
+            previous_score = record.get("previous_score")
+            clean_record["previous_score"] = (
+                max(0, min(100, int(previous_score))) if previous_score is not None else None
+            )
+        except (TypeError, ValueError):
+            clean_record["previous_score"] = None
+        valid_domains.append(clean_record)
     total_domains = len(valid_domains)
+    monitoring_status = "Enabled" if monitoring_enabled else "Off"
+    monitoring_dot_style = (
+        "" if monitoring_enabled else "background:var(--text-muted);box-shadow:none;"
+    )
 
     # Compute stats from managed domains
     scores = [d["last_score"] for d in valid_domains if d.get("last_score") is not None]
@@ -2221,8 +3132,6 @@ def home():
     passing = sum(1 for d in valid_domains if (d.get("last_score") or 0) >= 70)
     failing = total_domains - passing
     worst = sorted(valid_domains, key=lambda d: d.get("last_score") or 0)[:5]
-    best = sorted(valid_domains, key=lambda d: d.get("last_score") or 0, reverse=True)[:3]
-
     # Overall health colour
     if avg_score >= 85:
         health_colour = "var(--success)"
@@ -2263,7 +3172,7 @@ def home():
         drift = ""
         if prev is not None and prev != s:
             drift = f' <span style="color:var(--success);font-size:.75rem;">&#9650;{s-prev}</span>' if s > prev else f' <span style="color:var(--danger);font-size:.75rem;">&#9660;{prev-s}</span>'
-        last_scan = (d.get("last_scan_at") or "")[:16].replace("T", " ")
+        last_scan = _escape((d.get("last_scan_at") or "")[:16].replace("T", " "))
         domain_rows_html += f"""
         <tr>
             <td><a href="/domain/{dom}" style="color:var(--accent);text-decoration:none;font-weight:500;">{dom}</a></td>
@@ -2282,8 +3191,8 @@ def home():
             <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
                 <span>{icon}</span>
                 <div style="flex:1;">
-                    <div style="font-weight:500;color:var(--text-primary);">{a.get("domain","")}</div>
-                    <div style="font-size:.85rem;color:var(--text-secondary);">{a.get("message","")}</div>
+                    <div style="font-weight:500;color:var(--text-primary);">{_escape(a.get("domain", ""))}</div>
+                    <div style="font-size:.85rem;color:var(--text-secondary);">{_escape(a.get("message", ""))}</div>
                 </div>
             </div>"""
     else:
@@ -2328,7 +3237,7 @@ def home():
                 </div>"""
 
     if total_domains == 0:
-        _domain_table_html = '<div style="text-align:center;padding:40px 0;"><p style="font-size:1.2rem;margin-bottom:8px;">&#127760; No domains onboarded yet</p><p style="color:var(--text-secondary);max-width:400px;margin:0 auto 16px;">Add your domains to begin automated monitoring and defence.</p><a href="/domains" class="btn btn-primary" style="padding:12px 24px;">Go to My Domains</a></div>'
+        _domain_table_html = '<div style="text-align:center;padding:40px 0;"><p style="font-size:1.2rem;margin-bottom:8px;">&#127760; No domains onboarded yet</p><p style="color:var(--text-secondary);max-width:440px;margin:0 auto 16px;">Add domains to track their security posture. Scheduled monitoring remains off until you enable it in Settings.</p><a href="/domains" class="btn btn-primary" style="padding:12px 24px;">Go to My Domains</a></div>'
     else:
         _domain_table_html = f"""
             <div class="table-container">
@@ -2353,7 +3262,7 @@ def home():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge Security</title>
+    <title>NorthFlux Security</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128737;&#65039;</text></svg>">
     {_css()}
     {_auth_js()}
@@ -2363,7 +3272,7 @@ def home():
         <nav class="top-nav">
             <a href="/" class="nav-brand">
                 <span class="nav-brand-icon">&#128737;&#65039;</span>
-                <span>AuroraEdge</span>
+                <span>NorthFlux</span>
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link active">&#128202; Dashboard</a>
@@ -2378,14 +3287,14 @@ def home():
             <div class="logo-area">
                 <div class="logo">&#128737;&#65039;</div>
                 <div>
-                    <h1>AuroraEdge Security</h1>
+                    <h1>NorthFlux Security</h1>
                     <p class="subtitle">Cyber Defence Overview &#8212; {org_name}</p>
                 </div>
             </div>
             <div class="header-right">
                 <div class="live-indicator">
-                    <span class="live-dot"></span>
-                    <span>Monitoring {'Active' if total_domains > 0 else 'Inactive'}</span>
+                    <span class="live-dot" style="{monitoring_dot_style}"></span>
+                    <span>Scheduled Monitoring {monitoring_status}</span>
                 </div>
             </div>
         </header>
@@ -2395,7 +3304,7 @@ def home():
             <div class="stat-card">
                 <div class="stat-icon domains">&#127760;</div>
                 <div class="stat-value">{total_domains}</div>
-                <div class="stat-label">Domains Monitored</div>
+                <div class="stat-label">Managed Domains</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon score">&#128202;</div>
@@ -2500,6 +3409,7 @@ def _build_report_dashboard(rows, csv_file, md_file, base_html):
     # Build table rows
     table_rows = ""
     for r in rows:
+        r = _escape_record(r)
         grade = r.get("grade", "F")
         grade_class = grade.lower().replace("+", "-plus")
         severity = r.get("severity", "OK")
@@ -2529,7 +3439,7 @@ def _build_report_dashboard(rows, csv_file, md_file, base_html):
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
             <h2 style="margin:0;">&#128203; Latest Batch Scan Report</h2>
             <div style="display:flex;gap:8px;align-items:center;">
-                <span style="color:var(--text-secondary);font-size:.85rem;">{total} domains &#183; {csv_file.name}</span>
+                <span style="color:var(--text-secondary);font-size:.85rem;">{total} domains &#183; {_escape(csv_file.name)}</span>
                 {downloads}
             </div>
         </div>
@@ -3082,7 +3992,7 @@ def _test_css() -> str:
 
 def _test_js() -> str:
     """JavaScript for the interactive test hub."""
-    return """
+    script = """
 <script>
 let isScanning = false;
 
@@ -3111,12 +4021,13 @@ function hideAutoFixOverlay() {
 
 // Quick domain suggestions
 const quickDomains = [
-    'google.com', 'microsoft.com', 'belfastmet.ac.uk', 'qub.ac.uk',
-    'ulster.ac.uk', 'gov.uk', 'ncsc.gov.uk', 'cloudflare.com'
+    'google.com', 'microsoft.com', 'cloudflare.com', 'github.com',
+    'gov.uk', 'ncsc.gov.uk', 'proton.me', 'fastmail.com'
 ];
 
 // The pre-configured demo domain for auto-fix testing
-const demoDomain = 'auroraedge.co.uk';
+const demoDomain = __DEMO_DOMAIN__;
+const demoModeEnabled = __DEMO_MODE_ENABLED__;
 
 // Add quick domain to input
 function addQuickDomain(domain) {
@@ -3262,14 +4173,34 @@ async function performScan(domains) {
 }
 
 // Display scan results with enhanced explanations
+function escapeDisplayData(value) {
+    if (typeof value === 'string') {
+        return value
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+    if (Array.isArray(value)) return value.map(escapeDisplayData);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, item]) => [key, escapeDisplayData(item)])
+        );
+    }
+    return value;
+}
+
 function displayResults(data) {
     const container = document.getElementById('resultsContainer');
     const section = document.getElementById('resultsSection');
 
     let html = '';
 
-    for (const result of data.results) {
+    for (const [resultIndex, rawResult] of data.results.entries()) {
+        const result = escapeDisplayData(rawResult);
         const domain = result.domain;
+        const resultId = String(resultIndex);
 
         if (result.error) {
             html += `
@@ -3294,8 +4225,8 @@ function displayResults(data) {
         const severityClass = (ev.severity || 'ok').toLowerCase();
 
         html += `
-        <div class="result-container" id="result-${domain.replace(/\\./g, '-')}">
-            <div class="result-header" onclick="toggleDetails('${domain.replace(/\\./g, '-')}')">
+        <div class="result-container" id="result-${resultId}">
+            <div class="result-header" data-action="toggle-details" data-target="${resultId}" data-result-index="${resultIndex}">
                 <div class="result-domain">
                     <span class="expand-icon">&#9654;</span>
                     ${domain}
@@ -3317,7 +4248,7 @@ function displayResults(data) {
             ` : ''}
 
             <div class="result-stats">
-                <div class="result-stat clickable" onclick="showScoreBreakdown('${domain}', ${ev.score || 0})">
+                <div class="result-stat clickable" data-action="score-breakdown" data-result-index="${resultIndex}">
                     <div class="result-stat-value">${ev.score || 0}</div>
                     <div class="result-stat-label">Score</div>
                     <div class="stat-hint">Click for breakdown</div>
@@ -3337,7 +4268,7 @@ function displayResults(data) {
             </div>
 
             <!-- Expandable Details Section -->
-            <div class="result-details" id="details-${domain.replace(/\\./g, '-')}" style="display: none;">
+            <div class="result-details" id="details-${resultId}" style="display: none;">
                 <h3 style="margin: 20px 0 12px; color: var(--text-secondary);">&#128269; Security Checks</h3>
                 <div class="checks-grid">
                     ${renderCheckEnhanced('SPF', scan.spf_present, scan.spf_all ? 'All: ' + scan.spf_all : '', 'R2_SPF_MISSING')}
@@ -3350,10 +4281,10 @@ function displayResults(data) {
 
                 <!-- Raw Data Section -->
                 <div class="raw-data-section">
-                    <h4 onclick="toggleRawData('${domain.replace(/\\./g, '-')}')" style="cursor: pointer;">
+                    <h4 data-action="toggle-raw" data-target="${resultId}" data-result-index="${resultIndex}" style="cursor: pointer;">
                         &#128203; Raw DNS Data <span class="toggle-hint">(click to expand)</span>
                     </h4>
-                    <div class="raw-data" id="raw-${domain.replace(/\\./g, '-')}" style="display: none;">
+                    <div class="raw-data" id="raw-${resultId}" style="display: none;">
                         <pre>${JSON.stringify(scan, null, 2)}</pre>
                     </div>
                 </div>
@@ -3364,12 +4295,12 @@ function displayResults(data) {
                 <h3 style="margin-bottom: 16px; color: var(--text-secondary);">&#128295; How to Fix (${remediation.length} recommendation${remediation.length > 1 ? 's' : ''})</h3>
                 ${remediation.map((r, i) => `
                     <div class="remediation-item-enhanced ${(r.priority || 'info').toLowerCase()}">
-                        <div class="remediation-header" onclick="toggleRemediation('rem-${domain.replace(/\\./g, '-')}-${i}')">
+                        <div class="remediation-header" data-action="toggle-remediation" data-target="rem-${resultId}-${i}" data-result-index="${resultIndex}">
                             <span class="remediation-priority-badge ${(r.priority || 'info').toLowerCase()}">${r.priority || 'INFO'}</span>
                             <span class="remediation-title">${r.description}</span>
                             <span class="expand-arrow">&#9660;</span>
                         </div>
-                        <div class="remediation-body" id="rem-${domain.replace(/\\./g, '-')}-${i}" style="display: none;">
+                        <div class="remediation-body" id="rem-${resultId}-${i}" style="display: none;">
                             ${r.why ? `
                             <div class="remediation-why">
                                 <strong>&#10067; Why is this important?</strong>
@@ -3386,7 +4317,7 @@ function displayResults(data) {
                             <div class="remediation-example-box">
                                 <strong>&#128221; Example DNS Record:</strong>
                                 <code class="remediation-code">${r.example}</code>
-                                <button class="copy-btn" onclick="copyToClipboard('${r.example.replace(/'/g, "\\'")}')">&#128203; Copy</button>
+                                <button class="copy-btn" data-action="copy-example" data-result-index="${resultIndex}" data-remediation-index="${i}">&#128203; Copy</button>
                             </div>
                             ` : ''}
                             ${r.rfc ? `
@@ -3407,24 +4338,50 @@ function displayResults(data) {
 
             <!-- Action Buttons -->
             <div class="result-actions">
-                <button class="action-btn secondary" onclick="rescanDomain('${domain}')">&#128260; Rescan</button>
-                ${ev.violation_count > 0 ? `<button class="action-btn primary" onclick="autoFixFromScan('${domain}')" style="background:var(--warning);color:#000;">&#128295; Auto-Fix DNS</button>` : ''}
-                <button class="action-btn secondary" onclick="showHistory('${domain}')">&#128202; View History</button>
-                <button class="action-btn primary" onclick="exportDomainReport('${domain}', ${JSON.stringify(result).replace(/"/g, '&quot;')})">&#128229; Export Report</button>
+                <button class="action-btn secondary" data-action="rescan" data-result-index="${resultIndex}">&#128260; Rescan</button>
+                ${ev.violation_count > 0 ? `<button class="action-btn primary" data-action="auto-fix" data-result-index="${resultIndex}" style="background:var(--warning);color:#000;">&#128295; Auto-Fix DNS</button>` : ''}
+                <button class="action-btn secondary" data-action="history" data-result-index="${resultIndex}">&#128202; View History</button>
+                <button class="action-btn primary" data-action="export" data-result-index="${resultIndex}">&#128229; Export Report</button>
             </div>
         </div>
         `;
     }
 
     container.innerHTML = html;
+
+    // Bind behavior after rendering so untrusted DNS text is never embedded in
+    // executable inline event attributes.
+    container.querySelectorAll('[data-action]').forEach(element => {
+        element.addEventListener('click', event => {
+            event.stopPropagation();
+            const action = element.dataset.action;
+            const resultIndex = Number(element.dataset.resultIndex);
+            const rawResult = data.results[resultIndex];
+            if (!rawResult) return;
+            const domain = rawResult.domain;
+
+            if (action === 'toggle-details') toggleDetails(element.dataset.target);
+            else if (action === 'score-breakdown') showScoreBreakdown(domain, rawResult.evaluation?.score || 0);
+            else if (action === 'toggle-raw') toggleRawData(element.dataset.target);
+            else if (action === 'toggle-remediation') toggleRemediation(element.dataset.target);
+            else if (action === 'copy-example') {
+                const remediationIndex = Number(element.dataset.remediationIndex);
+                const example = rawResult.remediation?.[remediationIndex]?.example || '';
+                copyToClipboard(example);
+            }
+            else if (action === 'rescan') rescanDomain(domain);
+            else if (action === 'auto-fix') autoFixFromScan(domain);
+            else if (action === 'history') showHistory(domain);
+            else if (action === 'export') exportDomainReport(domain, rawResult);
+        });
+    });
+
     section.style.display = 'block';
     section.scrollIntoView({ behavior: 'smooth' });
 
     // Auto-expand first result details
-    if (data.results.length > 0) {
-        const firstDomain = data.results[0].domain.replace(/\\./g, '-');
-        toggleDetails(firstDomain);
-    }
+    const firstExpandable = container.querySelector('[data-action="toggle-details"]');
+    if (firstExpandable) toggleDetails(firstExpandable.dataset.target);
 }
 
 function getSeverityIcon(severity) {
@@ -3582,8 +4539,8 @@ async function resetDemoDomain(restore = false) {
     const original = btn ? btn.innerHTML : '';
     const actionLabel = restore ? 'restore' : 'reset';
     const confirmMsg = restore
-        ? 'Restore auroraedge.co.uk to the strong DNS state now?'
-        : 'This will intentionally re-break auroraedge.co.uk DNS records for another live auto-fix test.\\n\\nProceed?';
+        ? 'Restore ' + demoDomain + ' to the strong DNS state now?'
+        : 'This will intentionally re-break ' + demoDomain + ' DNS records for another live auto-fix test.\\n\\nProceed?';
 
     if (!confirm(confirmMsg)) return;
 
@@ -3789,12 +4746,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('quickDomains');
     if (container) {
         // Featured demo domain (pre-configured for auto-fix)
-        const demoBtn = document.createElement('button');
-        demoBtn.className = 'quick-domain demo-domain';
-        demoBtn.innerHTML = '&#11088; ' + demoDomain + ' <small>(Auto-Fix Demo)</small>';
-        demoBtn.title = 'Pre-configured demo domain &#8212; scan this then click Auto-Fix DNS';
-        demoBtn.onclick = () => addQuickDomain(demoDomain);
-        container.appendChild(demoBtn);
+        if (demoModeEnabled) {
+            const demoBtn = document.createElement('button');
+            demoBtn.className = 'quick-domain demo-domain';
+            demoBtn.appendChild(document.createTextNode('\u2B50 ' + demoDomain + ' '));
+            const demoLabel = document.createElement('small');
+            demoLabel.textContent = '(Auto-Fix Demo)';
+            demoBtn.appendChild(demoLabel);
+            demoBtn.title = 'Pre-configured demo domain &#8212; scan this then click Auto-Fix DNS';
+            demoBtn.onclick = () => addQuickDomain(demoDomain);
+            container.appendChild(demoBtn);
+        }
 
         // Regular quick domains
         quickDomains.forEach(domain => {
@@ -3808,6 +4770,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 """
+    return (
+        script.replace("__DEMO_DOMAIN__", json.dumps(DEMO_DOMAIN))
+        .replace(
+            "__DEMO_MODE_ENABLED__",
+            "true" if _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE")) else "false",
+        )
+    )
 
 
 @app.post("/api/scan", dependencies=[Depends(require_token)])
@@ -3842,24 +4811,29 @@ async def api_scan(request: Request):
     if len(domains) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 domains per request")
 
-    save_to_db = body.get("save_to_db", True)
-    show_remediation = body.get("remediation", True)
+    save_to_db = _is_enabled(body.get("save_to_db"), default=True)
+    manage_domains = _is_enabled(body.get("manage_domains"), default=False)
+    show_remediation = _is_enabled(body.get("remediation"), default=True)
 
     results = []
+    persist_entries = []
     db = None
-    scan_id = None
+    data_generation = None
 
-    if save_to_db and HAS_DB:
+    if (save_to_db or manage_domains) and not HAS_DB:
+        raise HTTPException(status_code=503, detail="Database not available")
+    if save_to_db or manage_domains:
         try:
             db = get_database()
-            scan_id = db.start_scan(notes=f"Dashboard scan of {len(domains)} domain(s)")
+            data_generation = db.get_data_generation()
         except Exception:
-            db = None
+            logger.exception("Could not prepare scan persistence")
+            raise HTTPException(status_code=500, detail="Could not prepare scan storage")
 
     for raw_domain in domains:
         domain, d_err = _sanitize_domain(raw_domain)
         if d_err:
-            results.append({"domain": "(invalid)", "error": d_err})
+            results.append({"domain": "(invalid)", "error": d_err, "saved": False})
             continue
 
         try:
@@ -3873,13 +4847,14 @@ async def api_scan(request: Request):
             except asyncio.TimeoutError:
                 results.append({
                     "domain": domain,
-                    "error": f"Scan timed out after {int(SCAN_TIMEOUT)}s &#8212; domain may not exist. Check for typos and try again."
+                    "error": f"Scan timed out after {int(SCAN_TIMEOUT)}s &#8212; domain may not exist. Check for typos and try again.",
+                    "saved": False,
                 })
                 continue
 
             scan_notes = scan_result.get("notes", "")
             if "Domain not found" in scan_notes or "Invalid domain" in scan_notes:
-                results.append({"domain": domain, "error": scan_notes})
+                results.append({"domain": domain, "error": scan_notes, "saved": False})
                 continue
 
             evaluation = evaluate(scan_result)
@@ -3909,41 +4884,50 @@ async def api_scan(request: Request):
                 evaluation["severity_urgency"] = severity_info.get("urgency", "")
                 evaluation["severity_color"] = severity_info.get("color", "#6b7280")
 
-            if db and scan_id:
-                db.save_result(scan_id, domain, scan_result, evaluation)
+            payload = {
+                "domain": domain,
+                "scan": scan_result,
+                "evaluation": evaluation,
+                "remediation": remediation_list,
+                "saved": False,
+            }
+            results.append(payload)
+            persist_entries.append((domain, scan_result, evaluation, payload))
 
-            # Auto-add to managed domains so it appears on the dashboard
-            if db:
-                grade = evaluation.get("grade", "F")
-                score = evaluation.get("score", 0)
-                db.add_managed_domain(domain, notes="Added via scan")
-                db.update_managed_domain_scan(domain, grade, score)
-
+        except Exception:
+            logger.exception("Scan failed for %s", domain)
             results.append(
                 {
                     "domain": domain,
-                    "scan": scan_result,
-                    "evaluation": evaluation,
-                    "remediation": remediation_list,
+                    "error": "The scan could not be completed. Check the domain and try again.",
+                    "saved": False,
                 }
             )
 
-        except Exception as e:
-            results.append(
-                {
-                    "domain": domain,
-                    "scan": {"error": str(e)},
-                    "evaluation": {"severity": "ERROR", "score": 0, "grade": "F"},
-                    "remediation": [],
-                }
-            )
-
-    if db and scan_id:
-        db.complete_scan(scan_id, len(results))
+    persistence_applied = True
+    if db and persist_entries:
+        persistence_applied = db.write_scan_results(
+            [(domain, scan, evaluation) for domain, scan, evaluation, _ in persist_entries],
+            notes=f"Dashboard scan of {len(domains)} domain(s)",
+            expected_generation=data_generation,
+            save_history=save_to_db,
+            manage_domains=manage_domains,
+            update_managed=manage_domains,
+            managed_notes="Added via scan",
+        )
+    for _domain, _scan, _evaluation, payload in persist_entries:
+        payload["saved"] = bool(save_to_db and persistence_applied)
 
     ok = [r for r in results if "error" not in r]
-    status = "success" if ok else "error"
-    return {"status": status, "count": len(results), "results": results}
+    status = "success" if len(ok) == len(results) else "partial" if ok else "error"
+    return {
+        "status": status,
+        "count": len(results),
+        "results": results,
+        "persistence_skipped": bool(
+            (save_to_db or manage_domains) and not persistence_applied
+        ),
+    }
 
 
 @app.post("/api/apply-fix", dependencies=[Depends(require_token)])
@@ -3991,6 +4975,10 @@ async def api_apply_fix(request: Request):
     domain, d_err = _sanitize_domain(body.get("domain"))
     if d_err:
         raise HTTPException(status_code=400, detail=d_err)
+    persistence_db = get_database() if HAS_DB else None
+    data_generation = (
+        persistence_db.get_data_generation() if persistence_db else None
+    )
 
     # OWNERSHIP CHECK: refuse to modify DNS for domains outside the configured zone
     owned, ownership_msg = cf.verify_domain_ownership(domain)
@@ -4061,6 +5049,7 @@ async def api_apply_fix(request: Request):
     # so we can report the *actual* improvement (or surface propagation lag).
     post_fix_eval = {}
     verification_note = ""
+    history_saved = False
     cf_verified = []  # records confirmed via Cloudflare API
     if applied_fixes:
         import time
@@ -4144,16 +5133,25 @@ async def api_apply_fix(request: Request):
                     "moment to see the updated grade."
                 )
             # Persist improved result if better
-            if HAS_DB and post_score >= pre_score:
+            if persistence_db and post_score >= pre_score:
                 try:
-                    db = get_database()
-                    sid = db.start_scan(notes="Post-fix verification")
-                    db.save_result(sid, domain, post_scan, post_fix_eval)
-                    db.complete_scan(sid, 1)
+                    history_saved = persistence_db.write_scan_results(
+                        [(domain, post_scan, post_fix_eval)],
+                        notes="Post-fix verification",
+                        expected_generation=data_generation,
+                        save_history=True,
+                        update_managed=True,
+                    )
+                    if not history_saved:
+                        verification_note += (
+                            " The verification result was not saved because scan data "
+                            "was cleared during remediation."
+                        )
                 except Exception:
-                    pass
-        except Exception as ve:
-            verification_note = f"Post-fix verification scan failed: {ve}"
+                    logger.exception("Could not persist post-fix verification for %s", domain)
+        except Exception:
+            logger.exception("Post-fix verification scan failed for %s", domain)
+            verification_note = "Post-fix verification scan failed. Review server logs."
 
     # Use post-fix evaluation if available, otherwise pre-fix
     final_eval = post_fix_eval if post_fix_eval else pre_fix_eval
@@ -4182,6 +5180,7 @@ async def api_apply_fix(request: Request):
         "pre_fix_grade": pre_fix_eval.get("grade", ""),
         "pre_fix_score": pre_fix_eval.get("score", 0),
         "verification": verification_note,
+        "history_saved": history_saved,
         "cf_verified": cf_verified,
         "cloudflare_zone": msg,
     }
@@ -4194,10 +5193,12 @@ async def api_demo_reset(request: Request):
 
     POST body (optional):
     {
-        "domain": "auroraedge.co.uk",   // must be the demo domain
+        "domain": "the configured demo domain",
         "restore": false                 // true => restore strong state
     }
     """
+    if _is_production() or not _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE")):
+        raise HTTPException(status_code=404, detail="Demo mode is not enabled")
     if not HAS_DB:
         raise HTTPException(status_code=501, detail="Database not available")
 
@@ -4220,6 +5221,7 @@ async def api_demo_reset(request: Request):
 
     db = get_database()
     db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
+    data_generation = db.get_data_generation()
 
     # Ensure runtime Cloudflare settings are synced and present.
     try:
@@ -4325,16 +5327,19 @@ async def api_demo_reset(request: Request):
             grade = evaluation.get("grade", "F")
             score = evaluation.get("score", 0)
             severity = evaluation.get("severity", "OK")
-            db.update_managed_domain_scan(DEMO_DOMAIN, grade, score)
-
-            scan_id = db.start_scan(notes=f"Demo {action} verification scan for {DEMO_DOMAIN}")
-            db.save_result(scan_id, DEMO_DOMAIN, scan_result, evaluation)
-            db.complete_scan(scan_id, 1)
+            saved = db.write_scan_results(
+                [(DEMO_DOMAIN, scan_result, evaluation)],
+                notes=f"Demo {action} verification scan for {DEMO_DOMAIN}",
+                expected_generation=data_generation,
+                save_history=True,
+                update_managed=True,
+            )
             scan_summary = {
                 "grade": grade,
                 "score": score,
                 "severity": severity,
                 "violations": evaluation.get("violation_count", 0),
+                "saved": saved,
             }
         except Exception:
             # Keep reset flow successful even if verification scan fails.
@@ -4390,13 +5395,24 @@ async def api_fix_status():
 @app.get("/test", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def test_hub():
     """Interactive testing hub for scanning domains."""
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
+    demo_mode_enabled = _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE"))
+    demo_display = "block" if demo_mode_enabled else "none"
+    demo_example = f"{DEMO_DOMAIN} (demo), " if demo_mode_enabled else ""
+    demo_help = (
+        f" Try <strong>{DEMO_DOMAIN}</strong> to test Auto-Fix."
+        if demo_mode_enabled
+        else ""
+    )
     html = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge Security - Scan Domains</title>
+    <title>NorthFlux Security - Scan Domains</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#129514;</text></svg>">
     {_css()}
     {_auth_js()}
@@ -4408,7 +5424,7 @@ def test_hub():
         <nav class="top-nav">
             <a href="/" class="nav-brand">
                 <span class="nav-brand-icon">&#128737;&#65039;</span>
-                <span>AuroraEdge</span>
+                <span>NorthFlux</span>
             </a>
             <div class="nav-links">
                 <a href="/" class="nav-link">&#128202; Dashboard</a>
@@ -4432,7 +5448,7 @@ def test_hub():
         <div class="help-box">
             <h3>&#128737;&#65039; How It Works</h3>
             <p>
-                Enter any domain below and AuroraEdge will check its 
+                Enter any domain below and NorthFlux Security will check its
                 <strong>SPF</strong>, <strong>DMARC</strong>, <strong>DKIM</strong>, 
                 <strong>MTA-STS</strong>, and <strong>TLS-RPT</strong> configurations. 
                 You&#8217;ll get a security grade, score, and actionable remediation recommendations.
@@ -4440,21 +5456,21 @@ def test_hub():
         </div>
         
         <!-- Auto-Fix Demo Guide -->
-        <div class="demo-guide" style="background:rgba(234,179,8,0.10); border:1px solid rgba(234,179,8,0.4); border-radius:12px; padding:20px 24px; margin-bottom:24px;">
+        <div class="demo-guide" style="display:{demo_display}; background:rgba(234,179,8,0.10); border:1px solid rgba(234,179,8,0.4); border-radius:12px; padding:20px 24px; margin-bottom:24px;">
             <h3 style="margin:0 0 10px; color:#fde68a;">&#11088; Auto-Fix Demo Guide</h3>
             <p style="margin:0 0 8px; color:#e2e8f0; line-height:1.6;">
-                The domain <strong style="color:#fde68a;">auroraedge.co.uk</strong> has been pre-configured with
+                The domain <strong style="color:#fde68a;">{DEMO_DOMAIN}</strong> has been pre-configured with
                 <strong>intentionally weakened</strong> email security records (SPF softfail, DMARC quarantine at 50%, no MTA-STS)
                 so you can see the automated remediation engine detect and fix real issues.
             </p>
             <ol style="margin:8px 0 0; padding-left:20px; color:#cbd5e1; line-height:1.8;">
-                <li>Click the <strong style="color:#fde68a;">&#11088; auroraedge.co.uk (Auto-Fix Demo)</strong> button below, then press <strong>Scan Domain</strong>.</li>
+                <li>Click the <strong style="color:#fde68a;">&#11088; {DEMO_DOMAIN} (Auto-Fix Demo)</strong> button below, then press <strong>Scan Domain</strong>.</li>
                 <li>Review the security grade and the list of violations flagged.</li>
-                <li>Click the <strong style="color:#f59e0b;">&#128295; Auto-Fix DNS</strong> button on the results to let AuroraEdge automatically create the missing records via the Cloudflare API.</li>
+                <li>Click the <strong style="color:#f59e0b;">&#128295; Auto-Fix DNS</strong> button on the results to let NorthFlux Security automatically create the missing records via the Cloudflare API.</li>
                 <li>Hit <strong>&#128260; Rescan</strong> to confirm the fixes have been applied and watch the grade improve.</li>
             </ol>
             <p style="margin:10px 0 0; color:#94a3b8; font-size:0.85rem;">
-                You may also scan any other domain (your own, university domains, etc.) &#8212; only <em>auroraedge.co.uk</em> supports auto-fix as it is the Cloudflare-managed zone.
+                You may also run read-only scans of other public domains. Only <em>{DEMO_DOMAIN}</em> supports this demo workflow because it is the authorised Cloudflare-managed zone.
             </p>
             <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
                 <button id="resetDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(false)" style="border-color:rgba(234,179,8,0.6); color:#fde68a;">
@@ -4476,8 +5492,8 @@ def test_hub():
         <div class="test-form" id="singleForm">
             <div class="form-group">
                 <label for="domainInput">Domain to Scan</label>
-                <input type="text" id="domainInput" placeholder="e.g., auroraedge.co.uk (demo), google.com, belfastmet.ac.uk">
-                <small>Enter a domain name without http:// or www. Try <strong>auroraedge.co.uk</strong> to test Auto-Fix.</small>
+                <input type="text" id="domainInput" placeholder="e.g., {demo_example}google.com, cloudflare.com">
+                <small>Enter a domain name without http:// or www.{demo_help}</small>
             </div>
             
             <div class="form-group">
@@ -4575,7 +5591,13 @@ microsoft.com
     dependencies=[Depends(require_token)],
 )
 def domain_detail(domain: str):
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Detailed view for a specific domain &#8212; pulls from DB, falls back to CSV."""
+    domain, domain_error = _sanitize_domain(domain)
+    if domain_error:
+        raise HTTPException(status_code=400, detail=domain_error)
     result = None
 
     # Try database first
@@ -4599,30 +5621,10 @@ def domain_detail(domain: str):
                     break
 
     if not result:
-        # Auto-scan the domain instead of showing a 404
-        if HAS_SCANNER:
-            try:
-                scan_result = scan_domain(domain, check_starttls=False)
-                scan_result["domain"] = domain
-                evaluation = evaluate(scan_result)
-                # Merge scan + evaluation into result dict for the page
-                result = {**scan_result, **evaluation}
-                # Persist to DB for future visits
-                if HAS_DB:
-                    try:
-                        db = get_database()
-                        scan_id = db.start_scan(notes=f"Auto-scan from domain page: {domain}")
-                        db.save_result(scan_id, domain, scan_result, evaluation)
-                        db.complete_scan(scan_id, 1)
-                        db.update_managed_domain_scan(domain, evaluation.get("grade", "F"), evaluation.get("score", 0))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+        # Navigation is read-only; an explicit action starts a scan.
+        return RedirectResponse(url=f"/scan?domain={domain}", status_code=303)
 
-    if not result:
-        # Redirect to scan page if scanner unavailable or scan failed
-        return RedirectResponse(url=f"/test?domain={domain}", status_code=303)
+    result = _escape_record(result)
 
     # Normalise &#8212; DB stores integers (0/1), CSV stores strings ("True"/"False")
     def _bool(val):
@@ -4757,7 +5759,7 @@ def domain_detail(domain: str):
             managed = db.get_managed_domains()
             for m in managed:
                 if m["domain"].lower() == domain.lower():
-                    managed_badge = '<span style="background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600;margin-left:12px;">MONITORED</span>'
+                    managed_badge = '<span style="background:var(--accent);color:#000;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600;margin-left:12px;">MANAGED</span>'
                     break
         except Exception:
             pass
@@ -4770,7 +5772,7 @@ def domain_detail(domain: str):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge Security - {domain}</title>
+    <title>NorthFlux Security - {domain}</title>
     {_css()}
     {_auth_js()}
     <style>
@@ -4972,7 +5974,7 @@ def _nav_html(active: str = "") -> str:
     <nav class="top-nav">
         <a href="/" class="nav-brand">
             <span class="nav-brand-icon">&#128737;&#65039;</span>
-            <span>AuroraEdge</span>
+            <span>NorthFlux</span>
         </a>
         <div class="nav-links">
             <a href="/" class="{_cls('dashboard')}">&#128202; Dashboard</a>
@@ -4990,43 +5992,65 @@ def _footer_html() -> str:
     return """
     <footer>
         <div style="margin-bottom: 16px;">
-            <strong style="font-size: 1.1rem; color: var(--text-primary);">AuroraEdge</strong>
+            <strong style="font-size: 1.1rem; color: var(--text-primary);">NorthFlux Security</strong>
             <span style="color: var(--accent);"> &#183; </span>
             <span>Automated Email Authentication & Cyber Defence System</span>
         </div>
-        <p><strong>Final Year Project</strong> &#183; Leon Chapman (50030738)</p>
-        <p style="margin-top: 8px;">Belfast Metropolitan College &#183; BSc Cybersecurity &amp; Networking Infrastructure &#183; 2025/2026</p>
-        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Public DNS checks only &middot; Local settings stay on this device &middot; <a href="https://github.com/L-chapman/AuroraEdge-FYP/blob/master/docs/PRIVACY_AND_ETHICS.md" style="color: var(--accent);">Privacy &amp; Ethics Policy</a></p>
+        <p>Created and maintained by Leon Chapman</p>
+        <p style="margin-top: 8px;">Self-hosted beta &#183; Operator-controlled monitoring and remediation</p>
+        <p style="margin-top: 6px; font-size: 0.75rem; color: var(--text-dim);">Public DNS, HTTPS &amp; SMTP posture checks &middot; Operator-controlled instance storage &middot; <a href="/privacy" style="color: var(--accent);">Privacy Summary</a></p>
     </footer>
     """
 
 
 @app.get("/domains", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def domains_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Managed domains page \u2014 the core of the SME experience."""
     # Get managed domains and alerts
     domains_list = []
     alerts = []
+    monitoring_enabled = False
     if HAS_DB:
         try:
             db = get_database()
             domains_list = db.get_managed_domains()
             alerts = db.get_alerts(unacknowledged_only=True, limit=20)
+            monitoring_enabled = _is_enabled(
+                db.get_setting("monitoring_enabled", "false")
+            )
         except Exception:
             pass
+
+    monitoring_status = "Enabled" if monitoring_enabled else "Off"
+    monitoring_dot_style = (
+        "" if monitoring_enabled else "background:var(--text-muted);box-shadow:none;"
+    )
 
     # Build domain cards
     domain_cards = ""
     if domains_list:
         for d in domains_list:
-            grade = d.get("last_grade") or "&#8212;"
-            score = d.get("last_score") or 0
+            domain_value = str(d.get("domain") or "")
+            domain_value, domain_error = _sanitize_domain(domain_value)
+            if domain_error:
+                logger.warning("Skipping invalid managed domain in database: %s", domain_error)
+                continue
+            domain_text = _escape(domain_value)
+            grade_order = ["A+", "A", "B", "C", "D", "F"]
+            raw_grade = str(d.get("last_grade") or "").upper()
+            grade = raw_grade if raw_grade in grade_order else "&#8212;"
+            try:
+                score = max(0, min(100, int(d.get("last_score") or 0)))
+            except (TypeError, ValueError):
+                score = 0
             grade_class = grade.lower().replace("+", "-plus") if grade != "&#8212;" else "f"
-            prev_grade = d.get("previous_grade") or ""
+            prev_grade = str(d.get("previous_grade") or "").upper()
             drift = ""
-            if prev_grade and prev_grade != grade:
-                grade_order = ["A+", "A", "B", "C", "D", "F"]
-                old_i = grade_order.index(prev_grade) if prev_grade in grade_order else 5
+            if prev_grade in grade_order and prev_grade != grade:
+                old_i = grade_order.index(prev_grade)
                 new_i = grade_order.index(grade) if grade in grade_order else 5
                 if new_i > old_i:
                     drift = f'<span style="color:var(--danger);font-size:0.8rem;">&#9660; was {prev_grade}</span>'
@@ -5036,12 +6060,13 @@ def domains_page():
             last_scan = d.get("last_scan_at") or "Never"
             if last_scan != "Never":
                 last_scan = last_scan[:16].replace("T", " ")
+            last_scan = _escape(last_scan)
 
             domain_cards += f"""
-            <div class="domain-card" data-domain="{d['domain']}">
+            <div class="domain-card" data-domain="{domain_text}">
                 <div class="domain-card-header">
                     <div>
-                        <div class="domain-card-name">{d['domain']}</div>
+                        <div class="domain-card-name">{domain_text}</div>
                         <div class="domain-card-meta">Last scanned: {last_scan} {drift}</div>
                     </div>
                     <div class="domain-card-grade">
@@ -5050,10 +6075,10 @@ def domains_page():
                     </div>
                 </div>
                 <div class="domain-card-actions">
-                    <button class="action-btn primary" onclick="rescanManaged('{d['domain']}')">&#128260; Rescan</button>
-                    <button class="action-btn secondary" onclick="fixDomain('{d['domain']}')">&#128295; Auto-Fix</button>
-                    <a href="/domain/{d['domain']}" class="action-btn secondary">&#128203; Details</a>
-                    <button class="action-btn secondary" onclick="removeDomain('{d['domain']}')" style="margin-left:auto;color:var(--danger);">&#10005; Remove</button>
+                    <button class="action-btn primary" onclick="rescanManaged(this.closest('.domain-card').dataset.domain)">&#128260; Rescan</button>
+                    <button class="action-btn secondary" onclick="fixDomain(this.closest('.domain-card').dataset.domain)">&#128295; Auto-Fix</button>
+                    <a href="/domain/{domain_text}" class="action-btn secondary">&#128203; Details</a>
+                    <button class="action-btn secondary" onclick="removeDomain(this.closest('.domain-card').dataset.domain)" style="margin-left:auto;color:var(--danger);">&#10005; Remove</button>
                 </div>
             </div>"""
     else:
@@ -5062,7 +6087,7 @@ def domains_page():
             <div style="font-size: 2.5rem; margin-bottom: 16px;">&#127760;</div>
             <h3 style="margin-bottom: 12px;">No Domains Onboarded</h3>
             <p style="color:var(--text-secondary); margin-bottom: 24px;">
-                Add your organisation's domain to begin automated monitoring and defence.
+                Add your organisation's domain to track its security posture. Scheduled monitoring remains off until you enable it in Settings.
             </p>
         </div>"""
 
@@ -5072,12 +6097,14 @@ def domains_page():
         alerts_html = '<div class="alerts-section"><h2>&#9889; Active Alerts</h2>'
         for a in alerts:
             sev_cls = (a.get("severity") or "info").lower()
+            alert_message = _escape(a.get("message", ""))
+            alert_details = _escape(a.get("details", ""))
             alerts_html += f"""
             <div class="alert-item {sev_cls}">
                 <div class="alert-content">
-                    <strong>{a['message']}</strong>
+                    <strong>{alert_message}</strong>
                     <span style="color:var(--text-muted);font-size:0.8rem;margin-left:8px;">{(a.get('created_at') or '')[:16].replace('T',' ')}</span>
-                    {f'<div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">{a["details"]}</div>' if a.get("details") else ''}
+                    {f'<div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">{alert_details}</div>' if alert_details else ''}
                 </div>
                 <button class="action-btn secondary" onclick="dismissAlert({a['id']})" style="flex-shrink:0;">Dismiss</button>
             </div>"""
@@ -5089,7 +6116,7 @@ def domains_page():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge Security - My Domains</title>
+    <title>NorthFlux Security - My Domains</title>
     {_css()}
     {_auth_js()}
     <style>
@@ -5219,8 +6246,8 @@ def domains_page():
             </div>
             <div class="header-right">
                 <div class="live-indicator">
-                    <span class="live-dot"></span>
-                    <span>Monitoring Active</span>
+                    <span class="live-dot" style="{monitoring_dot_style}"></span>
+                    <span>Scheduled Monitoring {monitoring_status}</span>
                 </div>
             </div>
         </header>
@@ -5232,7 +6259,7 @@ def domains_page():
                 <label for="newDomain">Add Domain</label>
                 <input type="text" id="newDomain" placeholder="e.g., yourcompany.com">
             </div>
-            <button class="btn btn-primary" onclick="addDomain()" style="height:46px;">+ Add Domain</button>
+            <button class="btn btn-primary" onclick="addDomain(this)" style="height:46px;">+ Add Domain</button>
         </div>
 
         <div id="domainsList">
@@ -5256,10 +6283,18 @@ def domains_page():
     </div>
 
     <script>
-    async function addDomain() {{
+    function escapeHtml(value) {{
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }}
+
+    async function addDomain(btn) {{
         const domain = document.getElementById('newDomain').value.trim();
         if (!domain) {{ alert('Please enter a domain'); return; }}
-        const btn = event.target;
         btn.disabled = true;
         btn.textContent = 'Adding...';
         try {{
@@ -5281,7 +6316,7 @@ def domains_page():
     async function removeDomain(domain) {{
         if (!confirm('Remove ' + domain + ' from monitoring?')) return;
         try {{
-            const res = await fetch('/api/managed-domains/' + domain, {{method: 'DELETE'}});
+            const res = await fetch('/api/managed-domains/' + encodeURIComponent(domain), {{method: 'DELETE'}});
             if (!res.ok) throw new Error('Failed');
             location.reload();
         }} catch(e) {{
@@ -5290,7 +6325,8 @@ def domains_page():
     }}
 
     async function rescanManaged(domain) {{
-        const card = document.querySelector('[data-domain="' + domain + '"]');
+        const card = Array.from(document.querySelectorAll('[data-domain]'))
+            .find(el => el.dataset.domain === domain);
         const btn = card ? card.querySelector('.action-btn.primary') : null;
         if (btn) {{ btn.disabled = true; btn.textContent = '\u23F3 Scanning...'; }}
         if (card) card.style.opacity = '0.6';
@@ -5366,11 +6402,11 @@ def domains_page():
                 status.textContent = '\u26D4 Domain not in your Cloudflare zone';
                 results.innerHTML = `
                     <div style="background:var(--danger-bg);padding:16px;border-radius:8px;margin-top:12px;">
-                        <p><strong>Cannot auto-fix "${{domain}}"</strong></p>
+                        <p><strong>Cannot auto-fix "${{escapeHtml(domain)}}"</strong></p>
                         <p style="color:var(--text-secondary);margin-top:8px;">
-                            Your Cloudflare zone is <strong>"${{zone}}"</strong>. You can only
-                            auto-fix domains within that zone (e.g. <strong>${{zone}}</strong>
-                            or <strong>sub.${{zone}}</strong>).
+                            Your Cloudflare zone is <strong>"${{escapeHtml(zone)}}"</strong>. You can only
+                            auto-fix domains within that zone (e.g. <strong>${{escapeHtml(zone)}}</strong>
+                            or <strong>sub.${{escapeHtml(zone)}}</strong>).
                         </p>
                         <p style="color:var(--text-secondary);margin-top:8px;">
                             Go to <a href="/settings" style="color:var(--accent);">Settings</a>
@@ -5398,7 +6434,7 @@ def domains_page():
                 status.textContent = '\u26D4 Auto-Fix Blocked';
                 results.innerHTML = `
                     <div style="background:var(--danger-bg);padding:16px;border-radius:8px;margin-top:12px;">
-                        <p><strong>${{data.detail || 'Unable to apply fixes.'}}</strong></p>
+                        <p><strong>${{escapeHtml(data.detail || 'Unable to apply fixes.')}}</strong></p>
                         <p style="color:var(--text-secondary);margin-top:8px;">
                             You can only auto-fix domains whose DNS is managed by your
                             configured Cloudflare zone. Check
@@ -5415,14 +6451,14 @@ def domains_page():
             if (data.applied && data.applied.length > 0) {{
                 data.applied.forEach(f => {{
                     html += `<div style="background:var(--success-bg);padding:12px;border-radius:6px;margin-bottom:8px;">
-                        <strong>&#9989; ${{f.type}}</strong> &#8212; ${{f.message}}</div>`;
+                        <strong>&#9989; ${{escapeHtml(f.type)}}</strong> &#8212; ${{escapeHtml(f.message)}}</div>`;
                 }});
                 hasContent = true;
             }}
             if (data.failed && data.failed.length > 0) {{
                 data.failed.forEach(f => {{
                     html += `<div style="background:var(--danger-bg);padding:12px;border-radius:6px;margin-bottom:8px;">
-                        <strong>&#10060; ${{f.type}}</strong> &#8212; ${{f.message}}</div>`;
+                        <strong>&#10060; ${{escapeHtml(f.type)}}</strong> &#8212; ${{escapeHtml(f.message)}}</div>`;
                 }});
                 hasContent = true;
             }}
@@ -5431,8 +6467,8 @@ def domains_page():
                     <strong>&#128295; Manual Steps Required</strong></div>`;
                 data.manual_actions.forEach(m => {{
                     html += `<div style="background:var(--bg-tertiary);padding:12px;border-radius:6px;margin-bottom:8px;border-left:3px solid var(--warning);">
-                        <strong>&#9888; ${{m.type}}</strong> &#8212; ${{m.description}}`;
-                    if (m.steps) html += `<br><small style="color:var(--text-secondary);white-space:pre-line;margin-top:4px;display:block;">${{m.steps}}</small>`;
+                        <strong>&#9888; ${{escapeHtml(m.type)}}</strong> &#8212; ${{escapeHtml(m.description)}}`;
+                    if (m.steps) html += `<br><small style="color:var(--text-secondary);white-space:pre-line;margin-top:4px;display:block;">${{escapeHtml(m.steps)}}</small>`;
                     html += `</div>`;
                 }});
                 hasContent = true;
@@ -5440,18 +6476,18 @@ def domains_page():
 
             if (data.verification) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--bg-secondary);border-left:3px solid var(--accent);">
-                    &#128269; <strong>Verification:</strong> ${{data.verification}}</div>`;
+                    &#128269; <strong>Verification:</strong> ${{escapeHtml(data.verification)}}</div>`;
             }}
             if (data.cf_verified && data.cf_verified.length > 0) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--bg-secondary);border-left:3px solid var(--success);">
-                    &#9729;&#65039; <strong>Cloudflare API confirms:</strong><br>${{data.cf_verified.map(v => '&nbsp;&nbsp;&#8226; ' + v).join('<br>')}}</div>`;
+                    &#9729;&#65039; <strong>Cloudflare API confirms:</strong><br>${{data.cf_verified.map(v => '&nbsp;&nbsp;&#8226; ' + escapeHtml(v)).join('<br>')}}</div>`;
             }}
             if (data.pre_fix_grade && data.grade && data.pre_fix_grade !== data.grade) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--success-bg);text-align:center;">
-                    &#128200; <strong>Grade: ${{data.pre_fix_grade}} &#8594; ${{data.grade}}</strong> | Score: ${{data.pre_fix_score}} &#8594; ${{data.score}} | Issues: ${{data.violations || 0}}</div>`;
+                    &#128200; <strong>Grade: ${{escapeHtml(data.pre_fix_grade)}} &#8594; ${{escapeHtml(data.grade)}}</strong> | Score: ${{escapeHtml(data.pre_fix_score)}} &#8594; ${{escapeHtml(data.score)}} | Issues: ${{escapeHtml(data.violations || 0)}}</div>`;
             }} else if (data.grade) {{
                 html += `<div style="padding:12px;border-radius:6px;margin-top:8px;background:var(--bg-secondary);text-align:center;">
-                    &#128202; <strong>Grade: ${{data.grade}}</strong> | Score: ${{data.score}} | Issues: ${{data.violations || 0}}</div>`;
+                    &#128202; <strong>Grade: ${{escapeHtml(data.grade)}}</strong> | Score: ${{escapeHtml(data.score)}} | Issues: ${{escapeHtml(data.violations || 0)}}</div>`;
             }}
             html += '</div>';
             setProgress(100);
@@ -5503,6 +6539,9 @@ def domains_page():
 
 @app.get("/generator", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def generator_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Interactive DNS record generator for SPF, DMARC, DKIM, MTA-STS, TLS-RPT, and BIMI."""
     html = f"""
 <!DOCTYPE html>
@@ -5510,7 +6549,7 @@ def generator_page():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge &#8212; DNS Record Generator</title>
+    <title>NorthFlux Security &#8212; DNS Record Generator</title>
     {_css()}
     {_auth_js()}
     <style>
@@ -5635,6 +6674,15 @@ def generator_page():
     </div>
 
     <script>
+    function setGeneratedOutput(id, text) {{
+        const el = document.getElementById(id);
+        const button = document.createElement('button');
+        button.className = 'copy-btn';
+        button.textContent = 'Copy';
+        button.addEventListener('click', () => copyRec(id));
+        el.replaceChildren(button, document.createTextNode(text));
+    }}
+
     function genSPF() {{
         const d = document.getElementById('spf_domain').value.trim() || 'example.com';
         const inc = document.getElementById('spf_includes').value.split(',').map(s=>s.trim()).filter(Boolean);
@@ -5645,8 +6693,7 @@ def generator_page():
         inc.forEach(i => parts.push('include:'+i));
         parts.push(all);
         const rec = parts.join(' ');
-        const el = document.getElementById('spf_out');
-        el.innerHTML = '<button class="copy-btn" onclick="copyRec(\\'spf_out\\')">Copy</button>' + d + '. IN TXT "' + rec + '"';
+        setGeneratedOutput('spf_out', d + '. IN TXT "' + rec + '"');
     }}
 
     function genDMARC() {{
@@ -5662,8 +6709,7 @@ def generator_page():
         if (rua) parts.push('rua=mailto:' + rua);
         if (ruf) parts.push('ruf=mailto:' + ruf);
         const rec = parts.join('; ');
-        const el = document.getElementById('dmarc_out');
-        el.innerHTML = '<button class="copy-btn" onclick="copyRec(\\'dmarc_out\\')">Copy</button>_dmarc.' + d + '. IN TXT "' + rec + '"';
+        setGeneratedOutput('dmarc_out', '_dmarc.' + d + '. IN TXT "' + rec + '"');
     }}
 
     function genSTS() {{
@@ -5672,23 +6718,21 @@ def generator_page():
         const mx = document.getElementById('sts_mx').value.trim() || ('mail.' + d);
         const maxAge = document.getElementById('sts_maxage').value || '604800';
         const id = new Date().toISOString().slice(0,10).replace(/-/g,'');
-        document.getElementById('sts_dns_out').innerHTML = '<button class="copy-btn" onclick="copyRec(\\'sts_dns_out\\')">Copy</button><strong>DNS TXT Record:</strong><br>_mta-sts.' + d + '. IN TXT "v=STSv1; id=' + id + '"';
-        document.getElementById('sts_policy_out').innerHTML = '<button class="copy-btn" onclick="copyRec(\\'sts_policy_out\\')">Copy</button><strong>Policy File (https://mta-sts.' + d + '/.well-known/mta-sts.txt):</strong><br>version: STSv1\\nmode: ' + mode + '\\nmx: ' + mx + '\\nmax_age: ' + maxAge;
+        setGeneratedOutput('sts_dns_out', 'DNS TXT Record:\\n_mta-sts.' + d + '. IN TXT "v=STSv1; id=' + id + '"');
+        setGeneratedOutput('sts_policy_out', 'Policy File (https://mta-sts.' + d + '/.well-known/mta-sts.txt):\\nversion: STSv1\\nmode: ' + mode + '\\nmx: ' + mx + '\\nmax_age: ' + maxAge);
     }}
 
     function genTLSRPT() {{
         const d = document.getElementById('tlsrpt_domain').value.trim() || 'example.com';
         const email = document.getElementById('tlsrpt_email').value.trim() || ('tlsrpt@' + d);
-        const el = document.getElementById('tlsrpt_out');
-        el.innerHTML = '<button class="copy-btn" onclick="copyRec(\\'tlsrpt_out\\')">Copy</button>_smtp._tls.' + d + '. IN TXT "v=TLSRPTv1; rua=mailto:' + email + '"';
+        setGeneratedOutput('tlsrpt_out', '_smtp._tls.' + d + '. IN TXT "v=TLSRPTv1; rua=mailto:' + email + '"');
     }}
 
     function genBIMI() {{
         const d = document.getElementById('bimi_domain').value.trim() || 'example.com';
         const logo = document.getElementById('bimi_logo').value.trim();
         const vmc = document.getElementById('bimi_vmc').value.trim();
-        const el = document.getElementById('bimi_out');
-        el.innerHTML = '<button class="copy-btn" onclick="copyRec(\\'bimi_out\\')">Copy</button>default._bimi.' + d + '. IN TXT "v=BIMI1; l=' + (logo || 'https://' + d + '/logo.svg') + '; a=' + (vmc || '') + '"';
+        setGeneratedOutput('bimi_out', 'default._bimi.' + d + '. IN TXT "v=BIMI1; l=' + (logo || 'https://' + d + '/logo.svg') + '; a=' + (vmc || '') + '"');
     }}
 
     function copyRec(id) {{
@@ -5715,6 +6759,9 @@ def generator_page():
 
 @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_token)])
 def settings_page():
+    spa_response = _spa_index_response()
+    if spa_response is not None:
+        return spa_response
     """Application settings page &#8212; Cloudflare credentials, monitoring config."""
     settings = {}
     if HAS_DB:
@@ -5724,26 +6771,24 @@ def settings_page():
         except Exception:
             pass
 
-    cf_token_display = ""
-    cf_token_set = False
-    if settings.get("cf_api_token"):
-        t = settings["cf_api_token"]
-        cf_token_display = t[:8] + "..." + t[-4:] if len(t) > 12 else "***"
-        cf_token_set = True
-    cf_api_key_display = ""
-    cf_api_key_set = False
-    if settings.get("cf_api_key"):
-        k = settings["cf_api_key"]
-        cf_api_key_display = k[:8] + "..." + k[-4:] if len(k) > 12 else "***"
-        cf_api_key_set = True
+    production_mode = _is_production()
+    env_token = (os.environ.get("CF_API_TOKEN", "") or "").strip()
+    env_api_key = (os.environ.get("CF_API_KEY", "") or "").strip()
+    cf_token_set = bool(env_token or (settings.get("cf_api_token") and not production_mode))
+    cf_api_key_set = bool(env_api_key or (settings.get("cf_api_key") and not production_mode))
+    cf_token_source = "runtime environment" if env_token else "local settings"
+    cf_api_key_source = "runtime environment" if env_api_key else "local settings"
+    credential_inputs_disabled = "disabled" if production_mode else ""
 
-    zone_id = settings.get("cf_zone_id", "")
-    account_id = settings.get("cf_account_id", "")
-    cf_email = settings.get("cf_email", "")
+    zone_id = _escape(os.environ.get("CF_ZONE_ID") or settings.get("cf_zone_id", ""))
+    account_id = _escape(os.environ.get("CF_ACCOUNT_ID") or settings.get("cf_account_id", ""))
+    cf_email = "" if production_mode else _escape(settings.get("cf_email", ""))
     interval = settings.get("monitor_interval", "24")
-    org_name = settings.get("org_name", "")
-    alert_email = settings.get("alert_email", "")
-    clear_on_start = settings.get("clear_on_start", "true").lower() in ("true", "1", "yes")
+    org_name = _escape(settings.get("org_name", ""))
+    alert_email = _escape(settings.get("alert_email", ""))
+    monitoring_enabled = _is_enabled(settings.get("monitoring_enabled", "false"))
+    automatic_remediation = _is_enabled(settings.get("automatic_remediation", "false"))
+    clear_on_start = _is_enabled(settings.get("clear_on_start", "false"))
 
     # Gather system info
     db_status = "Connected" if HAS_DB else "Not available"
@@ -5762,8 +6807,21 @@ def settings_page():
 
     cf_badge = '<span class="status-chip connected">Connected</span>' if cf_token_set and zone_id else '<span class="status-chip not-connected">Not configured</span>'
 
-    _cf_token_current = '<div class=\'current-value\'>Current: <code style="color:var(--accent);">' + cf_token_display + "</code></div>" if cf_token_display else ""
-    _cf_apikey_current = '<div class=\'current-value\'>Current: <code style="color:var(--accent);">' + cf_api_key_display + "</code></div>" if cf_api_key_display else ""
+    _cf_token_current = (
+        f'<div class="current-value">Configured via {cf_token_source}</div>'
+        if cf_token_set
+        else ""
+    )
+    _cf_apikey_current = (
+        f'<div class="current-value">Configured via {cf_api_key_source}</div>'
+        if cf_api_key_set
+        else ""
+    )
+    _credential_guidance = (
+        '<small>Production secrets are read from CF_API_TOKEN, CF_API_KEY, and CF_EMAIL.</small>'
+        if production_mode
+        else ""
+    )
 
     html = f"""
 <!DOCTYPE html>
@@ -5771,7 +6829,7 @@ def settings_page():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AuroraEdge Security - Settings</title>
+    <title>NorthFlux Security - Settings</title>
     {_css()}
     {_auth_js()}
     <style>
@@ -5980,7 +7038,7 @@ def settings_page():
                 <div class="logo">&#9881;&#65039;</div>
                 <div>
                     <h1>Settings</h1>
-                    <p class="subtitle">Configure AuroraEdge Security for your organisation</p>
+                    <p class="subtitle">Configure NorthFlux Security for your organisation</p>
                 </div>
             </div>
             <div>
@@ -5996,7 +7054,7 @@ def settings_page():
                 <p class="card-desc">Identity details used in reports and the dashboard header.</p>
                 <div class="form-row">
                     <label for="orgName">Organisation Name</label>
-                    <input type="text" id="orgName" value="{org_name}" placeholder="e.g., Belfast Met IT Services">
+                    <input type="text" id="orgName" value="{org_name}" placeholder="e.g., Example Company IT">
                     <small>Displayed on exports, reports, and the dashboard</small>
                 </div>
                 <div class="form-row">
@@ -6011,6 +7069,13 @@ def settings_page():
                 <h3>&#128260; Monitoring Schedule</h3>
                 <p class="card-desc">Automatic background rescans of managed domains with drift detection alerts.</p>
                 <div class="form-row">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="monitoringEnabled" {"checked" if monitoring_enabled else ""} style="width:18px;height:18px;">
+                        Enable scheduled monitoring
+                    </label>
+                    <small>Disabled by default. Enable after adding domains you are authorised to monitor.</small>
+                </div>
+                <div class="form-row">
                     <label for="monitorInterval">Scan Interval</label>
                     <select id="monitorInterval">
                         <option value="6" {"selected" if interval == "6" else ""}>Every 6 hours</option>
@@ -6019,7 +7084,14 @@ def settings_page():
                         <option value="48" {"selected" if interval == "48" else ""}>Every 48 hours</option>
                         <option value="168" {"selected" if interval == "168" else ""}>Weekly</option>
                     </select>
-                    <small>How often AuroraEdge rescans your domains and checks for grade changes</small>
+                    <small>How often NorthFlux Security rescans your domains and checks for grade changes</small>
+                </div>
+                <div class="form-row" style="margin-top:16px;">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="automaticRemediation" {"checked" if automatic_remediation else ""} style="width:18px;height:18px;">
+                        Allow automatic DNS remediation
+                    </label>
+                    <small>Disabled by default. When enabled, monitoring may change authorised Cloudflare DNS zones.</small>
                 </div>
                 <div class="form-row" style="margin-top:16px;">
                     <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
@@ -6073,8 +7145,8 @@ def settings_page():
                     <div class="form-row" style="margin-bottom:0;">
                         <label for="cfToken">API Token</label>
                         <div class="input-group">
-                            <input type="password" id="cfToken" placeholder="{"Token saved &#8212; enter new value to change" if cf_token_set else "Paste your Cloudflare API token"}" autocomplete="off">
-                            <button class="toggle-vis" onclick="toggleTokenVis()" title="Show/hide token" type="button">&#128065;&#65039;</button>
+                            <input type="password" id="cfToken" placeholder="{"Token configured" if cf_token_set else "Paste your Cloudflare API token"}" autocomplete="off" {credential_inputs_disabled}>
+                            <button class="toggle-vis" onclick="toggleTokenVis()" title="Show/hide token" type="button" {credential_inputs_disabled}>&#128065;&#65039;</button>
                         </div>
                         {_cf_token_current}
                         <small>
@@ -6100,7 +7172,7 @@ def settings_page():
                     <div class="form-row" style="margin-bottom:0;">
                         <label for="cfApiKey">Global API Key <span style="color:var(--text-muted);font-weight:400;font-size:0.8rem;">(optional fallback)</span></label>
                         <div class="input-group">
-                            <input type="password" id="cfApiKey" placeholder="{"Key saved &#8212; enter new value to change" if cf_api_key_set else "Only needed if Worker routes fail with your token"}" autocomplete="off">
+                            <input type="password" id="cfApiKey" placeholder="{"Key configured" if cf_api_key_set else "Only needed if Worker routes fail with your token"}" autocomplete="off" {credential_inputs_disabled}>
                         </div>
                         {_cf_apikey_current}
                         <small>Optional. Used only when your API token cannot create Cloudflare Worker routes.</small>
@@ -6108,11 +7180,12 @@ def settings_page():
                     <div class="form-row" style="margin-bottom:0;">
                         <label for="cfEmail">Cloudflare Account Email <span style="color:var(--text-muted);font-weight:400;font-size:0.8rem;">(optional fallback)</span></label>
                         <div class="input-group">
-                            <input type="email" id="cfEmail" value="{cf_email}" placeholder="Email used with the optional Global API Key" autocomplete="off">
+                            <input type="email" id="cfEmail" value="{cf_email}" placeholder="Email used with the optional Global API Key" autocomplete="off" {credential_inputs_disabled}>
                         </div>
                         <small>Only needed if you also use the optional Global API Key.</small>
                     </div>
                 </div>
+                {_credential_guidance}
                 <div class="btn-row" style="margin-top:16px;">
                     <button class="btn btn-secondary" onclick="testCloudflare()" style="padding:10px 20px;">&#129514; Test Connection</button>
                 </div>
@@ -6129,7 +7202,7 @@ def settings_page():
             <!-- Data Management -->
             <div class="settings-card">
                 <h3>&#128230; Data &amp; Export</h3>
-                <p class="card-desc">Download your scan data and settings for backup or academic review.</p>
+                <p class="card-desc">Download your scan data and settings for backup or migration.</p>
                 <div class="btn-row" style="flex-direction:column;gap:10px;">
                     <button class="btn btn-secondary" onclick="exportSettings()" style="width:100%;text-align:left;padding:12px 16px;">
                         &#128203; Export Settings as JSON
@@ -6151,11 +7224,11 @@ def settings_page():
             <!-- System Info -->
             <div class="settings-card">
                 <h3>&#8505;&#65039; System Information</h3>
-                <p class="card-desc">AuroraEdge instance details and module status.</p>
+                <p class="card-desc">NorthFlux Security instance details and module status.</p>
                 <div class="info-grid">
                     <div class="info-item">
                         <div class="info-label">Version</div>
-                        <div class="info-value">3.1</div>
+                        <div class="info-value">{PRODUCT_VERSION}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Database</div>
@@ -6197,6 +7270,15 @@ def settings_page():
     </div>
 
     <script>
+    function escapeHtml(value) {{
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }}
+
     function toggleTokenVis() {{
         const inp = document.getElementById('cfToken');
         const btn = inp.parentElement.querySelector('.toggle-vis');
@@ -6218,6 +7300,8 @@ def settings_page():
             cf_account_id: document.getElementById('cfAccount').value,
             cf_email: document.getElementById('cfEmail').value,
             monitor_interval: document.getElementById('monitorInterval').value,
+            monitoring_enabled: document.getElementById('monitoringEnabled').checked ? 'true' : 'false',
+            automatic_remediation: document.getElementById('automaticRemediation').checked ? 'true' : 'false',
             alert_email: document.getElementById('alertEmail').value,
             clear_on_start: document.getElementById('clearOnStart').checked ? 'true' : 'false',
         }};
@@ -6270,7 +7354,7 @@ def settings_page():
             const res = await fetch('/api/settings/test-cloudflare');
             const data = await res.json();
             if (data.ok) {{
-                let info = '&#9989; <strong>Connected</strong> &#8212; Zone: <code>' + data.zone_name + '</code>';
+                let info = '&#9989; <strong>Connected</strong> &#8212; Zone: <code>' + escapeHtml(data.zone_name) + '</code>';
                 result.className = 'test-result ok';
                 result.innerHTML = info;
 
@@ -6297,19 +7381,19 @@ def settings_page():
                 permList.innerHTML = html;
 
                 if (data.features && data.features.length) {{
-                    featList.innerHTML = '&#128295; <strong>Available auto-fix features:</strong> ' + data.features.join(', ');
+                    featList.innerHTML = '&#128295; <strong>Available auto-fix features:</strong> ' + data.features.map(escapeHtml).join(', ');
                 }} else {{
                     featList.innerHTML = '&#9888;&#65039; No auto-fix features available. Check your token permissions.';
                 }}
                 permBox.style.display = 'block';
             }} else {{
                 result.className = 'test-result fail';
-                result.innerHTML = '&#10060; ' + data.message;
+                result.textContent = '❌ ' + data.message;
                 permBox.style.display = 'none';
             }}
         }} catch(e) {{
             result.className = 'test-result fail';
-            result.innerHTML = '&#10060; Connection failed: ' + e.message;
+            result.textContent = '❌ Connection failed: ' + e.message;
             permBox.style.display = 'none';
         }}
     }}
@@ -6320,12 +7404,12 @@ def settings_page():
             const data = await res.json();
             // Add export metadata
             data.exported_at = new Date().toISOString();
-            data.version = '3.1';
+            data.version = '{PRODUCT_VERSION}';
             const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'auroraedge_settings_' + new Date().toISOString().slice(0,10) + '.json';
+            a.download = 'northflux_settings_' + new Date().toISOString().slice(0,10) + '.json';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -6343,14 +7427,14 @@ def settings_page():
             const data = await res.json();
             if (data.ok) {{
                 result.className = 'test-result success';
-                result.innerHTML = '\\u2705 ' + data.message;
+                result.textContent = '\\u2705 ' + data.message;
             }} else {{
                 result.className = 'test-result fail';
-                result.innerHTML = '\\u274c ' + (data.detail || 'Clear failed');
+                result.textContent = '\\u274c ' + (data.detail || 'Clear failed');
             }}
         }} catch(e) {{
             result.className = 'test-result fail';
-            result.innerHTML = '\\u274c Error: ' + e.message;
+            result.textContent = '\\u274c Error: ' + e.message;
         }}
     }}
 
@@ -6365,3 +7449,35 @@ def settings_page():
 </html>
 """
     return HTMLResponse(html)
+
+
+@app.get("/assets/{asset_path:path}", include_in_schema=False)
+def react_asset(asset_path: str):
+    """Serve a fingerprinted React asset without allowing path traversal."""
+    assets_root = (FRONTEND_DIST / "assets").resolve()
+    candidate = (assets_root / asset_path).resolve()
+    try:
+        candidate.relative_to(assets_root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not _react_frontend_available() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(
+        candidate,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/{spa_path:path}", include_in_schema=False)
+def react_spa_fallback(spa_path: str):
+    """Return the SPA for browser deep links, never for API-like paths."""
+    reserved = {
+        "api", "download", "health", "ready", "docs", "redoc", "openapi.json"
+    }
+    first_segment = spa_path.split("/", 1)[0]
+    if first_segment in reserved:
+        raise HTTPException(status_code=404, detail="Not found")
+    response = _spa_index_response()
+    if response is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return response

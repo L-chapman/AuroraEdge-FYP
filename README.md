@@ -1,697 +1,248 @@
-# AuroraEdge Security
+# NorthFlux Security
 
-**Designing and Implementing an Automated Email Authentication and Cyber Defence System for Small Organisations**
+NorthFlux Security is a self-hosted platform for assessing and improving a domain's email security posture. It checks SPF, DKIM, DMARC, MTA-STS, TLS-RPT, STARTTLS, MX routing, BIMI, and mail-server blocklists; explains weaknesses; tracks results; and can apply supported DNS changes through Cloudflare for authorised zones.
 
-**Final Year Project** | Leon Chapman (50030738)  
-Belfast Metropolitan College | Cybersecurity & Networking Infrastructure  
-Academic Year 2025/2026
+The current release is a tested, single-operator self-hosted release candidate. Its browser experience is a React and TypeScript application backed by FastAPI JSON APIs. NorthFlux still has the operational limits documented below, so deployment owners should validate it against their own availability, retention, and change-control requirements before relying on it.
 
----
+NorthFlux began as an independent home project under the **AuroraEdge** name and later became Leon Chapman's Belfast Metropolitan College final-year project. The current repository continues that work as a practical, maintained email security product.
 
-## Overview
+## What it does
 
-AuroraEdge Security is a local tool for checking and improving email security records for small organisations.
+- Scans public DNS, HTTPS policy endpoints, and SMTP transport security.
+- Scores each domain from 0–100 and assigns a grade with actionable findings.
+- Stores scan history, managed domains, settings, and alerts in SQLite.
+- Generates PDF, CSV, and Markdown reports.
+- Supports scheduled monitoring and security-posture drift alerts.
+- Builds draft DNS records from operator-provided settings, with examples for common mail providers.
+- Applies supported Cloudflare DNS fixes after ownership checks.
+- Provides a responsive React dashboard and a command-line interface.
 
-It checks the controls that are often missing, misconfigured, or left too weak in real deployments:
+Safety-sensitive behaviour is opt-in. Adding a managed domain does not change DNS by default, scheduled monitoring is disabled by default, automatic remediation requires a separate setting, and production mode requires authentication.
 
-- SPF
-- DKIM
-- DMARC
-- MTA-STS
-- TLS-RPT
-- STARTTLS
-- MX mail routing
+## Technology
 
-AuroraEdge detects these problems, explains what they mean, scores the domain, stores the results locally, and can apply supported DNS fixes through Cloudflare when credentials are available.
+| Area | Implementation |
+|---|---|
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Frontend | React 19, TypeScript, Vite, React Router, TanStack Query |
+| Storage | SQLite with WAL mode |
+| Network checks | dnspython, Requests, sockets/TLS |
+| Reports | ReportLab, Matplotlib, CSV, Markdown |
+| Integration | Cloudflare API |
+| Quality | pytest, Vitest, Testing Library, Playwright, axe-core, GitHub Actions |
+| Deployment | Windows launcher, manual Python setup, Docker Compose |
 
-The project includes:
+## Architecture
 
-- A FastAPI web dashboard
-- A command-line scanner
-- SQLite-backed local state and history
-- Report generation
-- Cloudflare DNS auto-remediation
-- Monitoring and alerting for managed domains
-- A demo workflow for lecturers and evaluators
-- A large automated test suite
-
-For assessment, the main documents are split by purpose:
-
-- `README.md` for quick setup and first run
-- `docs/TESTING_GUIDE.md` for marking and validation steps
-- `docs/ARCHITECTURE.md` for the design view
-- `docs/FINAL_RELEASE_NOTES.md` for the final release snapshot and evidence set
-
----
-
-## At A Glance
-
-| Area | Details |
-|------|---------|
-| **Problem** | Small organisations often lack the expertise to configure and maintain secure email authentication records correctly |
-| **Solution** | AuroraEdge scans domains, grades them, explains risks, recommends fixes, and can automate supported DNS changes |
-| **Primary Interface** | FastAPI dashboard with pages for scanning, managed domains, DNS record generation, and settings |
-| **Secondary Interface** | CLI for single-domain scans, batch scans, remediation reporting, and optional DNS fixing |
-| **Storage** | SQLite database in `state/auroraedge.db`, report files in `reports/`, logs in `logs/` |
-| **Optional Integration** | Cloudflare API for DNS remediation and MTA-STS Worker deployment |
-| **Verification** | `verify_system.py`, `scripts/demo.ps1`, and the `tests/` suite |
-
----
-
-## What AuroraEdge Does
-
-AuroraEdge has five main tasks:
-
-1. **Scan** public DNS and HTTPS resources for email security controls.
-2. **Evaluate** the results using RFC-based rules, severity levels, and a 0-100 scoring model.
-3. **Explain** why each issue matters and how to fix it in plain language.
-4. **Store** scan results, settings, alerts, and local state for follow-up work.
-5. **Defend** by applying supported Cloudflare DNS fixes for domains you own or are explicitly authorised to manage.
-
----
-
-## How The Project Works
-
-The main application flow is:
-
-1. `src/app/scanner.py` performs DNS, HTTPS, and optional STARTTLS checks.
-2. `src/app/rules.py` evaluates the raw scan output and assigns score, grade, severity, and remediation guidance.
-3. `src/app/dashboard.py` exposes the web UI and API endpoints.
-4. `src/app/cli.py` provides the command-line workflow for single and batch scans.
-5. `src/app/database.py` stores scans, managed domains, settings, and alerts in SQLite.
-6. `src/app/dns_fix.py` integrates with Cloudflare for supported DNS remediation and audit logging.
-7. `src/app/analysis.py` calculates statistics used by reports and dashboard views.
-8. `src/app/logging_config.py` centralises structured logging.
-
-The same codebase can be used by:
-
-- **Lecturers or markers** who just want to run the system and test a few domains
-- **Developers** who want to inspect, verify, and extend the platform
-- **Security testers** who prefer terminal-based scans and reports
-- **Domain owners** who want ongoing monitoring and Cloudflare-backed auto-fix
-
----
-
-## Choose Your Starting Option
-
-| If you want to... | Best option | What to use |
-|-------------------|-------------|-------------|
-| **Try the project as quickly as possible** | Recommended | Double-click `START.bat` |
-| **Show the project in a guided way** | Demo path | `scripts/demo.ps1` |
-| **Run the web app manually** | Developer path | Activate `.venv`, set `PYTHONPATH`, run Uvicorn |
-| **Use only the terminal** | CLI path | `python -m app.cli ...` |
-| **Confirm the environment is healthy** | Verification path | `python verify_system.py` |
-| **Run the full automated test suite** | Validation path | `python -m pytest -q` |
-
-Important note:
-
-- `START.bat` is the easiest first run because it creates the virtual environment, installs requirements, prepares folders, and starts the dashboard.
-- `scripts/demo.ps1` is best used **after** the project has already been set up once.
-
----
-
-## Getting The Project Files
-
-Choose whichever option suits you best. All three end up with the same project folder.
-
----
-
-### Option 1: Download ZIP From GitHub (Easiest — No Software Needed)
-
-This is the simplest approach. You do **not** need Git or any command-line tools.
-
-1. Open the GitHub repository in your browser:
-
-   **<https://github.com/L-chapman/AuroraEdge-FYP>**
-
-2. Click the green **Code** button near the top-right of the page.
-3. In the dropdown menu, click **Download ZIP**.
-4. Save the ZIP file to your computer and extract (unzip) it.
-5. Open the extracted folder (it will be called `AuroraEdge-FYP-master`).
-6. Double-click **`START.bat`** to set up and launch the project.
-
-That is it. `START.bat` handles everything else automatically.
-
----
-
-### Option 2: Clone With Git (Copy-Paste Commands)
-
-Use this if you have [Git](https://git-scm.com/downloads) installed. If you are not sure, try Option 1 instead.
-
-Open **PowerShell** or **Command Prompt** and paste these commands one at a time:
-
-```powershell
-git clone https://github.com/L-chapman/AuroraEdge-FYP.git
+```text
+React browser app ----> FastAPI JSON API
+                              |
+CLI --------------------------+
+                              |
+                              +--> scanner.py ------> public DNS / HTTPS / SMTP
+                              +--> rules.py --------> findings, score, grade, remediation
+                              +--> database.py -----> SQLite state and history
+                              +--> dns_fix.py ------> authorised Cloudflare DNS changes
+                              +--> analysis.py -----> reports and charts
 ```
 
+FastAPI serves the compiled single-page application and its fingerprinted local assets in production. Authentication, CSRF enforcement, scanning, persistence, reporting, scheduling, and optional remediation remain server-side. A deprecated server-rendered interface remains available only as a development fallback while backend routes are separated from the large `dashboard.py` module.
+
+See [Architecture](docs/ARCHITECTURE.md) for the detailed component and data flow.
+
+## Quick start with Docker
+
+Requirements:
+
+- Docker Engine with Compose v2
+- Internet access for live DNS, HTTPS, and SMTP checks
+
+Clone the repository, create an untracked `.env`, and start the hardened single-instance service:
+
 ```powershell
-cd AuroraEdge-FYP
+git clone https://github.com/L-chapman/AuroraEdge-FYP.git NorthFlux-Security
+cd NorthFlux-Security
+@'
+DASH_TOKEN=replace-with-a-random-value-at-least-32-characters
+NORTHFLUX_PUBLIC_ORIGIN=https://security.example.com
+'@ | Set-Content .env
+docker compose up --build -d
 ```
 
-```powershell
-.\START.bat
-```
+Replace the example token and origin before starting. The image builds the React application in a Node stage, copies only the compiled assets into the non-root Python runtime, and checks `/ready`. The loopback URL `http://127.0.0.1:8080/health` is suitable for a host-side health check, but production sign-in uses a `Secure` session cookie and therefore requires an HTTPS reverse proxy. Open the configured external HTTPS origin rather than the loopback HTTP port. See [Deployment](docs/DEPLOYMENT.md) for a complete production path.
 
-That will download the project, enter the folder, and launch the setup.
+Cloudflare credentials are optional. Supply production credentials through protected environment or secret-manager configuration; do not commit them or place them in the frontend build.
 
-> **Tip:** If Git asks you to log in, you can use your GitHub username and a [Personal Access Token](https://github.com/settings/tokens) as the password. If the repository is private, you need to be added as a collaborator first.
-
----
-
-### Option 3: You Already Have A Folder Copy
-
-If the project was shared with you through Google Drive, OneDrive, email, USB, or a ZIP extract, you do **not** need Git.
-
-1. Place the project folder somewhere convenient.
-2. Open the folder.
-3. Double-click **`START.bat`**.
-
-If the folder was copied from another machine and the included `.venv` is unusable, `START.bat` will rebuild it automatically. If you ever need to do that manually, delete the `.venv` folder and run `START.bat` again.
-
----
-
-### How To Update Your Copy Later
-
-#### If you downloaded a ZIP or received a folder copy
-
-1. Download or receive the new version.
-2. Replace the old folder with the new one (or copy the new files over).
-3. Run `START.bat` again so the environment can refresh dependencies if needed.
-
-#### If you cloned with Git
-
-Open PowerShell inside the project folder and run:
+## Manual development setup
 
 ```powershell
-git pull
-```
-
-Then refresh the environment:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-#### If `git pull` says `not a git repository`
-
-That means your copy is a normal folder, not a Git clone. Use the ZIP/folder-copy update method above instead.
-
----
-
-## Requirements
-
-### Required
-
-- Python 3.10 or newer
-- Internet access for DNS and HTTPS checks
-- Permission to run local scripts
-
-### Optional
-
-- Cloudflare account and API credentials if you want automatic DNS remediation
-- PowerShell if you want to use the Windows demo script
-
-### Platform Notes
-
-- **Windows** is the primary path because this repository includes `START.bat` and a PowerShell demo script.
-- **Linux/macOS** can still run the project, but you should use the manual setup steps rather than `START.bat`.
-
----
-
-## Setup Instructions
-
-## Option A: Windows Quick Setup
-
-This is the simplest and recommended setup path.
-
-1. Open the project folder.
-2. Double-click `START.bat`.
-3. Wait while it:
-   - validates a real Python runtime (and ignores Microsoft Store app-alias stubs)
-   - creates `.venv` if needed
-   - falls back to `%LOCALAPPDATA%\\AuroraEdge\\venv_submission` if `.venv` cannot be created in the project folder
-   - auto-relocates to a writable local folder if launched from read-only media (for example CD/ISO paths)
-   - installs dependencies from `requirements.txt`
-   - creates `reports/`, `state/`, and `logs/` if missing
-   - selects an available port between `8080` and `8085`
-   - starts the dashboard
-4. Let the browser open automatically.
-5. If the browser does not open, visit `http://127.0.0.1:8080/test` or the port shown in the terminal window.
-
-You only need to do the full dependency install on first run or after dependency changes.
-
-## Option B: Windows Manual Setup
-
-Use this if you want full control over the environment.
-
-```powershell
-cd "<project-folder>"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 $env:PYTHONPATH = "$PWD\src"
+$env:NORTHFLUX_SERVE_REACT = "true"
+
+Push-Location frontend
+npm ci
+npm run build
+Pop-Location
+
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 ```
 
-Then open:
+Open `http://127.0.0.1:8080`.
 
-- `http://127.0.0.1:8080`
-- `http://127.0.0.1:8080/test`
-- `http://127.0.0.1:8080/domains`
-- `http://127.0.0.1:8080/settings`
+Manual React development requires Node.js 22.12 or newer. Run FastAPI on port `8000`, then run `npm run dev` in `frontend/`; Vite serves on `127.0.0.1:5173` and proxies application requests to FastAPI. On Windows, `START.bat` creates the Python environment, installs locked frontend dependencies when needed, builds the React application, and starts the local dashboard.
 
-If PowerShell blocks activation scripts, run:
+For an authenticated local instance:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-and then activate the virtual environment again.
-
-## Option C: Linux/macOS Manual Setup
-
-```bash
-cd /path/to/AuroraEdge_FYP
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-export PYTHONPATH="$PWD/src"
+$env:DASH_TOKEN = "use-a-random-value-at-least-32-characters-long"
 python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
 ```
 
-Then open `http://127.0.0.1:8080/test` in your browser.
+The browser redirects to `/login` and exchanges the configured token for an HttpOnly session cookie. API clients may use `Authorization: Bearer <token>`.
 
----
+## Docker Compose
 
-## First Run Checklist
+The Compose service binds to `127.0.0.1:8080`, persists state, reports, and logs in Docker-managed volumes, runs as a non-root user with a read-only root filesystem, and checks `/ready`. Put a TLS reverse proxy in front before exposing the service beyond the host.
 
-If you just want to prove the project works, do this:
+See [Deployment](docs/DEPLOYMENT.md) for production-mode configuration, backups, reverse-proxy expectations, and rollback guidance.
 
-1. Start the dashboard with `START.bat`.
-2. Open `/test`.
-3. Scan one public domain.
-4. Review the score, grade, and remediation guidance.
-5. Open `/` to see dashboard history and statistics.
+## Command line
 
-Good starter domains:
-
-| Domain | What it is useful for |
-|--------|------------------------|
-| `google.com` | Strong example of mature email security |
-| `microsoft.com` | Another strong enterprise reference |
-| `github.com` | Good real-world comparison domain |
-| `example.com` | Simple weak/example case |
-| `auroraedge.co.uk` | Project demo domain |
-
----
-
-## All Supported Ways To Use The Project
-
-## 1. Dashboard Workflow
-
-The dashboard is the main interface for most use cases.
-
-### Main pages
-
-| Page | URL | Purpose |
-|------|-----|---------|
-| **Dashboard** | `/` | Overview of results, trends, alerts, and domain posture |
-| **Test Hub** | `/test` | Interactive scanner for one or more domains |
-| **My Domains** | `/domains` | Managed domains for monitoring and auto-defence |
-| **Generator** | `/generator` | DNS record generator wizard |
-| **Settings** | `/settings` | Cloudflare, monitoring, organisation, and startup settings |
-| **Health** | `/health` | JSON health check |
-
-### What the dashboard supports
-
-- Single-domain interactive scans
-- Multi-domain input through the scan UI
-- Score, grade, severity, and remediation display
-- History and report access
-- Managed domain onboarding
-- Monitoring alerts
-- Cloudflare credential testing
-- Automatic DNS fixing for supported records
-- Clearing scan data while keeping app settings
-
-## 2. CLI Workflow
-
-Use the CLI if you prefer working from the terminal.
-
-### Prepare the shell first
+With the virtual environment active and `PYTHONPATH` set to `src`:
 
 ```powershell
-cd "<project-folder>"
-.\.venv\Scripts\Activate.ps1
-$env:PYTHONPATH = "$PWD\src"
-```
+# Scan one domain
+python -m app.cli --domain example.com
 
-### Common CLI commands
-
-```powershell
-# Scan a single domain
-python -m app.cli --domain google.com
-
-# Scan with remediation advice
+# Include remediation guidance
 python -m app.cli --domain example.com --remediation
 
-# Scan multiple domains from a file
+# Scan a file of domains
 python -m app.cli --domains domains.txt
-
-# Apply supported DNS fixes through Cloudflare
-python -m app.cli --domain example.com --apply-fix
 ```
 
-### What the CLI does
+`--apply-fix` can change DNS. Use it only for a domain you own or are explicitly authorised to manage, and configure Cloudflare credentials first.
 
-- Scans one or more domains
-- Prints console output with grades and severities
-- Saves results into the local database
-- Writes CSV and Markdown reports
-- Can apply supported Cloudflare fixes when credentials are configured in the environment
+## Configuration
 
-## 3. Demo Workflow
+| Variable | Purpose | Production guidance |
+|---|---|---|
+| `NORTHFLUX_ENV` | Runtime mode | Set to `production` outside local development |
+| `NORTHFLUX_PORT` | Host port published by the standard Compose deployment | Defaults to `8080`; the container still listens on `8080` |
+| `DASH_TOKEN` | Dashboard and API access token | Required in production; use a random secret of at least 32 characters |
+| `NORTHFLUX_PUBLIC_ORIGIN` | Canonical browser origin for CSRF validation | Set to the external HTTPS origin when proxy headers are unavailable |
+| `NORTHFLUX_LOG_LEVEL` | Log verbosity | `INFO` is the normal default |
+| `NORTHFLUX_STATE_DIR` | SQLite state directory | Defaults to `state/`; point it at persistent private storage |
+| `NORTHFLUX_REPORTS_DIR` | Generated report directory | Defaults to `reports/`; point it at persistent private storage |
+| `NORTHFLUX_LOGS_DIR` | Runtime and DNS audit log directory | Defaults to `logs/`; point it at persistent private storage |
+| `NORTHFLUX_SERVE_REACT` | Enable the compiled React application | Defaults to enabled in production; set `true` for a source-based development build |
+| `NORTHFLUX_FRONTEND_DIST` | Compiled Vite output directory | Defaults to `frontend/dist`; normally leave unchanged |
+| `CF_API_TOKEN` | Cloudflare scoped API token | Use a secret manager or protected service environment |
+| `CF_ZONE_ID` | Authorised Cloudflare zone | Required for DNS remediation |
+| `CF_ACCOUNT_ID` | Cloudflare account | Required for Worker deployment |
+| `CF_API_KEY` / `CF_EMAIL` | Legacy Cloudflare authentication | Avoid unless a required operation cannot use an API token |
 
-For a more guided lecturer or presentation experience:
+The legacy `AURORAEDGE_LOG_LEVEL` variable is accepted for one compatibility release. The application does not automatically load `.env` files; Compose loads its own `.env`, while manual and service deployments should provide environment variables through the operating system or service manager.
 
-```powershell
-.\scripts\demo.ps1
+## Safe operating defaults
+
+- Scan history is preserved across restarts.
+- Demo mode is disabled unless `NORTHFLUX_DEMO_MODE=true` is supplied.
+- Scheduled monitoring is disabled until enabled in Settings.
+- Automatic remediation is disabled independently of monitoring.
+- Production mode refuses to start without a `DASH_TOKEN` of at least 32 characters.
+- Production mode refuses to start without a compiled React application.
+- Production mode expects Cloudflare secrets from the runtime environment rather than the settings API.
+- Cloudflare changes are restricted to the configured and verified zone and recorded in the audit log.
+- The supported production image contains only locally built frontend assets. Its CSP permits scripts, styles, fonts, images, and API connections from the application origin (plus `data:` images), not third-party frontend CDNs.
+
+The controlled legacy demo domain is `auroraedge.co.uk`. Its name is retained because it is an external DNS zone; it should only be reset or remediated using the authorised demo workflow.
+
+## Verification
+
+The current deterministic test baseline is:
+
+```text
+439 Python tests passed
+57 frontend unit/component tests passed
 ```
 
-The demo script can:
-
-- scan one domain
-- scan many domains
-- scan with remediation
-- launch the dashboard
-- open the test hub
-- view reports
-- check system health
-- run unit tests
-
-Recommended approach:
-
-1. Run `START.bat` once to prepare the environment.
-2. Stop the server if you want to use the guided PowerShell demo instead.
-3. Run `scripts/demo.ps1`.
-
-## 4. Verification Workflow
-
-Use the verification script to confirm the main modules and scan pipeline are working.
+Run the full suite:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python verify_system.py
-```
-
-It checks imports, scanning, rules, remediation generation, and logging.
-
-## 5. Automated Test Workflow
-
-```powershell
-.\.venv\Scripts\Activate.ps1
 $env:PYTHONPATH = "$PWD\src"
 python -m pytest -q
 ```
 
-The repository includes tests for:
-
-- analysis and benchmarks
-- CLI behaviour
-- dashboard routes and auth
-- database persistence and safety
-- misconfiguration scenarios
-- remediation logic
-- security hardening
-- scanner behaviour
-- SPF recursion edge cases
-- stress and abuse handling
-
-## 6. Domain-Owner Workflow With Cloudflare
-
-Use this when you own a domain or have explicit written permission to manage it.
-
-1. Start the dashboard.
-2. Open `/settings`.
-3. Add Cloudflare credentials.
-4. Test the connection.
-5. Go to `/domains` and add your domain.
-6. Run a scan.
-7. Apply supported fixes where appropriate.
-8. Review `logs/dns_audit.log` for the audit trail.
-
----
-
-## Demo Domain And No-Domain Testing
-
-If you do not own a domain, you can still test the platform.
-
-Use the demo domain:
-
-- `auroraedge.co.uk`
-
-Without Cloudflare credentials, you can still:
-
-- scan the domain
-- review score, grade, and violations
-- view remediation advice
-- generate suggested DNS records
-- test the dashboard and CLI
-
-Cloudflare credentials are only needed when you want AuroraEdge to attempt live DNS changes.
-
----
-
-## What AuroraEdge Checks
-
-| Check | Standard | Purpose |
-|-------|----------|---------|
-| **SPF** | RFC 7208 | Defines which senders are allowed to send email for the domain |
-| **DKIM** | RFC 6376 | Verifies signed mail integrity and sender legitimacy |
-| **DMARC** | RFC 7489 | Tells receivers how to handle failed SPF/DKIM alignment |
-| **MTA-STS** | RFC 8461 | Enforces secure SMTP transport expectations |
-| **TLS-RPT** | RFC 8460 | Receives reports about TLS delivery failures |
-| **STARTTLS** | RFC 3207 / RFC 8996 context | Checks SMTP transport encryption capability and strength |
-| **MX** | RFC 5321 context | Confirms mail routing exists and is usable |
-
-### Grading Scale
-
-| Grade | Score | Meaning |
-|-------|-------|---------|
-| **A+ / A** | 90-100 | Strong email security posture |
-| **B** | 75-89 | Good but not fully hardened |
-| **C** | 60-74 | Usable but with meaningful gaps |
-| **D** | 40-59 | Weak and vulnerable to abuse |
-| **F** | 0-39 | Failing or critically exposed |
-
----
-
-## Cloudflare Auto-Fix
-
-AuroraEdge can automatically remediate supported DNS issues through Cloudflare.
-
-### Supported automatic fixes
-
-- SPF
-- DMARC
-- TLS-RPT
-- MTA-STS DNS record
-- MTA-STS HTTPS policy hosting through Cloudflare Workers
-- DKIM for supported providers where the selector pattern can be identified safely
-
-### Ways to provide Cloudflare credentials
-
-#### Dashboard users
-
-Enter them in the **Settings** page.
-
-#### CLI or shell users
-
-Set environment variables in your session:
+Run the offline system smoke test:
 
 ```powershell
-$env:CF_API_TOKEN = "your_api_token_here"
-$env:CF_ZONE_ID = "your_zone_id_here"
-$env:CF_ACCOUNT_ID = "your_account_id_here"
-$env:CF_API_KEY = "your_global_api_key_here"
-$env:CF_EMAIL = "you@example.com"
+python verify_system.py --offline
 ```
 
-### Important guardrails
-
-- Only use auto-fix for domains you own or are authorised to manage.
-- AuroraEdge checks that the target domain belongs to the configured Cloudflare zone.
-- DNS changes are logged to `logs/dns_audit.log`.
-- MTA-STS Worker deployment may require broader Cloudflare permissions than basic DNS edit actions.
-- BIMI is reported but intentionally **not** auto-fixed because it depends on branding assets and, in many cases, a VMC.
-
-### Controlled demo reset workflow for `auroraedge.co.uk`
-
-For the authorised classroom demo, `auroraedge.co.uk` can be reset to a known weak state, fixed, and then restored again.
+Run the frontend checks and production build:
 
 ```powershell
-python scripts/demo_prep.py
-python -m app.cli --domain auroraedge.co.uk --apply-fix --remediation
-python scripts/demo_prep.py --restore
+Push-Location frontend
+npm ci
+npm run typecheck
+npm run lint
+npm run test:coverage
+npm run build
+Pop-Location
 ```
 
-- `python scripts/demo_prep.py` resets the demo domain to the controlled weak state used for repeat tests.
-- You can then scan `auroraedge.co.uk` in the dashboard or CLI and run **Auto-Fix DNS**.
-- `python scripts/demo_prep.py --restore` returns the domain to the normal strong state after the session.
-- The `/test` page reset/restore buttons now show progress feedback and perform staged rescan refreshes so grade changes appear reliably after a single click.
-- This workflow is only for `auroraedge.co.uk` or another domain you own or are explicitly authorised to manage.
+The Playwright suite covers nine operator journeys in desktop Chromium, Firefox, WebKit, and a Pixel 7 mobile profile. It starts a disposable FastAPI instance with deterministic scans and no Cloudflare integration:
 
-### Variable reference
+```powershell
+Push-Location frontend
+npx playwright install chromium firefox webkit
+npm run test:e2e
+Pop-Location
+```
 
-`.env.example` is included as a reference file showing the supported variable names. For the current codebase, the application reads these values from the active environment or from stored dashboard settings.
+Tests cover the rules engine, scanner fallbacks, SPF recursion, database behaviour, API routes, authentication, Cloudflare ownership enforcement, input validation, XSS, SQL injection, path traversal, security headers, stress cases, remediation logic, responsive navigation, accessibility checks, and the principal operator workflows. Deterministic tests do not prove availability of external DNS, SMTP, HTTPS, or Cloudflare services.
 
----
-
-## Reports, Logs, And Local State
-
-AuroraEdge creates and uses these local paths:
-
-| Path | Purpose |
-|------|---------|
-| `reports/indexed/` | Current CSV and Markdown scan outputs |
-| `reports/archive/` | Historical stored reports |
-| `state/auroraedge.db` | SQLite database for scans, settings, managed domains, and alerts |
-| `logs/` | Runtime logs |
-| `logs/dns_audit.log` | DNS auto-fix audit trail |
-
-Note on persistence:
-
-- AuroraEdge stores local state in SQLite.
-- Scan history can be preserved or cleared on startup depending on the `clear_on_start` setting in the dashboard settings page.
-
----
-
-## Project Structure
+## Project structure
 
 ```text
-AuroraEdge_FYP/
+.
+├── src/app/                 Application code
+├── frontend/                React/TypeScript application and browser tests
+├── tests/                   Automated test suite
+├── docs/                    Architecture, deployment, operations, and history
+├── scripts/                 Demo, experiment, and packaging tools
+├── reports/                 Generated report output (runtime, not committed)
+├── state/                   Local SQLite state (runtime, not committed)
+├── logs/                    Runtime and audit logs (runtime, not committed)
+├── Dockerfile
+├── compose.yaml
 ├── START.bat
-├── README.md
-├── requirements.txt
-├── domains.txt
-├── verify_system.py
-├── .env.example
-├── docs/
-├── logs/
-├── reports/
-├── scripts/
-│   ├── create_submission_zip.ps1
-│   ├── demo.ps1
-│   └── demo_prep.py
-├── src/
-│   └── app/
-│       ├── analysis.py
-│       ├── cli.py
-│       ├── dashboard.py
-│       ├── database.py
-│       ├── dns_fix.py
-│       ├── logging_config.py
-│       ├── main.py
-│       ├── rules.py
-│       └── scanner.py
-├── state/
-└── tests/
+└── verify_system.py
 ```
 
----
+## Security and scope
 
-## Final Submission ZIP
+NorthFlux reads public DNS and public-facing transport information. DNS remediation is restricted to explicitly configured Cloudflare zones. Operators remain responsible for obtaining authorisation and reviewing proposed changes before enabling automatic remediation.
 
-Use the packaging script when you need a clean assessment copy.
+Do not expose the development server directly to the public Internet. Use production mode, a long authentication token, HTTPS at a reverse proxy, protected environment secrets, restricted network access, and tested backups. The current shared-token, single-worker, SQLite design is intended for a small single-operator deployment; it is not a multi-tenant identity or horizontally scaled service.
 
-```powershell
-.\scripts\create_submission_zip.ps1
-```
+See [Security policy](SECURITY.md) and [Privacy and data handling](docs/PRIVACY.md).
 
-When run from the Git checkout, it builds `dist\AuroraEdge_FYP_submission.zip` from the tracked project files so the clean ZIP stays aligned with the public repository. `.github/` is left out because it is only for repository automation, not for marking. If you package from a plain folder copy, the script also skips local-only items such as `.venv`, `.git`, `.git (1)`, `.pytest_cache`, `.vscode`, `__pycache__`, runtime database files, logs, and nested ZIP files.
+## Documentation
 
----
+- [Documentation index](docs/INDEX.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Testing guide](docs/TESTING.md)
+- [Integrations](docs/INTEGRATIONS.md)
+- [Privacy and operating boundaries](docs/PRIVACY.md)
+- [Historical academic material](docs/academic/README.md)
 
-## API Surface
+## Project status and licence
 
-The dashboard exposes 36 route handlers grouped across:
-
-- page routes
-- scan and remediation routes
-- report and history routes
-- managed domain and settings routes
-- alerts and reference routes
-
-Key examples include:
-
-- `/health`
-- `/api/scan`
-- `/api/rescan/{domain}`
-- `/api/apply-fix`
-- `/api/runs`
-- `/api/history/{domain}`
-- `/api/data/clear`
-- `/api/managed-domains`
-- `/api/settings`
-- `/api/settings/test-cloudflare`
-- `/api/alerts`
-- `/api/tools/comparison`
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| **Smart App Control blocks `START.bat`** | Right-click `START.bat` and choose **Run as administrator**. If it is still blocked, open **Windows Security > App & browser control > Smart App Control** and turn Smart App Control **Off**, then run `START.bat` again. |
-| `Python not found` | Install Python 3.10+ and make sure it is available on `PATH` |
-| `Found python was` or other strange version text | Disable Windows App Execution Aliases for `python.exe`/`python3.exe`, then rerun `START.bat` |
-| `ModuleNotFoundError: app` | Set `PYTHONPATH` to the `src` folder before running CLI or Uvicorn |
-| PowerShell blocks `.ps1` activation | Run `Set-ExecutionPolicy -Scope Process Bypass` in that session |
-| Existing `.venv` fails with `not a valid application for this OS platform` | Delete `.venv` and rerun `START.bat`, or recreate the environment manually with `python -m venv .venv` |
-| Port `8080` is in use | Use another port manually or let `START.bat` choose a free port |
-| `PermissionError` under `D:\\` or another read-only path | Launch `START.bat` from a normal writable folder, or let it auto-copy/relaunch into `%LOCALAPPDATA%\\AuroraEdge\\AuroraEdge_FYP_submission` |
-| `git pull` fails with `not a git repository` | Your copy is a folder copy, not a Git clone |
-| Cloudflare auto-fix unavailable | Add valid Cloudflare credentials in Settings or through environment variables |
-| No report files appear | Run a scan first; report files are created after successful scan runs |
-
----
-
-## Documentation Map
-
-Use these documents depending on what you need:
-
-| Document | Purpose |
-|----------|---------|
-| `docs/INDEX.md` | Central map of the maintained documentation set |
-| `docs/TESTING_GUIDE.md` | Practical step-by-step testing guide |
-| `docs/ARCHITECTURE.md` | System structure, diagram, and design decisions |
-| `docs/FYP_SPEC.md` | Project specification |
-| `docs/STATUS.md` | Build status, timeline, and test breakdown |
-| `docs/ACADEMIC_NOTEBOOK.md` | Design decisions and rationale |
-| `docs/INTEGRATION_GUIDE.md` | Cloudflare, OpenDMARC, and Postfix integration details |
-| `docs/PRIVACY_AND_ETHICS.md` | Legal, privacy, and ethical constraints |
-| `docs/VERIFICATION_REPORT.md` | Verification evidence |
-| `docs/FINAL_RELEASE_NOTES.md` | Final release summary, evidence selection, and known limitations |
-| `docs/progress/` | Historical project progress records |
-| `docs/Stage_*_README.md` | Historical development snapshots by stage |
-
----
-
-## Privacy, Ethics, And Safety
-
-AuroraEdge is limited to public-domain email security assessment and authorised remediation.
-
-- The scans query public DNS and related HTTPS resources.
-- The tool does not attempt mailbox intrusion or credential abuse.
-- Cloudflare auto-fix should only be used for domains you control or are authorised to manage.
-- Legal, privacy, and ethical context is documented in `docs/PRIVACY_AND_ETHICS.md`.
-
----
-
-## Licence
-
-Developed as a Final Year Project for academic assessment.  
-All rights reserved © 2025-2026 Leon Chapman.
+NorthFlux Security is a personal, non-commercial project under active development. It has no claimed commercial customers or production users. The source is publicly viewable, but no open-source licence has been selected yet; normal copyright restrictions therefore apply.

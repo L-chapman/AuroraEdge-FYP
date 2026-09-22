@@ -1,5 +1,7 @@
 # AuroraEdge Testing Guide
 
+> **Historical assessor guide:** These instructions, paths, demonstrations, and test counts belong to the AuroraEdge submission snapshot. Do not use them to validate NorthFlux Security 4.0. Follow the current [`TESTING.md`](TESTING.md) and repository [`README`](../README.md).
+
 ## For Lecturers, Markers, and Other Test Users
 
 AuroraEdge is an automated email authentication and cyber defence system for small organisations. This guide keeps the testing steps simple and practical.
@@ -275,7 +277,6 @@ Important notes:
 ## Project Information
 
 **Student**: Leon Chapman  
-**Student ID**: 50030738  
 **Course**: Cybersecurity & Networking Infrastructure  
 **Institution**: Belfast Metropolitan College  
 **Year**: 2025/2026 Final Year Project  

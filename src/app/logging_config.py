@@ -1,4 +1,4 @@
-"""Shared logging helpers for the AuroraEdge app."""
+"""Shared logging helpers for NorthFlux Security."""
 
 import os
 import sys
@@ -8,20 +8,25 @@ from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
+from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
+
 # Paths
-ROOT = Path(__file__).resolve().parents[2]
-LOG_DIR = ROOT / "logs"
+ROOT = PROJECT_ROOT
+LOG_DIR = LOGS_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Log files
-MAIN_LOG = LOG_DIR / "auroraedge.log"
+MAIN_LOG = LOG_DIR / "northflux.log"
 SCANNER_LOG = LOG_DIR / "scanner.log"
 DASHBOARD_LOG = LOG_DIR / "dashboard.log"
 AUDIT_LOG = LOG_DIR / "audit.log"
 ERROR_LOG = LOG_DIR / "errors.log"
 
 # Log levels from environment
-LOG_LEVEL = os.environ.get("AURORAEDGE_LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = os.environ.get(
+    "NORTHFLUX_LOG_LEVEL",
+    os.environ.get("AURORAEDGE_LOG_LEVEL", "INFO"),
+).upper()
 
 
 class ColoredFormatter(logging.Formatter):
@@ -162,19 +167,19 @@ def configure_module_loggers(formatter: logging.Formatter, level: int) -> None:
     """Configure loggers for specific modules."""
 
     # Scanner logger
-    scanner_logger = logging.getLogger("auroraedge.scanner")
+    scanner_logger = logging.getLogger("northflux.scanner")
     scanner_handler = create_rotating_handler(SCANNER_LOG, formatter)
     scanner_handler.setLevel(level)
     scanner_logger.addHandler(scanner_handler)
 
     # Dashboard logger
-    dashboard_logger = logging.getLogger("auroraedge.dashboard")
+    dashboard_logger = logging.getLogger("northflux.dashboard")
     dashboard_handler = create_rotating_handler(DASHBOARD_LOG, formatter)
     dashboard_handler.setLevel(level)
     dashboard_logger.addHandler(dashboard_handler)
 
     # Audit logger (always INFO level for important events)
-    audit_logger = logging.getLogger("auroraedge.audit")
+    audit_logger = logging.getLogger("northflux.audit")
     audit_handler = create_rotating_handler(AUDIT_LOG, formatter)
     audit_handler.setLevel(logging.INFO)
     audit_logger.addHandler(audit_handler)
@@ -185,7 +190,7 @@ def get_logger(name: str) -> logging.Logger:
     Get a configured logger for a module.
 
     Args:
-        name: Module name (will be prefixed with 'auroraedge.')
+        name: Module name (will be prefixed with 'northflux.')
 
     Returns:
         Configured logger instance
@@ -194,8 +199,8 @@ def get_logger(name: str) -> logging.Logger:
         logger = get_logger("scanner")
         logger.info("Scanning domain", extra={"domain": "example.com"})
     """
-    if not name.startswith("auroraedge."):
-        name = f"auroraedge.{name}"
+    if not name.startswith("northflux."):
+        name = f"northflux.{name}"
     return logging.getLogger(name)
 
 

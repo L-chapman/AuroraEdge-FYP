@@ -1,7 +1,9 @@
 # AuroraEdge Development Timeline
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## Project Information
-**Student**: Leon Chapman (50030738)  
+**Student**: Leon Chapman
 **Course**: Cybersecurity & Networking Infrastructure  
 **Institution**: Belfast Metropolitan College  
 **Project Span**: September 2025 - February 2026  

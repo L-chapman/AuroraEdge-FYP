@@ -1,5 +1,7 @@
 # AuroraEdge Scan Analysis Report
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 **Generated:** 2026-01-08 14:00:00 UTC
 **Total Domains Scanned:** 51
 

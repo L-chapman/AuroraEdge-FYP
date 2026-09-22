@@ -1,5 +1,7 @@
 ﻿# Stage 4 — Misconfiguration rules v1 + Rich console
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 Rules implemented:
 - R1_MX_MISSING (HIGH): no MX records
 - R2_SPF_MISSING (HIGH): SPF not published

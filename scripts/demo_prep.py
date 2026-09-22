@@ -3,7 +3,7 @@
 demo_prep.py &#8212; Prepare auroraedge.co.uk for a controlled authorised Auto-Fix demonstration.
 
 This script talks directly to the Cloudflare API and puts the demo domain
-into a known weak state so that the AuroraEdge auto-fixer has something real
+into a known weak state so that the NorthFlux auto-fixer has something real
 to repair during a live demo.
 
 Actions
@@ -16,14 +16,14 @@ Actions
 After running this, the domain should scan as Grade D with at least five
 violations (R3C_SPF_SOFTFAIL, R5B_DMARC_QUARANTINE, R5C_DMARC_PCT,
 R8_MTA_STS_MISSING, R12_NO_STRICT_POLICY).  You can then hit "Auto-Fix DNS"
-on the scan results page to let AuroraEdge repair everything automatically.
+on the scan results page to let NorthFlux repair everything automatically.
 
 Usage
 -----
     python scripts/demo_prep.py            # reset to the demo state
     python scripts/demo_prep.py --restore  # return to the normal strong state
 
-Credentials are read from the AuroraEdge SQLite database (state/auroraedge.db)
+Credentials are read from the NorthFlux Security SQLite database.
 so they stay consistent with the running server.
 """
 
@@ -76,15 +76,17 @@ RECORDS_TO_DELETE = [
 
 
 def _db_path() -> Path:
-    """Locate the AuroraEdge SQLite database."""
+    """Locate the NorthFlux database, with the legacy filename as fallback."""
     candidates = [
+        Path(__file__).resolve().parent.parent / "state" / "northflux.db",
+        Path("state/northflux.db"),
         Path(__file__).resolve().parent.parent / "state" / "auroraedge.db",
         Path("state/auroraedge.db"),
     ]
     for p in candidates:
         if p.exists():
             return p
-    sys.exit("ERROR: Could not find state/auroraedge.db &#8212; run from the project root.")
+    sys.exit("ERROR: Could not find state/northflux.db (or legacy auroraedge.db) &#8212; run from the project root.")
 
 
 def _get_cf_creds() -> tuple[str, str]:
@@ -225,7 +227,7 @@ def restore_records():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prepare auroraedge.co.uk DNS for the controlled AuroraEdge auto-fix demo"
+        description="Prepare auroraedge.co.uk DNS for the controlled NorthFlux auto-fix demo"
     )
     parser.add_argument(
         "--restore",

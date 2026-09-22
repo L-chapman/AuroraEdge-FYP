@@ -4,23 +4,57 @@ import sqlite3
 import json
 import logging
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import random
 
-logger = logging.getLogger("auroraedge.database")
+from app.runtime_paths import get_state_dir
 
-# Default database path relative to project root
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "state" / "auroraedge.db"
+logger = logging.getLogger("northflux.database")
 
 
-class AuroraDatabase:
-    """SQLite database for AuroraEdge scan results."""
+def _with_connection_lock(method):
+    """Serialise a method that directly uses the shared SQLite connection."""
+
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+# Default database path relative to project root. ``STATE_DIR`` remains public
+# for compatibility; _default_db_path() resolves the environment on each call
+# so tests and embedded deployments can select storage before first DB use.
+STATE_DIR = get_state_dir()
+DEFAULT_DB_PATH = STATE_DIR / "northflux.db"
+LEGACY_DB_PATH = STATE_DIR / "auroraedge.db"
+
+
+def _default_db_path() -> Path:
+    """Use the new database name while preserving existing local installations."""
+    state_dir = get_state_dir()
+    default_db_path = state_dir / "northflux.db"
+    legacy_db_path = state_dir / "auroraedge.db"
+    if default_db_path.exists() or not legacy_db_path.exists():
+        return default_db_path
+    logger.info(
+        "Using legacy database at %s; migrate it to %s when convenient",
+        legacy_db_path,
+        default_db_path,
+    )
+    return legacy_db_path
+
+
+class NorthFluxDatabase:
+    """SQLite database for NorthFlux Security scan results."""
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialise the database connection."""
-        self.db_path = db_path or DEFAULT_DB_PATH
+        self.db_path = db_path or _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn: Optional[sqlite3.Connection] = None
         self._init_db()
@@ -38,8 +72,15 @@ class AuroraDatabase:
         """Create database tables if they don't exist."""
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
+        # A single SQLite connection is shared by the FastAPI worker threads.
+        # SQLite permits that only when application code serialises every use
+        # of the connection; concurrent cursors on one connection can otherwise
+        # produce false empty reads or ``InterfaceError`` failures.
+        self._lock = threading.RLock()
+        self._data_generation = 0
 
         cursor = self.conn.cursor()
 
@@ -267,7 +308,7 @@ class AuroraDatabase:
 
     def _save_result_inner(
         self, scan_id: str, domain: str, result: Dict, evaluation: Dict,
-        combined: Dict, now: str
+        combined: Dict, now: str, *, commit: bool = True
     ):
         """Inner implementation of save_result (must be called under _lock)."""
         cursor = self.conn.cursor()
@@ -359,7 +400,8 @@ class AuroraDatabase:
                 (domain, now, now, score, score, score, grade),
             )
 
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def complete_scan(self, scan_id: str, domain_count: int):
         """Mark a scan as completed."""
@@ -376,59 +418,168 @@ class AuroraDatabase:
             raise
         logger.info("Completed scan %s with %d domains", scan_id, domain_count)
 
+    @_with_connection_lock
+    def get_data_generation(self) -> int:
+        """Return the generation used to invalidate in-flight scan persistence."""
+        return self._data_generation
+
+    def write_scan_results(
+        self,
+        entries: List[tuple[str, Dict[str, Any], Dict[str, Any]]],
+        *,
+        notes: str,
+        expected_generation: Optional[int] = None,
+        save_history: bool = True,
+        manage_domains: bool = False,
+        update_managed: bool = False,
+        managed_notes: str = "",
+    ) -> bool:
+        """Persist evaluated results as one locked database operation.
+
+        Destructive clear, history-delete, and managed-domain removal requests
+        increment ``_data_generation``. Results from a scan that started before
+        one of those actions are discarded instead of silently recreating data
+        after the operator was told deletion had finished.
+        """
+        with self._lock:
+            if (
+                expected_generation is not None
+                and expected_generation != self._data_generation
+            ):
+                return False
+
+            cursor = self.conn.cursor()
+            try:
+                scan_id = None
+                if save_history and entries:
+                    scan_id = (
+                        datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+                        + f"_{random.randint(0, 9999):04d}"
+                    )
+                    started_at = datetime.now(timezone.utc).isoformat()
+                    cursor.execute(
+                        "INSERT INTO scans (scan_id, started_at, notes) VALUES (?, ?, ?)",
+                        (scan_id, started_at, notes),
+                    )
+                    for domain, result, evaluation in entries:
+                        combined = {**result, **evaluation, "domain": domain}
+                        self._save_result_inner(
+                            scan_id,
+                            domain,
+                            result,
+                            evaluation,
+                            combined,
+                            datetime.now(timezone.utc).isoformat(),
+                            commit=False,
+                        )
+                    cursor.execute(
+                        "UPDATE scans SET completed_at = ?, domain_count = ? WHERE scan_id = ?",
+                        (datetime.now(timezone.utc).isoformat(), len(entries), scan_id),
+                    )
+
+                if manage_domains:
+                    added_at = datetime.now(timezone.utc).isoformat()
+                    for domain, _result, _evaluation in entries:
+                        cursor.execute(
+                            """INSERT INTO managed_domains (domain, added_at, notes)
+                               VALUES (?, ?, ?)
+                               ON CONFLICT(domain) DO UPDATE SET
+                                   is_active = 1,
+                                   notes = excluded.notes""",
+                            (domain.lower().strip(), added_at, managed_notes),
+                        )
+
+                if manage_domains or update_managed:
+                    for domain, _result, evaluation in entries:
+                        self._update_managed_domain_scan_inner(
+                            cursor,
+                            domain,
+                            evaluation.get("grade", "F"),
+                            evaluation.get("score", 0),
+                        )
+
+                self.conn.commit()
+                return True
+            except Exception as error:
+                # Keep the batch atomic even when data preparation fails before
+                # SQLite executes a statement (for example, JSON serialisation
+                # of an unexpected scanner value).  Leaving that transaction
+                # open would allow a later, unrelated commit to persist a
+                # partial scan row.
+                self.conn.rollback()
+                logger.error("Failed to persist scan results: %s", error)
+                raise
+
+    @contextmanager
+    def snapshot(self):
+        """Hold a consistent read snapshot across several database methods."""
+        with self._lock:
+            yield self
+
+    @_with_connection_lock
+    def ping(self) -> bool:
+        """Check that the shared connection can execute a trivial query."""
+        self.conn.execute("SELECT 1").fetchone()
+        return True
+
     def get_latest_results(self, limit: int = 100) -> List[Dict]:
         """Get the most recent scan results."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM results
-            ORDER BY scanned_at DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM results
+                ORDER BY scanned_at DESC
+                LIMIT ?
+            """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def get_domain_history(self, domain: str, limit: int = 20) -> List[Dict]:
         """Get historical scan results for a specific domain."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM results
-            WHERE domain = ?
-            ORDER BY scanned_at DESC
-            LIMIT ?
-        """,
-            (domain, limit),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM results
+                WHERE domain = ?
+                ORDER BY scanned_at DESC
+                LIMIT ?
+            """,
+                (domain, limit),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def get_scan_results(self, scan_id: str) -> List[Dict]:
         """Get all results from a specific scan."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM results
-            WHERE scan_id = ?
-            ORDER BY domain
-        """,
-            (scan_id,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM results
+                WHERE scan_id = ?
+                ORDER BY domain
+            """,
+                (scan_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def get_scans(self, limit: int = 50) -> List[Dict]:
         """Get list of recent scans."""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM scans
-            ORDER BY started_at DESC
-            LIMIT ?
-        """,
-            (limit,),
-        )
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM scans
+                ORDER BY started_at DESC
+                LIMIT ?
+            """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
+    @_with_connection_lock
     def get_statistics(self) -> Dict:
         """Get aggregate statistics across all scans."""
         cursor = self.conn.cursor()
@@ -501,6 +652,7 @@ class AuroraDatabase:
             "top_violations": top_violations,
         }
 
+    @_with_connection_lock
     def get_domains_by_grade(self, grade: str) -> List[Dict]:
         """Get all domains with a specific grade from their latest scan."""
         cursor = self.conn.cursor()
@@ -515,6 +667,7 @@ class AuroraDatabase:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    @_with_connection_lock
     def get_improvement_candidates(self, max_score: int = 70) -> List[Dict]:
         """Get domains that need improvement (low scores)."""
         cursor = self.conn.cursor()
@@ -529,6 +682,7 @@ class AuroraDatabase:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    @_with_connection_lock
     def close(self):
         """Close database connection."""
         if self.conn:
@@ -539,6 +693,7 @@ class AuroraDatabase:
     # Managed Domains (SME onboarding)
     # =========================================================================
 
+    @_with_connection_lock
     def add_managed_domain(self, domain: str, notes: str = "") -> Dict:
         """Add a domain for continuous monitoring."""
         cursor = self.conn.cursor()
@@ -561,6 +716,30 @@ class AuroraDatabase:
             self.conn.commit()
             return {"ok": True, "domain": domain, "reactivated": True}
 
+    def add_managed_domain_if_generation(
+        self,
+        domain: str,
+        notes: str,
+        expected_generation: int,
+    ) -> bool:
+        """Add/reactivate a domain unless scan data was cleared meanwhile."""
+        with self._lock:
+            if expected_generation != self._data_generation:
+                return False
+            cursor = self.conn.cursor()
+            now = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                """INSERT INTO managed_domains (domain, added_at, notes)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(domain) DO UPDATE SET
+                       is_active = 1,
+                       notes = excluded.notes""",
+                (domain.lower().strip(), now, notes),
+            )
+            self.conn.commit()
+            return True
+
+    @_with_connection_lock
     def remove_managed_domain(self, domain: str) -> bool:
         """Soft-delete a managed domain (deactivate)."""
         cursor = self.conn.cursor()
@@ -569,8 +748,15 @@ class AuroraDatabase:
             (domain.lower().strip(),),
         )
         self.conn.commit()
-        return cursor.rowcount > 0
+        removed = cursor.rowcount > 0
+        if removed:
+            # A monitoring/onboarding scan that started before this removal
+            # must not reactivate or update the domain after the operator has
+            # been told it was removed.
+            self._data_generation += 1
+        return removed
 
+    @_with_connection_lock
     def get_managed_domains(self, active_only: bool = True) -> List[Dict]:
         """Get all managed domains."""
         cursor = self.conn.cursor()
@@ -589,33 +775,55 @@ class AuroraDatabase:
         try:
             with self._lock:
                 cursor = self.conn.cursor()
-                now = datetime.now(timezone.utc).isoformat()
-                # Store previous values for drift detection
-                cursor.execute(
-                    "SELECT last_grade, last_score FROM managed_domains WHERE domain = ?",
-                    (domain.lower().strip(),),
-                )
-                row = cursor.fetchone()
-                prev_grade = row["last_grade"] if row else None
-                prev_score = row["last_score"] if row else None
-
-                cursor.execute(
-                    """UPDATE managed_domains
-                       SET last_scan_at = ?, last_grade = ?, last_score = ?,
-                           previous_grade = ?, previous_score = ?
-                       WHERE domain = ?""",
-                    (now, grade, score, prev_grade, prev_score, domain.lower().strip()),
+                previous = self._update_managed_domain_scan_inner(
+                    cursor, domain, grade, score
                 )
                 self.conn.commit()
         except sqlite3.Error as e:
             logger.error("Failed to update managed domain %s: %s", domain, e)
             raise
-        return {"previous_grade": prev_grade, "previous_score": prev_score}
+        return previous
+
+    def _update_managed_domain_scan_inner(
+        self,
+        cursor: sqlite3.Cursor,
+        domain: str,
+        grade: str,
+        score: int,
+    ) -> Dict[str, Any]:
+        """Update managed-domain metadata inside the caller's lock/transaction."""
+        clean_domain = domain.lower().strip()
+        cursor.execute(
+            "SELECT last_grade, last_score FROM managed_domains WHERE domain = ?",
+            (clean_domain,),
+        )
+        row = cursor.fetchone()
+        previous_grade = row["last_grade"] if row else None
+        previous_score = row["last_score"] if row else None
+        cursor.execute(
+            """UPDATE managed_domains
+               SET last_scan_at = ?, last_grade = ?, last_score = ?,
+                   previous_grade = ?, previous_score = ?
+               WHERE domain = ?""",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                grade,
+                score,
+                previous_grade,
+                previous_score,
+                clean_domain,
+            ),
+        )
+        return {
+            "previous_grade": previous_grade,
+            "previous_score": previous_score,
+        }
 
     # =========================================================================
     # Settings
     # =========================================================================
 
+    @_with_connection_lock
     def get_setting(self, key: str, default: str = "") -> str:
         """Get a setting value."""
         cursor = self.conn.cursor()
@@ -639,14 +847,27 @@ class AuroraDatabase:
             logger.error("Failed to set setting %s: %s", key, e)
             raise
 
+    def delete_setting(self, key: str) -> bool:
+        """Delete one setting, returning whether a row was removed."""
+        try:
+            with self._lock:
+                cursor = self.conn.cursor()
+                cursor.execute("DELETE FROM settings WHERE key = ?", (key,))
+                removed = cursor.rowcount > 0
+                self.conn.commit()
+                return removed
+        except sqlite3.Error as e:
+            logger.error("Failed to delete setting %s: %s", key, e)
+            raise
+
     def clear_scan_data(self):
         """Clear all scan-related data (scans, results, domains, managed_domains, alerts).
 
-        Preserves settings (Cloudflare credentials, org name, etc.).
-        Called on server startup so each launch begins with a clean slate.
+        Preserves application settings. Production credentials should be
+        supplied through the runtime environment rather than this database.
         """
-        try:
-            with self._lock:
+        with self._lock:
+            try:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM results")
                 cursor.execute("DELETE FROM scans")
@@ -654,9 +875,12 @@ class AuroraDatabase:
                 cursor.execute("DELETE FROM managed_domains")
                 cursor.execute("DELETE FROM alerts")
                 self.conn.commit()
-            logger.info("Cleared all scan data for fresh start")
-        except sqlite3.Error as e:
-            logger.error("Failed to clear scan data: %s", e)
+                self._data_generation += 1
+            except Exception as error:
+                self.conn.rollback()
+                logger.error("Failed to clear scan data: %s", error)
+                raise
+        logger.info("Cleared all scan data for fresh start")
 
     def delete_domain_history(self, domain: str) -> int:
         """Delete all scan history for a specific domain.
@@ -664,20 +888,39 @@ class AuroraDatabase:
         Returns the number of result rows deleted.
         """
         d = domain.lower().strip()
-        try:
-            with self._lock:
+        with self._lock:
+            try:
                 cursor = self.conn.cursor()
                 cursor.execute("DELETE FROM results WHERE domain = ?", (d,))
                 deleted = cursor.rowcount
                 cursor.execute("DELETE FROM domains WHERE domain = ?", (d,))
                 cursor.execute("DELETE FROM alerts WHERE domain = ?", (d,))
+                cursor.execute(
+                    """UPDATE managed_domains
+                       SET last_scan_at = NULL, last_grade = NULL, last_score = NULL,
+                           previous_grade = NULL, previous_score = NULL
+                       WHERE domain = ?""",
+                    (d,),
+                )
+                cursor.execute(
+                    """DELETE FROM scans
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM results WHERE results.scan_id = scans.scan_id
+                       )"""
+                )
                 self.conn.commit()
-            logger.info("Deleted %d history records for %s", deleted, d)
-            return deleted
-        except sqlite3.Error as e:
-            logger.error("Failed to delete history for %s: %s", d, e)
-            raise
+                # Treat domain-history deletion like the global clear for
+                # concurrency purposes.  Otherwise an earlier in-flight scan
+                # can silently recreate the history moments after deletion.
+                self._data_generation += 1
+            except Exception as error:
+                self.conn.rollback()
+                logger.error("Failed to delete history for %s: %s", d, error)
+                raise
+        logger.info("Deleted %d history records for %s", deleted, d)
+        return deleted
 
+    @_with_connection_lock
     def get_all_settings(self) -> Dict[str, str]:
         """Get all settings as a dictionary."""
         cursor = self.conn.cursor()
@@ -690,11 +933,16 @@ class AuroraDatabase:
 
     def create_alert(
         self, domain: str, alert_type: str, severity: str,
-        message: str, details: str = ""
+        message: str, details: str = "", expected_generation: Optional[int] = None
     ) -> int:
         """Create a new alert."""
         try:
             with self._lock:
+                if (
+                    expected_generation is not None
+                    and expected_generation != self._data_generation
+                ):
+                    return 0
                 cursor = self.conn.cursor()
                 now = datetime.now(timezone.utc).isoformat()
                 cursor.execute(
@@ -708,6 +956,7 @@ class AuroraDatabase:
             logger.error("Failed to create alert for %s: %s", domain, e)
             raise
 
+    @_with_connection_lock
     def get_alerts(
         self, unacknowledged_only: bool = True, limit: int = 50
     ) -> List[Dict]:
@@ -742,6 +991,7 @@ class AuroraDatabase:
             logger.error("Failed to acknowledge alert %d: %s", alert_id, e)
             raise
 
+    @_with_connection_lock
     def get_alert_count(self) -> int:
         """Get count of unacknowledged alerts."""
         cursor = self.conn.cursor()
@@ -749,17 +999,21 @@ class AuroraDatabase:
         return cursor.fetchone()["c"]
 
 
+# Compatibility alias for integrations written before the product rename.
+AuroraDatabase = NorthFluxDatabase
+
+
 # Singleton instance for convenience
-_db_instance: Optional[AuroraDatabase] = None
+_db_instance: Optional[NorthFluxDatabase] = None
 _db_lock = threading.Lock()
 
 
-def get_database(db_path: Optional[Path] = None) -> AuroraDatabase:
+def get_database(db_path: Optional[Path] = None) -> NorthFluxDatabase:
     """Get or create the database instance (thread-safe)."""
     global _db_instance
     if _db_instance is None:
         with _db_lock:
             # Double-checked locking
             if _db_instance is None:
-                _db_instance = AuroraDatabase(db_path)
+                _db_instance = NorthFluxDatabase(db_path)
     return _db_instance

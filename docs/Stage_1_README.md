@@ -1,5 +1,7 @@
 ﻿# Stage 1 — DNS Scanner Skeleton (Granny pace)
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 Checks **SPF, MX, DMARC** for one or more domains and writes results to `reports/indexed/`.
 
 ## 1) Install dependencies

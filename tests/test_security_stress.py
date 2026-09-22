@@ -1,5 +1,5 @@
 """
-AuroraEdge Security, Stress & Edge-Case Test Suite
+NorthFlux Security, Stress & Edge-Case Test Suite
 ===================================================
 Covers:
   1. Authentication bypass attempts
@@ -59,8 +59,9 @@ class TestAuthentication:
     @pytest.mark.parametrize("method,path", PROTECTED)
     def test_endpoints_require_auth(self, method, path):
         """Every protected endpoint must return 401 without a valid token."""
-        r = client.request(method, path)
-        assert r.status_code == 401, f"{method} {path} returned {r.status_code} without auth"
+        r = client.request(method, path, follow_redirects=False)
+        expected = 401 if path.startswith("/api/") else 303
+        assert r.status_code == expected, f"{method} {path} returned {r.status_code} without auth"
 
     def test_wrong_token_rejected(self):
         r = client.get("/api/runs", headers={"Authorization": "Bearer WRONG"})
@@ -369,7 +370,7 @@ class TestOwnershipEnforcement:
                 r = client.post(
                     "/api/apply-fix",
                     headers={**AUTH, "Content-Type": "application/json"},
-                    json={"domain": "belfastmet.ac.uk"},
+                    json={"domain": "example.net"},
                 )
                 assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
                 assert "does not belong" in r.json().get("detail", "")
@@ -633,15 +634,15 @@ class TestPrivacyFooter:
 
     def test_privacy_notice_in_dashboard(self):
         r = client.get("/", headers=AUTH)
-        assert "Public DNS checks only" in r.text
+        assert "Public DNS, HTTPS &amp; SMTP posture checks" in r.text
 
     def test_privacy_notice_in_domains(self):
         r = client.get("/domains", headers=AUTH)
-        assert "Public DNS checks only" in r.text
+        assert "Public DNS, HTTPS &amp; SMTP posture checks" in r.text
 
     def test_privacy_notice_in_generator(self):
         r = client.get("/generator", headers=AUTH)
-        assert "Public DNS checks only" in r.text
+        assert "Public DNS, HTTPS &amp; SMTP posture checks" in r.text
 
 
 # =========================================================================
@@ -653,7 +654,7 @@ class TestCustom404Page:
     def test_404_returns_html(self):
         r = client.get("/nonexistent-page-xyz", headers=AUTH)
         assert r.status_code == 404
-        assert "AuroraEdge" in r.text
+        assert "NorthFlux Security" in r.text
         assert "404" in r.text
 
     def test_404_has_back_link(self):

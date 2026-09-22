@@ -1,0 +1,43 @@
+services:
+  northflux:
+    build:
+      context: .
+    image: northflux-security:local
+    container_name: northflux-security
+    restart: unless-stopped
+    init: true
+    environment:
+      NORTHFLUX_ENV: production
+      NORTHFLUX_LOG_LEVEL: ${NORTHFLUX_LOG_LEVEL:-INFO}
+      DASH_TOKEN: ${DASH_TOKEN:?Set DASH_TOKEN in the Compose environment}
+      NORTHFLUX_PUBLIC_ORIGIN: ${NORTHFLUX_PUBLIC_ORIGIN:-}
+      CF_API_TOKEN: ${CF_API_TOKEN:-}
+      CF_ZONE_ID: ${CF_ZONE_ID:-}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-}
+    ports:
+      - "127.0.0.1:${NORTHFLUX_PORT:-8080}:8080"
+    volumes:
+      - northflux-state:/app/state
+      - northflux-reports:/app/reports
+      - northflux-logs:/app/logs
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  northflux-state:
+    name: northflux-state
+  northflux-reports:
+    name: northflux-reports
+  northflux-logs:
+    name: northflux-logs

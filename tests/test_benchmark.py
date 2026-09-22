@@ -1,24 +1,24 @@
 """
-AuroraEdge Benchmark Tests
+NorthFlux Security Benchmark Tests
 Tests for performance benchmarks and tool comparison data.
 
 These tests validate:
-- Tool comparison data structure (FYP Objective: Compare to similar tools)
+- Legacy tool-comparison data compatibility
 - Scoring system accuracy (0-100 range, A+ to F grades)
-- Performance metrics for academic reporting
+- Performance expectations for operational reporting
 """
 
 import time
 from app.rules import evaluate, SCORE_WEIGHTS, ALL_RULES
-from app.dns_fix import TOOL_COMPARISON, generate_comparison_report
+from app.dns_fix import COMPARISON_DISCLAIMER, TOOL_COMPARISON, generate_comparison_report
 
 
 class TestToolComparison:
-    """Tests for tool comparison data (FYP Objective 6)."""
+    """Compatibility tests for the labelled legacy comparison snapshot."""
 
     def test_tool_comparison_has_required_tools(self):
         """Verify comparison includes required competitor tools."""
-        required_tools = ["AuroraEdge", "OnDMARC", "EasyDMARC", "dmarcian", "MXToolbox"]
+        required_tools = ["NorthFlux Security", "OnDMARC", "EasyDMARC", "dmarcian", "MXToolbox"]
         for tool in required_tools:
             assert tool in TOOL_COMPARISON, f"Missing tool: {tool}"
 
@@ -36,28 +36,30 @@ class TestToolComparison:
             for feature in required_features:
                 assert feature in data, f"{tool} missing feature: {feature}"
 
-    def test_auroraedge_has_all_features(self):
-        """Verify AuroraEdge implements all checked features."""
-        aurora = TOOL_COMPARISON.get("AuroraEdge", {})
-        checks = aurora.get("checks", [])
+    def test_northflux_has_all_features(self):
+        """Verify NorthFlux Security implements all checked features."""
+        northflux = TOOL_COMPARISON.get("NorthFlux Security", {})
+        checks = northflux.get("checks", [])
         assert "SPF" in checks
         assert "DKIM" in checks
         assert "DMARC" in checks
         assert "MTA-STS" in checks
-        assert aurora.get("auto_fix") is True
-        assert aurora.get("api") is True
+        assert northflux.get("auto_fix") is True
+        assert northflux.get("api") is True
 
     def test_comparison_report_generation(self):
         """Verify comparison report generates valid markdown."""
         report = generate_comparison_report()
         assert "# Email Security Tool Comparison" in report
+        assert COMPARISON_DISCLAIMER in report
         assert "| Feature |" in report
-        assert "AuroraEdge" in report
+        assert "NorthFlux Security" in report
+        assert "Open Source / Academic" not in report
         assert len(report) > 500  # Should be substantial
 
 
 class TestScoringSystem:
-    """Tests for the scoring system accuracy (FYP Objective: Security scores)."""
+    """Tests for the documented security scoring model."""
 
     def test_score_weights_are_defined(self):
         """Verify all severity levels have scoring weights."""
@@ -112,7 +114,7 @@ class TestScoringSystem:
         assert ev["grade"] in ("A+", "A", "B", "C", "D", "F")
 
     def test_grade_thresholds(self):
-        """Verify grade boundaries match academic standards."""
+        """Verify the documented NorthFlux grade boundaries."""
         # Test exact boundary scores
         test_cases = [
             (100, "A+"),
@@ -153,7 +155,7 @@ class TestRulesEngine:
 
     def test_all_rules_registered(self):
         """Verify all rules are registered in ALL_RULES."""
-        # Minimum expected rules based on FYP spec
+        # Minimum rule-set breadth expected by the product contract.
         assert len(ALL_RULES) >= 10, "Should have at least 10 security rules"
 
     def test_rules_return_correct_format(self):
@@ -172,7 +174,7 @@ class TestRulesEngine:
 
 
 class TestPerformanceBenchmarks:
-    """Performance benchmarks for academic reporting."""
+    """Performance benchmarks for operational reporting."""
 
     def test_evaluate_performance(self):
         """Benchmark: evaluate() should complete in under 10ms."""

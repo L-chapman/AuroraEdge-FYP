@@ -1,10 +1,10 @@
 <#
-AuroraEdge demo script for local testing.
+NorthFlux Security demo script for local testing.
 Use this after START.bat if you want a simple menu instead of typing commands.
 #>
 
 # Set console encoding and colours
-$Host.UI.RawUI.WindowTitle = "AuroraEdge Demo"
+$Host.UI.RawUI.WindowTitle = "NorthFlux Security Demo"
 $ErrorActionPreference = "Stop"
 
 # Project paths
@@ -22,14 +22,14 @@ function Write-Header {
     Write-Host "  ╔═══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
     Write-Host "  ║                                                               ║" -ForegroundColor Cyan
     Write-Host "  ║   " -ForegroundColor Cyan -NoNewline
-    Write-Host "🛡️  AuroraEdge Security" -ForegroundColor White -NoNewline
+    Write-Host "🛡️  NorthFlux Security" -ForegroundColor White -NoNewline
     Write-Host "                    ║" -ForegroundColor Cyan
     Write-Host "  ║                                                               ║" -ForegroundColor Cyan
     Write-Host "  ║   " -ForegroundColor Cyan -NoNewline
     Write-Host "Interactive Demo & Testing Interface" -ForegroundColor Gray -NoNewline
     Write-Host "                     ║" -ForegroundColor Cyan
     Write-Host "  ║   " -ForegroundColor Cyan -NoNewline
-    Write-Host "Leon Chapman (50030738) - Belfast Met FYP" -ForegroundColor DarkGray -NoNewline
+    Write-Host "Created by Leon Chapman" -ForegroundColor DarkGray -NoNewline
     Write-Host "                ║" -ForegroundColor Cyan
     Write-Host "  ║                                                               ║" -ForegroundColor Cyan
     Write-Host "  ╚═══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
@@ -202,7 +202,7 @@ function Run-QuickDemo {
     # Make a temporary file with demo domains
     $tempFile = [System.IO.Path]::GetTempFileName()
     @"
-# AuroraEdge Quick Demo - 5 Well-Known Domains
+# NorthFlux Security Quick Demo - 5 Well-Known Domains
 google.com
 microsoft.com
 github.com
@@ -221,7 +221,7 @@ cloudflare.com
 
 function Launch-Dashboard {
     Write-Host ""
-    Write-Info "Launching AuroraEdge Dashboard..."
+    Write-Info "Launching NorthFlux Security Dashboard..."
     Write-Host ""
     Write-Host "  Dashboard will be available at: " -NoNewline
     Write-Host "http://127.0.0.1:8080" -ForegroundColor Green

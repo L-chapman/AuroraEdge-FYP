@@ -1,5 +1,7 @@
 # Stage 9 - SQLite Database + Persistent Scan History
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## Overview
 Stage 9 deliverable: Implemented SQLite database persistence for storing scan results, enabling historical tracking and trend analysis.
 

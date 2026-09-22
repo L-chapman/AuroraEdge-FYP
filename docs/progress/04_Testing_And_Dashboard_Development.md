@@ -1,5 +1,7 @@
 # Testing & Dashboard Development Progress Record
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../../README.md) and [`testing guide`](../TESTING.md).
+
 ## Stage 5 - Transport Security (28 Oct - 03 Nov 2025)
 **Stage 5**: Transport Security (MTA-STS & TLS-RPT)
 

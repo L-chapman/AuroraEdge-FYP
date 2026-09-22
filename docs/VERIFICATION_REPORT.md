@@ -1,5 +1,7 @@
 # AuroraEdge Security — Spec Verification Report (Updated Apr 2026)
 
+> **Historical verification snapshot:** This report verifies the AuroraEdge final-year-project submission as it existed in April 2026. Its counts, routes, links, and readiness conclusions are not the NorthFlux Security 4.0 release evidence. Use the current [`README`](../README.md), [`TESTING.md`](TESTING.md), and [`CHANGELOG`](../CHANGELOG.md).
+
 *Date:* 2026-04-14
 
 This report verifies the AuroraEdge repository against the **final project spec** in `docs/FYP_SPEC.md`. It aims to be clear for dissertation/assessment: traceability to implementation, evidence pointers, and a short gap analysis.

@@ -1,1 +1,0 @@
-domain,spf_present,spf_lookup_count,mx_present,mx_count,dmarc_present,dmarc_policy,dmarc_strength,dkim_present,dkim_selectors,dkim_algos,notes\nexample.com,True,0,True,1,True,reject,reject,True,amazonses,default,google,k1,k2,klaviyo,mail,mailchimp,mailgun,mandrill,mg,postfix,s1,s2,selector1,selector2,sendgrid,smtp,sparkpost,zoho,,

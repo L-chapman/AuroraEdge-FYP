@@ -1,10 +1,12 @@
 # AuroraEdge Integration Guide
 
+> **Historical integration notes:** This document is retained as final-year-project evidence and includes obsolete names, paths, environment variables, and deployment advice. Use the current [`INTEGRATIONS.md`](INTEGRATIONS.md) and [`DEPLOYMENT.md`](DEPLOYMENT.md) for NorthFlux Security 4.0.
+
 ## Overview
 
 This guide covers the optional integrations and deployment extras around AuroraEdge.
 
-You do **not** need everything in this document to run the project locally. For normal local setup, use `README.md` or `docs/TESTING_GUIDE.md` first.
+You do **not** need everything in this historical document to run the current product.
 
 ### Quick Navigation
 

@@ -1,5 +1,7 @@
 # Stage 14 - Interactive Test Hub + Demo Script
 
+> **Historical academic snapshot:** This file records the pre-migration AuroraEdge final-year project and may contain obsolete commands, paths, test counts, capabilities, or operating assumptions. It is not current NorthFlux Security 4.0 guidance. Use the current [`README`](../README.md) and [`testing guide`](TESTING.md).
+
 ## Overview
 Stage 14 added an interactive testing page for live domain scans and a demo script for evaluators.
 

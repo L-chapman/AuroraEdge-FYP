@@ -1,12 +1,13 @@
-"""Cloudflare-backed DNS fixing and audit logging for AuroraEdge."""
+"""Cloudflare-backed DNS fixing and audit logging for NorthFlux Security."""
 
 import os
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
-from pathlib import Path
 from logging.handlers import RotatingFileHandler
+
+from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
 
 # Optional requests import for Cloudflare API calls
 try:
@@ -17,7 +18,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 # Configure logging
-logger = logging.getLogger("auroraedge.dns_fix")
+logger = logging.getLogger("northflux.dns_fix")
 
 # Cloudflare API configuration
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
@@ -28,13 +29,13 @@ CF_API_KEY = os.environ.get("CF_API_KEY", "")
 CF_EMAIL = os.environ.get("CF_EMAIL", "")
 
 # Audit log path (rotated, max 2 MB, 3 backups)
-ROOT = Path(__file__).resolve().parents[2]
-AUDIT_LOG = ROOT / "logs" / "dns_audit.log"
+ROOT = PROJECT_ROOT
+AUDIT_LOG = LOGS_DIR / "dns_audit.log"
 AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
 _audit_handler = RotatingFileHandler(
     AUDIT_LOG, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
 )
-_audit_logger = logging.getLogger("auroraedge.dns_audit")
+_audit_logger = logging.getLogger("northflux.dns_audit")
 _audit_logger.addHandler(_audit_handler)
 _audit_logger.setLevel(logging.INFO)
 
@@ -154,7 +155,7 @@ class CloudflareDNS:
         meaningless DNS records in the wrong zone.
 
         Args:
-            domain: The domain to verify (e.g. "auroraedge.co.uk")
+            domain: The domain to verify (e.g. "example.com")
 
         Returns:
             Tuple of (is_owned, message)
@@ -182,14 +183,25 @@ class CloudflareDNS:
             f"or scan a domain within '{zone}'."
         )
 
-    def get_txt_record(self, name: str) -> Optional[Dict]:
-        """Get existing TXT record by name."""
+    def get_txt_records(self, name: str) -> List[Dict]:
+        """Get all TXT records for a name without assuming the first is ours."""
         url = f"{self.base_url}?type=TXT&name={name}"
         success, result = self._request("GET", url)
+        if success:
+            return list(result.get("result") or [])
+        return []
 
-        if success and result.get("result"):
-            return result["result"][0]
-        return None
+    def get_txt_record(self, name: str, content_prefix: str = "") -> Optional[Dict]:
+        """Get one TXT record, optionally selecting by protocol prefix."""
+        records = self.get_txt_records(name)
+        if content_prefix:
+            prefix = content_prefix.lower()
+            records = [
+                record
+                for record in records
+                if str(record.get("content", "")).strip().lower().startswith(prefix)
+            ]
+        return records[0] if records else None
 
     def create_or_update_txt(
         self, name: str, content: str, comment: str = ""
@@ -205,7 +217,22 @@ class CloudflareDNS:
         Returns:
             Tuple of (success, message)
         """
-        existing = self.get_txt_record(name)
+        ok, ownership_message = self._ensure_ownership(name)
+        if not ok:
+            return False, ownership_message
+
+        protocol_prefix = content.split(";", 1)[0].split(" ", 1)[0].strip().lower()
+        matching = [
+            record
+            for record in self.get_txt_records(name)
+            if str(record.get("content", "")).strip().lower().startswith(protocol_prefix)
+        ]
+        if len(matching) > 1:
+            return False, (
+                f"Refusing to update {name}: multiple {protocol_prefix} TXT records exist. "
+                "Resolve the duplicate records manually first."
+            )
+        existing = matching[0] if matching else None
         old_value = existing.get("content", "") if existing else ""
 
         data = {
@@ -214,7 +241,7 @@ class CloudflareDNS:
             "content": content,
             "ttl": 3600,  # 1 hour
             "comment": comment
-            or f"Created by AuroraEdge at {datetime.now(timezone.utc).isoformat()}",
+            or f"Created by NorthFlux Security at {datetime.now(timezone.utc).isoformat()}",
         }
 
         if existing:
@@ -276,7 +303,7 @@ class CloudflareDNS:
         spf_content = " ".join(spf_parts)
 
         return self.create_or_update_txt(
-            domain, spf_content, "SPF record - AuroraEdge auto-fix"
+            domain, spf_content, "SPF record - NorthFlux Security auto-fix"
         )
 
     def fix_dmarc(
@@ -309,30 +336,42 @@ class CloudflareDNS:
         if not ok:
             return False, msg
 
-        # Build DMARC record
-        dmarc_parts = ["v=DMARC1", f"p={policy}"]
+        dmarc_name = f"_dmarc.{domain}"
+        existing = self.get_txt_record(dmarc_name, "v=dmarc1")
+        preserved = {}
+        if existing:
+            for part in str(existing.get("content", "")).split(";"):
+                key, separator, value = part.strip().partition("=")
+                if separator and key:
+                    preserved[key.lower()] = value.strip()
+
+        # Update requested fields while retaining alignment and reporting tags.
+        preserved["v"] = "DMARC1"
+        preserved["p"] = policy
 
         if rua:
             if not rua.startswith("mailto:"):
                 rua = f"mailto:{rua}"
-            dmarc_parts.append(f"rua={rua}")
+            preserved["rua"] = rua
 
         if ruf:
             if not ruf.startswith("mailto:"):
                 ruf = f"mailto:{ruf}"
-            dmarc_parts.append(f"ruf={ruf}")
+            preserved["ruf"] = ruf
 
-        if pct < 100:
-            dmarc_parts.append(f"pct={pct}")
+        if pct < 100 or "pct" in preserved:
+            preserved["pct"] = str(pct)
 
         if sp:
-            dmarc_parts.append(f"sp={sp}")
+            preserved["sp"] = sp
 
-        dmarc_content = "; ".join(dmarc_parts)
-        dmarc_name = f"_dmarc.{domain}"
+        preferred_order = ["v", "p", "sp", "pct", "rua", "ruf", "adkim", "aspf", "fo", "rf", "ri"]
+        ordered_keys = [key for key in preferred_order if key in preserved]
+        ordered_keys.extend(key for key in preserved if key not in ordered_keys)
+        dmarc_content = "; ".join(f"{key}={preserved[key]}" for key in ordered_keys)
 
         return self.create_or_update_txt(
-            dmarc_name, dmarc_content, "DMARC record - AuroraEdge auto-fix"
+            dmarc_name, dmarc_content, "DMARC record - NorthFlux Security auto-fix"
         )
 
     def fix_tls_rpt(self, domain: str, rua: str) -> Tuple[bool, str]:
@@ -357,7 +396,7 @@ class CloudflareDNS:
         tlsrpt_name = f"_smtp._tls.{domain}"
 
         return self.create_or_update_txt(
-            tlsrpt_name, tlsrpt_content, "TLS-RPT record - AuroraEdge auto-fix"
+            tlsrpt_name, tlsrpt_content, "TLS-RPT record - NorthFlux Security auto-fix"
         )
 
     def fix_mta_sts_dns(self, domain: str, policy_id: str = None) -> Tuple[bool, str]:
@@ -384,7 +423,7 @@ class CloudflareDNS:
         mtasts_name = f"_mta-sts.{domain}"
 
         return self.create_or_update_txt(
-            mtasts_name, mtasts_content, "MTA-STS DNS record - AuroraEdge auto-fix"
+            mtasts_name, mtasts_content, "MTA-STS DNS record - NorthFlux Security auto-fix"
         )
 
     # -----------------------------------------------------------------
@@ -506,6 +545,9 @@ class CloudflareDNS:
         Returns:
             Tuple of (success, message)
         """
+        ok, ownership_message = self._ensure_ownership(name)
+        if not ok:
+            return False, ownership_message
         existing = self.get_cname_record(name)
         old_value = existing.get("content", "") if existing else ""
 
@@ -516,7 +558,7 @@ class CloudflareDNS:
             "ttl": 3600,
             "proxied": proxied,
             "comment": comment
-            or f"Created by AuroraEdge at {datetime.now(timezone.utc).isoformat()}",
+            or f"Created by NorthFlux Security at {datetime.now(timezone.utc).isoformat()}",
         }
 
         if existing:
@@ -572,7 +614,7 @@ class CloudflareDNS:
             "ttl": 1,  # Auto TTL when proxied
             "proxied": proxied,
             "comment": comment
-            or f"Created by AuroraEdge at {datetime.now(timezone.utc).isoformat()}",
+            or f"Created by NorthFlux Security at {datetime.now(timezone.utc).isoformat()}",
         }
 
         if existing:
@@ -604,16 +646,12 @@ class CloudflareDNS:
 
     def fix_dkim(self, domain: str, scan_result: Dict) -> Tuple[bool, str]:
         """
-        Automatically configure DKIM DNS records based on detected email provider.
+        Refuse to guess tenant-specific DKIM values from MX records.
 
-        For Microsoft 365: Creates CNAME records (selector1, selector2) pointing
-        to Microsoft's DKIM signing infrastructure. The target is derived from
-        the MX record pattern.
-
-        For Google Workspace: Creates a CNAME record for the 'google' selector
-        pointing to dkim.googlehosted.com.
-
-        For Proton Mail: Creates CNAME records pointing to Proton's DKIM servers.
+        MX records can identify the likely email provider, but they do not expose
+        the selector targets or public keys assigned to this tenant. Writing a
+        guessed record can silently break DKIM, so NorthFlux returns operator
+        guidance instead of changing DNS.
 
         Args:
             domain: The domain name
@@ -622,82 +660,23 @@ class CloudflareDNS:
         Returns:
             Tuple of (success, message)
         """
+        ok, msg = self._ensure_ownership(domain)
+        if not ok:
+            return False, msg
+
         mx_hosts = scan_result.get("mx_hosts", "")
         provider = self.detect_email_provider(mx_hosts)
-        provider_key = provider.get("provider", "unknown")
-
-        if provider_key == "unknown":
+        if provider.get("provider", "unknown") != "unknown":
             return False, (
-                "Could not detect email provider from MX records. "
-                "DKIM requires provider-specific configuration. "
-                f"MX hosts found: {mx_hosts or 'none'}"
+                f"Detected {provider.get('name', 'the mail provider')}, but DKIM records "
+                "must be copied from that provider's admin console and reviewed manually."
             )
 
-        results = []
-        all_ok = True
-
-        if provider_key == "microsoft365":
-            # Microsoft 365 DKIM uses two CNAME records
-            domain_guid = provider.get("domain_guid", domain.replace(".", "-"))
-            # Target format: selector1-<domainGUID>._domainkey.<domainGUID>.onmicrosoft.com
-            # This covers the most common M365 setup
-            for selector in ["selector1", "selector2"]:
-                cname_name = f"{selector}._domainkey.{domain}"
-                cname_target = f"{selector}-{domain_guid}._domainkey.{domain_guid}.onmicrosoft.com"
-                ok, msg = self.create_or_update_cname(
-                    cname_name, cname_target,
-                    f"DKIM {selector} for Microsoft 365 - AuroraEdge auto-fix"
-                )
-                results.append(f"{selector}: {msg}")
-                if not ok:
-                    all_ok = False
-
-        elif provider_key == "google":
-            # Google Workspace DKIM uses a CNAME pointing to dkim.googlehosted.com
-            cname_name = f"google._domainkey.{domain}"
-            cname_target = f"google._domainkey.{domain}.{provider.get('cname_suffix', 'dkim.googlehosted.com')}"
-            ok, msg = self.create_or_update_cname(
-                cname_name, cname_target,
-                "DKIM for Google Workspace - AuroraEdge auto-fix"
-            )
-            results.append(msg)
-            if not ok:
-                all_ok = False
-
-        elif provider_key == "protonmail":
-            # Proton Mail DKIM uses CNAME records
-            for i, selector in enumerate(provider.get("selectors", ["protonmail"]), 1):
-                cname_name = f"{selector}._domainkey.{domain}"
-                cname_target = f"{selector}.domainkey.{domain.replace('.', '-')}.crypto"
-                ok, msg = self.create_or_update_cname(
-                    cname_name, cname_target,
-                    f"DKIM {selector} for Proton Mail - AuroraEdge auto-fix"
-                )
-                results.append(f"{selector}: {msg}")
-                if not ok:
-                    all_ok = False
-
-        else:
-            # Generic provider &#8212; create TXT record stub with known selector
-            selectors = provider.get("selectors", ["default"])
-            for selector in selectors:
-                # We can create the _domainkey subdomain but the value
-                # depends on the provider generating the key
-                return False, (
-                    f"Detected email provider: {provider.get('name', 'Unknown')}. "
-                    f"DKIM selector '{selector}' requires the public key from your "
-                    f"email provider's admin console. AuroraEdge created the DNS "
-                    f"record name ({selector}._domainkey.{domain}) &#8212; paste the "
-                    f"public key value in your provider's DKIM setup."
-                )
-
-        summary = f"DKIM auto-fix for {provider.get('name', 'Unknown')}: {'; '.join(results)}"
-        if all_ok:
-            logger.info(summary)
-            return True, summary
-        else:
-            logger.warning(summary)
-            return False, summary
+        return False, (
+            "Could not detect email provider from MX records. "
+            "DKIM requires provider-specific configuration. "
+            f"MX hosts found: {mx_hosts or 'none'}"
+        )
 
     # -----------------------------------------------------------------
     # Cloudflare Workers &#8212; MTA-STS HTTPS Policy Hosting
@@ -759,8 +738,8 @@ class CloudflareDNS:
         # Worker script that serves the MTA-STS policy
         # Uses Service Worker (classic) syntax for application/javascript upload
         worker_script = f"""
-// AuroraEdge MTA-STS Policy Worker for {domain}
-// Auto-deployed by AuroraEdge DNS Auto-Fix
+// NorthFlux Security MTA-STS Policy Worker for {domain}
+// Auto-deployed by NorthFlux Security DNS Auto-Fix
 // Serves /.well-known/mta-sts.txt for MTA-STS compliance
 
 addEventListener('fetch', function(event) {{
@@ -776,7 +755,7 @@ async function handleRequest(request) {{
       headers: {{
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'public, max-age=86400',
-        'X-AuroraEdge': 'mta-sts-worker',
+        'X-NorthFlux': 'mta-sts-worker',
       }},
     }});
   }}
@@ -785,7 +764,7 @@ async function handleRequest(request) {{
 """.strip()
 
         # Sanitise the worker name (only lowercase alphanumeric and hyphens)
-        worker_name = f"auroraedge-mta-sts-{domain.replace('.', '-')}"
+        worker_name = f"northflux-mta-sts-{domain.replace('.', '-')}"
 
         steps_done = []
         steps_failed = []
@@ -796,7 +775,7 @@ async function handleRequest(request) {{
         a_name = f"mta-sts.{domain}"
         ok, msg = self.create_or_update_a(
             a_name, "192.0.2.1", proxied=True,
-            comment=f"MTA-STS Worker endpoint - AuroraEdge auto-fix"
+            comment="MTA-STS Worker endpoint - NorthFlux Security auto-fix"
         )
         if ok:
             steps_done.append(f"DNS A record: {a_name} (proxied)")
@@ -994,7 +973,7 @@ async function handleRequest(request) {{
                         "current": spf_raw,
                         "recommended": hardened,
                         "auto_fix": lambda h=hardened: self.create_or_update_txt(
-                            domain, h, "SPF hardened to -all - AuroraEdge auto-fix"
+                            domain, h, "SPF hardened to -all - NorthFlux Security auto-fix"
                         ),
                     }
                 )
@@ -1073,7 +1052,7 @@ async function handleRequest(request) {{
                     "priority": "WARN",
                     "description": f"Deploy Cloudflare Worker to serve MTA-STS policy at https://mta-sts.{domain}",
                     "current": "Not configured",
-                    "recommended": f"Cloudflare Worker serving /.well-known/mta-sts.txt",
+                    "recommended": "Cloudflare Worker serving /.well-known/mta-sts.txt",
                     "auto_fix": lambda mxh=mx_hosts: self.deploy_mta_sts_worker(domain, mxh),
                 }
             )
@@ -1131,17 +1110,25 @@ def get_cloudflare_client() -> Optional[CloudflareDNS]:
     return CloudflareDNS()
 
 
-# Comparison data for academic analysis
+# Legacy feature snapshot retained for compatibility with existing reports.
+# Vendor capabilities and commercial terms change frequently, so callers must
+# present this data with the disclaimer below and verify it before procurement.
+COMPARISON_DISCLAIMER = (
+    "Legacy illustrative snapshot only. Vendor capabilities, support, and pricing "
+    "change; verify current details with each vendor before making a purchasing "
+    "or security decision."
+)
+
 TOOL_COMPARISON = {
-    "AuroraEdge": {
-        "type": "Open Source / Academic",
+    "NorthFlux Security": {
+        "type": "Self-hosted beta",
         "checks": ["SPF", "DKIM", "DMARC", "MTA-STS", "TLS-RPT", "STARTTLS", "BIMI", "Blacklist/RBL"],
         "auto_fix": True,
         "api": True,
         "reporting": ["CSV", "Markdown", "JSON", "Database", "PDF"],
-        "cost": "Free",
+        "cost": "Software licence not yet selected; infrastructure costs apply",
         "deployment": "Self-hosted",
-        "unique": "Cloudflare auto-remediation, DNS record generator, score timeline, academic focus",
+        "unique": "Cloudflare remediation, DNS record generator, and score timeline",
     },
     "OnDMARC": {
         "type": "Commercial SaaS",
@@ -1149,7 +1136,7 @@ TOOL_COMPARISON = {
         "auto_fix": False,
         "api": True,
         "reporting": ["Dashboard", "PDF"],
-        "cost": "Subscription ($$$)",
+        "cost": "Verify with vendor",
         "deployment": "Cloud",
         "unique": "Managed service, enterprise support",
     },
@@ -1159,7 +1146,7 @@ TOOL_COMPARISON = {
         "auto_fix": False,
         "api": True,
         "reporting": ["Dashboard", "PDF", "Email"],
-        "cost": "Freemium / Subscription",
+        "cost": "Verify with vendor",
         "deployment": "Cloud",
         "unique": "BIMI support, threat intelligence",
     },
@@ -1169,7 +1156,7 @@ TOOL_COMPARISON = {
         "auto_fix": False,
         "api": True,
         "reporting": ["Dashboard", "XML"],
-        "cost": "Subscription",
+        "cost": "Verify with vendor",
         "deployment": "Cloud",
         "unique": "DMARC-focused, detailed analytics",
     },
@@ -1179,7 +1166,7 @@ TOOL_COMPARISON = {
         "auto_fix": False,
         "api": True,
         "reporting": ["Web", "Email Alerts"],
-        "cost": "Free / Pro subscription",
+        "cost": "Verify with vendor",
         "deployment": "Cloud",
         "unique": "Blacklist monitoring, diagnostics",
     },
@@ -1187,15 +1174,17 @@ TOOL_COMPARISON = {
 
 
 def generate_comparison_report() -> str:
-    """Generate markdown comparison report for academic use."""
+    """Generate a labelled legacy feature-snapshot report."""
     lines = [
         "# Email Security Tool Comparison",
         "",
         f"*Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*",
         "",
+        f"> **Important:** {COMPARISON_DISCLAIMER}",
+        "",
         "## Feature Matrix",
         "",
-        "| Feature | AuroraEdge | OnDMARC | EasyDMARC | dmarcian | MXToolbox |",
+        "| Feature | NorthFlux Security | OnDMARC | EasyDMARC | dmarcian | MXToolbox |",
         "|---------|------------|---------|-----------|----------|-----------|",
     ]
 
@@ -1216,7 +1205,7 @@ def generate_comparison_report() -> str:
         ("Deployment", "deployment"),
     ]
 
-    tools = ["AuroraEdge", "OnDMARC", "EasyDMARC", "dmarcian", "MXToolbox"]
+    tools = ["NorthFlux Security", "OnDMARC", "EasyDMARC", "dmarcian", "MXToolbox"]
 
     for feature_name, key in features:
         row = [feature_name]
@@ -1234,17 +1223,17 @@ def generate_comparison_report() -> str:
             "",
             "## Key Differentiators",
             "",
-            "### AuroraEdge Advantages",
-            "- **Automatic DNS Remediation**: Cloudflare API integration for one-click fixes",
-            "- **Self-Hosted**: Full control over data, no third-party dependencies",
-            "- **Academic Focus**: Designed for educational and research purposes",
-            "- **Comprehensive Checks**: Includes MTA-STS and TLS-RPT (often missing in competitors)",
-            "- **Open Source**: Transparent, auditable codebase",
+            "### NorthFlux Security Characteristics",
+            "- **Supported DNS Remediation**: Cloudflare API integration with ownership and scope guards",
+            "- **Self-Hosted**: Operator-controlled deployment and local application storage",
+            "- **Operator Control**: Monitoring and remediation remain independently opt-in",
+            "- **Protocol Coverage**: Includes SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, and blacklist checks",
+            "- **Source Availability**: Repository visibility does not grant reuse rights; review the selected licence before reuse",
             "",
-            "### Commercial Tool Advantages",
-            "- **Managed Service**: No infrastructure to maintain",
-            "- **Enterprise Support**: SLAs and dedicated support",
-            "- **Advanced Analytics**: Historical trending and threat intelligence",
+            "### Typical Managed-Service Characteristics",
+            "- **Managed Operations**: The vendor may operate the service infrastructure",
+            "- **Support Options**: Commercial support and service commitments may be available",
+            "- **Hosted Analytics**: Capabilities vary by vendor and plan and must be verified",
             "",
         ]
     )

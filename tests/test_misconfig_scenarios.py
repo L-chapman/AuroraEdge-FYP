@@ -1,5 +1,5 @@
 """
-AuroraEdge &#8212; Comprehensive Misconfiguration Scenario Tests
+NorthFlux Security - Comprehensive Misconfiguration Scenario Tests
 ===========================================================
 
 Tests every rule (R1&#8211;R15) individually and in combination, verifying that:
@@ -9,7 +9,7 @@ Tests every rule (R1&#8211;R15) individually and in combination, verifying that:
   &#8226; Scanner integration with mocked DNS returns the expected result dict
   &#8226; Edge-cases (empty strings, None, boundary values) are handled safely
 
-Organised by misconfig *type* so a lecturer can see scenario-driven testing.
+Organised by misconfiguration type for clear scenario-driven coverage.
 """
 
 import pytest
@@ -612,7 +612,7 @@ class TestScoreArithmetic:
     """Verify the weighted penalty system returns mathematically correct scores."""
 
     def test_one_critical_worth_40(self):
-        """There's no single-rule CRITICAL in AuroraEdge, but if severity were
+        """There's no single-rule CRITICAL in NorthFlux, but if severity were
         artificially set, it would deduct 40. In practice, the worst single
         rule is HIGH (25 points)."""
         assert SCORE_WEIGHTS["CRITICAL"] == 40
