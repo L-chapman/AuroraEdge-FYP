@@ -82,9 +82,17 @@ function Get-RelativePathSafe {
 
     $root = [System.IO.Path]::GetFullPath($ProjectRoot)
     $target = [System.IO.Path]::GetFullPath($TargetPath)
+    $relative = [System.IO.Path]::GetRelativePath($root, $target)
 
-    if ($target.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $target.Substring($root.Length).TrimStart("\\")
+    if (
+        $relative -eq "." -or
+        (
+            $relative -ne ".." -and
+            -not $relative.StartsWith(".." + [System.IO.Path]::DirectorySeparatorChar) -and
+            -not [System.IO.Path]::IsPathRooted($relative)
+        )
+    ) {
+        return $relative
     }
 
     return Split-Path -Leaf $target
@@ -177,7 +185,7 @@ $files = @(
         Where-Object {
             (Test-Path -LiteralPath $_ -PathType Leaf) -and -not (Test-ExcludedPath $_)
         } |
-        ForEach-Object { Get-Item -LiteralPath $_ }
+        ForEach-Object { Get-Item -LiteralPath $_ -Force }
 )
 
 if (-not $files -or $files.Count -eq 0) {
