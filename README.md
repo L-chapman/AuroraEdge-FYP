@@ -25,6 +25,8 @@ You run it on your own computer or server. The interface is built with **React a
 
 Checks include SPF, DKIM and DMARC (email identity); MTA-STS, TLS-RPT and STARTTLS (delivery protection); mail routing, BIMI and blocklist signals. [The project tour](docs/PROJECT_TOUR.md) explains how the pieces fit together without requiring a security background.
 
+If a lookup fails or important records are ambiguous, the result is **Incomplete**, not a confident grade. The interface explains what could not be checked, keeps that warning in history and reports, and blocks automatic fixes until a usable scan is available. Finding a record alone does not prove that every policy setting is safe.
+
 **You stay in control:** scanning does not change DNS. Scheduled monitoring and automatic fixes are separate, disabled-by-default choices. Cloudflare is optional.
 
 ## Try it on your computer
@@ -54,6 +56,8 @@ sh ./start.sh
 
 Both launchers prepare a private Python environment, install the locked web dependencies, build the React interface and start NorthFlux at **http://127.0.0.1:8080**. Keep the terminal open; press **Ctrl+C** to stop. Your saved results remain in the project folder.
 
+Setup also checks for missing or changed installed dependencies before reusing an existing environment. If it cannot prepare a consistent installation, it stops with an error instead of starting a partly broken service.
+
 For a different port, or a server without a desktop:
 
 ```text
@@ -70,7 +74,9 @@ Use the supplied Docker deployment with HTTPS, a strong access token, restricted
 
 [Follow the production deployment guide →](docs/DEPLOYMENT.md)
 
-The supported design is **one operator, one application process and one local database**. This is not a hosted service with separate customer accounts, company-wide sign-in or multiple redundant servers. Those would require additional engineering. Live checks also depend on DNS, HTTPS and sometimes outgoing SMTP access; some networks block SMTP.
+The supported design is **one operator, one application process and one local SQLite database**, with a shared access token rather than individual accounts and roles. This is not a hosted service with separate customer accounts, company-wide sign-in or multiple redundant servers. Those would require additional engineering.
+
+Live checks need public DNS, HTTPS and sometimes outgoing SMTP access; some networks block SMTP. Scan connections refuse private or special-purpose addresses, use time and response-size limits, and do not follow MTA-STS HTTPS redirects or inherit a machine's HTTP proxy settings. Internal-only mail systems are outside this scanning scope.
 
 ## For reviewers: where the engineering is
 
@@ -78,6 +84,7 @@ NorthFlux is more than a static dashboard. It joins a network scanner, explainab
 
 - **Clear separation:** React handles the interface; the Python service performs checks and controls all data changes.
 - **Safer operations:** authenticated sessions, checks against forged browser requests, zone-ownership checks and a record of DNS changes.
+- **Honest results:** incomplete checks remain ungraded; failed prerequisite reads stop DNS changes rather than being treated as missing records.
 - **Reliable state:** scan results are saved together, and a scan finishing late cannot restore data that the operator has just deleted.
 - **Usable workflows:** responsive navigation, keyboard controls, understandable failures and reduced-motion support.
 - **Repeatable delivery:** locked frontend dependencies, declared Python requirements, automated browser journeys, Windows/Linux checks and a source package that excludes secrets and local data.
@@ -86,7 +93,7 @@ Read the [guided project tour](docs/PROJECT_TOUR.md), [architecture](docs/ARCHIT
 
 ## What is tested?
 
-The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions. Check the badge above for the current default branch.
+The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions. Check the badge above for the current default branch. The [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) records the release's findings, fixes, completed checks and remaining limits.
 
 | Area | Automated checks |
 |---|---|
@@ -96,7 +103,7 @@ The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions
 | Accessibility | Automated checks, narrow-screen layouts, keyboard navigation and reduced motion. These are not a substitute for a complete accessibility audit. |
 | Security and packaging | Dependency audits, secret scanning, security regression tests, a hardened-container smoke test and source-archive checks. |
 
-Tests use controlled results for repeatability; they do not prove that every external mail server or Cloudflare account will work. macOS, ARM devices and every possible OS/browser combination are **not yet validated**. See [Testing](docs/TESTING.md) for the measured results, exact commands and known limitations. No test suite can promise zero bugs on every computer.
+Tests use controlled results for repeatability. The deep-debug release does not claim a tested live Cloudflare write or a deployed production server. A connection check only reads Cloudflare data; it does not prove permission to change DNS. macOS, ARM devices and every possible OS/browser combination are **not yet validated**. See [Testing](docs/TESTING.md) for the measured results, exact commands and known limitations. No test suite can promise zero bugs on every computer.
 
 ## Find your way around
 

@@ -73,6 +73,7 @@ atexit.register(_close_test_database)
 def deterministic_scan(domain: str, check_starttls: bool = False) -> dict:
     """Return a representative scan without touching external DNS or SMTP."""
     weak = domain.startswith("weak")
+    incomplete = domain.startswith("incomplete.")
     return {
         "domain": domain,
         "spf_present": True,
@@ -105,7 +106,8 @@ def deterministic_scan(domain: str, check_starttls: bool = False) -> dict:
         "rbl_listings": 0,
         "starttls_grade": "A",
         "starttls_worst": "TLSv1.2",
-        "notes": "Deterministic browser-test scan",
+        "notes": "A DNS lookup timed out in this synthetic example" if incomplete else "Deterministic browser-test scan",
+        "scan_incomplete": incomplete,
         "check_starttls": check_starttls,
     }
 

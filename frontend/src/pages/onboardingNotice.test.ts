@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { onboardingNotice } from './onboardingNotice'
 
 describe('managed-domain onboarding notices', () => {
+  it('does not announce a provisional grade when the initial scan is incomplete', () => {
+    expect(onboardingNotice('example.com', { grade: 'A', score: 98, severity: 'INFO', scan_incomplete: true })).toEqual({
+      tone: 'warning', message: 'example.com is now monitored, but its initial scan was incomplete. No grade has been assigned. Use Rescan to try again.',
+    })
+  })
+
   it('reports a successfully saved initial grade', () => {
     expect(onboardingNotice('example.com', { grade: 'A', score: 92, severity: 'INFO' })).toEqual({
       tone: 'success',

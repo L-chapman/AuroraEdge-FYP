@@ -9,7 +9,7 @@ It brings the checks, explanations, scan history, and optional DNS changes into 
 Start with the [local setup](../README.md), then follow this short route:
 
 1. Open **Scan** and check a domain you own or are authorised to assess. A scan reads public information; it does not automatically add the domain to monitoring or change its DNS.
-2. Read the grade, individual findings, and suggested next steps. The grade summarises the implemented rules; it is not a security certification.
+2. Read the grade, individual findings, and suggested next steps. If a check cannot finish reliably, NorthFlux shows **Incomplete**, explains why and withholds a grade. A completed grade summarises the implemented rules; it is not a security certification.
 3. Add an authorised domain under **Domains** to keep it in the managed list. Open its detail page to review its results and stored history.
 4. Open **Generator** to prepare email-security records. Review the values before copying anything into your DNS provider.
 5. Open **Settings**. Notice that scheduled monitoring and automatic fixes are separate choices, both off by default. You do not need Cloudflare credentials for the read-only tour.
@@ -33,6 +33,10 @@ DNS is a domain's public directory of records. Email providers use those records
 
 Public DNS, network restrictions, mail-server behaviour, and third-party services can affect results. NorthFlux cannot infer provider-specific DKIM keys, prove inbox delivery, or inspect a provider's private configuration.
 
+“Record found” means the relevant check found a record, not that every policy setting is safe. STARTTLS checks whether encrypted transport can be negotiated; it is not proof of the server's identity or successful delivery. Private network destinations are deliberately excluded from the scanner's direct connections.
+
+If a scan is incomplete, its warning stays visible in saved history and PDF reports, and no automatic fix is offered. This prevents a timeout being mistaken for a missing record that should be created. Resolve the cause in the scan notes and run a fresh check before making changes.
+
 ## What is involved behind the interface
 
 The engineering is more than displaying a scan response. The application must handle slow networks, uncertain results, repeated requests, stored history, and potentially consequential DNS changes.
@@ -40,7 +44,8 @@ The engineering is more than displaying a scan response. The application must ha
 | Design problem | How the project handles it | Where to inspect it |
 |---|---|---|
 | Separate observations from conclusions | The scanner collects evidence; the rules engine turns it into findings and advice. The rules can be tested without a live domain. | [Scanner](../src/app/scanner.py), [rules](../src/app/rules.py) |
-| Keep a responsive, consistent interface | React pages share a typed request client, reusable form controls, loading states, and error handling. | [Frontend source](../frontend/src/), [browser journeys](../frontend/e2e/operator-journeys.spec.ts) |
+| Keep uncertainty visible | Failed or ambiguous checks remain ungraded in the interface and saved history; automatic changes are blocked until usable evidence is available. | [Scanner](../src/app/scanner.py), [database](../src/app/database.py), [DNS write layer](../src/app/dns_fix.py) |
+| Keep a responsive, consistent interface | React pages share a typed request client, reusable form controls, loading states, and error handling. Late responses do not undo sign-out or replace a settings draft. | [Frontend source](../frontend/src/), [browser journeys](../frontend/e2e/operator-journeys.spec.ts) |
 | Keep concurrent work from corrupting history | Database access is coordinated, related changes are saved together, and stale scans are prevented from restoring data after it has been cleared. | [Database](../src/app/database.py), [application](../src/app/dashboard.py), [tests](../tests/) |
 | Protect operator access | Sign-in creates an expiring server session. Browser requests that change data need a separate anti-forgery check; the access token is not saved in browser storage. | [API models](../src/app/api_models.py), [application](../src/app/dashboard.py), [security policy](../SECURITY.md) |
 | Avoid unintended DNS changes | Read-only scanning, monitoring, and automatic fixes are separate. Writes check the configured Cloudflare zone, preserve unrelated records, stop on ambiguous records, and leave an audit log. | [DNS write layer](../src/app/dns_fix.py), [integrations](INTEGRATIONS.md) |
@@ -50,9 +55,9 @@ For the full component map, request flow, and storage design, continue to [Archi
 
 ## What the test evidence does—and does not—show
 
-The [testing guide](TESTING.md) links a completed Windows/Linux baseline and explains how to repeat the checks. Automated coverage includes backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene.
+The [testing guide](TESTING.md) explains how to repeat the checks. The [deep-debug review](DEEP_DEBUG_REVIEW.md) records the release's findings and completed verification; older baseline results are labelled historical. Automated checks include backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene. Reported frontend coverage percentages apply to selected logic modules, not every UI page or interaction.
 
-Browser tests use controlled sample scans and disable Cloudflare writes. This makes failures repeatable and prevents a test run from changing a live domain. It does **not** verify every external DNS service, every network, or an operator's real Cloudflare permissions. Those need separate, authorised checks on the intended deployment.
+Browser tests use controlled sample scans and disable Cloudflare writes. This makes failures repeatable and prevents a test run from changing a live domain. It does **not** verify every external DNS service, every network, or an operator's real Cloudflare permissions. The settings connection test only reads provider data; it cannot prove write permission. No live Cloudflare write or production deployment is claimed by the deep-debug release. Those need separate, authorised checks on the intended deployment.
 
 ## Honest release boundaries
 

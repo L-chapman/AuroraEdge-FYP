@@ -159,11 +159,24 @@ export function classifySpfIp(value: string): GenerationResult<IpMechanism> {
 }
 
 function txtRecord(host: string, value: string): TxtRecord {
+  // RFC 1035 sections 3.3/3.3.14: one TXT record may contain multiple
+  // character-strings, each limited to 255 data octets. Joining them must
+  // preserve the exact value, including spaces at chunk boundaries.
+  const chunks: string[] = ['']
+  const encoder = new TextEncoder()
+  let octets = 0
+  for (const character of value) {
+    const size = encoder.encode(character).length
+    if (octets + size > 255) { chunks.push(''); octets = 0 }
+    chunks[chunks.length - 1] += character
+    octets += size
+  }
+  const quoted = chunks.map((chunk) => `"${chunk.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`).join(' ')
   return {
     host,
     type: 'TXT',
     value,
-    zoneFile: `${host}. IN TXT "${value}"`,
+    zoneFile: `${host}. IN TXT ${quoted}`,
   }
 }
 
@@ -202,14 +215,37 @@ function isEmail(value: string): boolean {
   if (value.length > 254 || /\s/.test(value)) return false
   const at = value.lastIndexOf('@')
   if (at <= 0 || at === value.length - 1) return false
-  if (!/^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(value.slice(0, at))) return false
+  const local = value.slice(0, at)
+  if (local.length > 64 || local.startsWith('.') || local.endsWith('.') || local.includes('..')) return false
+  if (!/^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+$/i.test(local)) return false
   return isDomainName(value.slice(at + 1))
 }
 
+function reportUri(email: string): string {
+  const at = email.lastIndexOf('@')
+  // RFC 6068: address characters such as ?, # and % are URI data, not
+  // delimiters. Encode ! too because DMARC uses it for a report-size suffix.
+  const local = encodeURIComponent(email.slice(0, at)).replaceAll('!', '%21')
+  return `mailto:${local}@${normaliseDomain(email.slice(at + 1))}`
+}
+
 function parseEmails(value: string, field: string, errors: FieldIssue[]): string[] {
-  const emails = splitCommaOrLineList(value).map((email) => email.replace(/^mailto:/i, ''))
-  for (const email of emails) {
+  const emails: string[] = []
+  for (const input of splitCommaOrLineList(value)) {
+    let email = input
+    if (/^mailto:/i.test(input)) {
+      const address = input.slice(7)
+      if (/[?#]/.test(address)) {
+        errors.push({ field, message: `Use a plain email address or a correctly encoded mailto URI: ${input}` })
+        continue
+      }
+      try { email = decodeURIComponent(address) } catch {
+        errors.push({ field, message: `Invalid mailto URI encoding: ${input}` })
+        continue
+      }
+    }
     if (!isEmail(email)) errors.push({ field, message: `Invalid email address: ${email}` })
+    emails.push(email)
   }
   return emails
 }
@@ -219,6 +255,7 @@ export function generateDmarc(input: DmarcInput): GenerationResult<TxtRecord> {
   const warnings: FieldIssue[] = []
   const domain = normaliseDomain(input.domain)
   if (!isDomainName(domain)) errors.push({ field: 'domain', message: 'Enter a valid domain name.' })
+  if (`_dmarc.${domain}`.length > 253) errors.push({ field: 'domain', message: 'The full DMARC record name would exceed the DNS name limit.' })
   if (!Number.isInteger(input.percentage) || input.percentage < 0 || input.percentage > 100) {
     errors.push({ field: 'percentage', message: 'Percentage must be a whole number from 0 to 100.' })
   }
@@ -236,8 +273,8 @@ export function generateDmarc(input: DmarcInput): GenerationResult<TxtRecord> {
   const tags = ['v=DMARC1', `p=${input.policy}`]
   if (input.subdomainPolicy) tags.push(`sp=${input.subdomainPolicy}`)
   if (input.percentage < 100) tags.push(`pct=${input.percentage}`)
-  if (aggregateEmails.length) tags.push(`rua=${aggregateEmails.map((email) => `mailto:${email}`).join(',')}`)
-  if (forensicEmails.length) tags.push(`ruf=${forensicEmails.map((email) => `mailto:${email}`).join(',')}`)
+  if (aggregateEmails.length) tags.push(`rua=${aggregateEmails.map(reportUri).join(',')}`)
+  if (forensicEmails.length) tags.push(`ruf=${forensicEmails.map(reportUri).join(',')}`)
   return success(txtRecord(`_dmarc.${domain}`, tags.join('; ')), warnings)
 }
 
@@ -256,6 +293,7 @@ export function generateMtaSts(input: MtaStsInput): GenerationResult<MtaStsOutpu
   const warnings: FieldIssue[] = []
   const domain = normaliseDomain(input.domain)
   if (!isDomainName(domain)) errors.push({ field: 'domain', message: 'Enter a valid domain name.' })
+  if (`_mta-sts.${domain}`.length > 253) errors.push({ field: 'domain', message: 'The full MTA-STS record name would exceed the DNS name limit.' })
 
   const mxHosts = splitLines(input.mxHosts).map(normaliseDomain)
   if (input.mode !== 'none' && mxHosts.length === 0) {
@@ -297,12 +335,13 @@ export function generateTlsRpt(input: TlsRptInput): GenerationResult<TxtRecord> 
   const errors: FieldIssue[] = []
   const domain = normaliseDomain(input.domain)
   if (!isDomainName(domain)) errors.push({ field: 'domain', message: 'Enter a valid domain name.' })
+  if (`_smtp._tls.${domain}`.length > 253) errors.push({ field: 'domain', message: 'The full TLS-RPT record name would exceed the DNS name limit.' })
   const emails = parseEmails(input.reportEmails, 'reportEmails', errors)
   if (emails.length === 0) {
     errors.push({ field: 'reportEmails', message: 'Add at least one TLS report email address.' })
   }
   if (errors.length) return failure(errors)
-  const destinations = emails.map((email) => `mailto:${email}`).join(',')
+  const destinations = emails.map(reportUri).join(',')
   return success(txtRecord(`_smtp._tls.${domain}`, `v=TLSRPTv1; rua=${destinations}`))
 }
 
@@ -326,6 +365,7 @@ export function generateBimi(input: BimiInput): GenerationResult<TxtRecord> {
     ? normaliseHttpsUrl(input.certificateUrl.trim())
     : ''
   if (!isDomainName(domain)) errors.push({ field: 'domain', message: 'Enter a valid domain name.' })
+  if (`${selector}._bimi.${domain}`.length > 253) errors.push({ field: 'domain', message: 'The selector and domain would exceed the DNS name limit.' })
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(selector)) {
     errors.push({ field: 'selector', message: 'Enter a valid BIMI selector.' })
   }

@@ -2,6 +2,7 @@
 
 import argparse
 import csv as csv_mod
+import html
 import logging
 import sys
 from datetime import datetime, timezone
@@ -165,6 +166,35 @@ def scan_domains(
             logger.warning(f"Could not initialise database: {e}")
             db = None
 
+    def scan_one(domain: str) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+        try:
+            res = scan_domain(domain, check_starttls=check_starttls)
+            ev = evaluate(res)
+        except Exception as e:
+            logger.error("Error scanning %s: %s", domain, e)
+            return (
+                domain,
+                {"error": str(e), "scan_incomplete": True},
+                {"severity": "CRITICAL", "score": 0, "grade": "F",
+                 "violations": "", "violation_count": 0, "advice": str(e)},
+            )
+
+        # Storage failure does not invalidate an otherwise completed scan.
+        # Keep its one report row and make the missing history explicit.
+        if db and scan_id:
+            try:
+                db.save_result(scan_id, domain, res, ev)
+            except Exception as e:
+                logger.warning("Scan result for %s was not saved to the database: %s", domain, e)
+                res = {
+                    **res,
+                    "notes": "; ".join(filter(None, [
+                        str(res.get("notes") or ""),
+                        "Scan completed, but this result was not saved to the database. Check the application log.",
+                    ])),
+                }
+        return domain, res, ev
+
     if HAS_RICH:
         console = Console()
         with Progress(
@@ -178,50 +208,18 @@ def scan_domains(
 
             for domain in targets:
                 progress.update(task, description=f"Scanning {domain}...")
-                try:
-                    res = scan_domain(domain, check_starttls=check_starttls)
-                    ev = evaluate(res)
-                    results.append((domain, res, ev))
-
-                    if db and scan_id:
-                        db.save_result(scan_id, domain, res, ev)
-
-                except Exception as e:
-                    logger.error(f"Error scanning {domain}: {e}")
-                    results.append(
-                        (
-                            domain,
-                            {"error": str(e)},
-                            {"severity": "CRITICAL", "score": 0, "grade": "F",
-                             "violations": "", "violation_count": 0, "advice": str(e)},
-                        )
-                    )
-
+                results.append(scan_one(domain))
                 progress.advance(task)
     else:
         for i, domain in enumerate(targets, 1):
             print(f"[{i}/{len(targets)}] Scanning {domain}...")
-            try:
-                res = scan_domain(domain, check_starttls=check_starttls)
-                ev = evaluate(res)
-                results.append((domain, res, ev))
-
-                if db and scan_id:
-                    db.save_result(scan_id, domain, res, ev)
-
-            except Exception as e:
-                logger.error(f"Error scanning {domain}: {e}")
-                results.append(
-                    (
-                        domain,
-                        {"error": str(e)},
-                        {"severity": "CRITICAL", "score": 0, "grade": "F",
-                         "violations": "", "violation_count": 0, "advice": str(e)},
-                    )
-                )
+            results.append(scan_one(domain))
 
     if db and scan_id:
-        db.complete_scan(scan_id, len(results))
+        try:
+            db.complete_scan(scan_id, len(results))
+        except Exception as e:
+            logger.warning("Could not mark scan complete in the database: %s", e)
 
     return results
 
@@ -263,8 +261,16 @@ def write_csv(rows: List[Tuple[str, Dict, Dict]], path: Path):
         for domain, res, ev in rows:
             combined = {**res, **ev, "domain": domain}
             writer.writerow([
-                str(combined.get(col, "") or "") for col in csv_cols
+                "" if combined.get(col) is None else str(combined[col]) for col in csv_cols
             ])
+
+
+def _markdown_cell(value: Any) -> str:
+    """Keep observed record values as text, not report markup or extra rows."""
+    text = html.escape("" if value is None else str(value), quote=False)
+    for character in "\\`*_[]()!|":
+        text = text.replace(character, "\\" + character)
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
 
 
 def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str):
@@ -272,7 +278,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
     lines = [
         "# NorthFlux Security Scan Results",
         "",
-        f"**Scan Time:** {scan_ts} UTC",
+        f"**Scan Time:** {_markdown_cell(scan_ts)} UTC",
         f"**Domains Scanned:** {len(rows)}",
         "",
         "## Summary Statistics",
@@ -340,10 +346,9 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         tls = "Y" if res.get("tls_rpt_present") else "N"
         violations = ev.get("violation_count", 0)
 
-        lines.append(
-            f"| {domain} | {ev.get('grade', 'F')} | {ev.get('score', 0)} | {ev.get('severity', 'OK')} | "
-            f"{spf} | {dmarc} | {dkim} | {sts} | {tls} | {violations} |"
-        )
+        cells = (domain, ev.get("grade", "F"), ev.get("score", 0), ev.get("severity", "OK"),
+                 spf, dmarc, dkim, sts, tls, violations)
+        lines.append("| " + " | ".join(_markdown_cell(cell) for cell in cells) + " |")
 
     # Common violations section
     violation_counts = {}
@@ -365,7 +370,7 @@ def write_markdown(rows: List[Tuple[str, Dict, Dict]], path: Path, scan_ts: str)
         for v, count in sorted(
             violation_counts.items(), key=lambda x: x[1], reverse=True
         ):
-            lines.append(f"| {v} | {count} |")
+            lines.append(f"| {_markdown_cell(v)} | {count} |")
 
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")

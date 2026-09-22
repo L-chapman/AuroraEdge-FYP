@@ -18,6 +18,14 @@ if ([System.IO.Path]::GetExtension($OutputZip) -ne ".zip") {
     throw "The output path must name a .zip file."
 }
 $ChecksumPath = "$OutputZip.sha256"
+foreach ($outputPath in @($OutputZip, $ChecksumPath)) {
+    if (Test-Path -LiteralPath $outputPath) {
+        $existingOutput = Get-Item -LiteralPath $outputPath -Force
+        if ($existingOutput.PSIsContainer -or $existingOutput.LinkType) {
+            throw "Release output must be a regular file, not a directory or link: $outputPath"
+        }
+    }
+}
 $DistDir = Split-Path -Parent $OutputZip
 $PackageRoot = "NorthFlux_Security"
 
@@ -35,6 +43,7 @@ $ExcludedFolderNames = @(
     ".venv",
     ".vite",
     ".pytest_cache",
+    ".ruff_cache",
     ".vscode",
     "__pycache__",
     "blob-report",
@@ -46,7 +55,8 @@ $ExcludedFolderNames = @(
     "playwright-report",
     "reports",
     "state",
-    "test-results"
+    "test-results",
+    "venv"
 )
 
 $ExcludedRelativePaths = @()
@@ -81,7 +91,13 @@ $ExcludedExtensions = @(
     ".kdbx",
     ".p7b",
     ".p7c",
-    ".tsbuildinfo"
+    ".tsbuildinfo",
+    ".db",
+    ".db-wal",
+    ".db-shm",
+    ".sqlite",
+    ".sqlite3",
+    ".log"
 )
 
 function Get-RelativePathSafe {
@@ -114,7 +130,7 @@ function Test-ExcludedPath {
     }
 
     foreach ($part in ($relativePath -split "[\\/]")) {
-        if ($ExcludedFolderNames -contains $part) {
+        if ($ExcludedFolderNames -contains $part -or $part.StartsWith(".venv-", [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -151,6 +167,51 @@ function Test-ExcludedPath {
     return $false
 }
 
+function Get-GitOutput {
+    param([string[]]$Arguments)
+
+    # Git's normal line output quotes non-ASCII, tab and newline filenames.
+    # Read the NUL-delimited stream unchanged so those files are not silently lost.
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command git -ErrorAction Stop).Source
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    foreach ($argument in $Arguments) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    try {
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) {
+            throw "Git could not enumerate the release files."
+        }
+        $errorTask.GetAwaiter().GetResult() | Out-Null
+        return $outputTask.GetAwaiter().GetResult()
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Assert-RegularReleaseInput {
+    param([string]$TargetPath)
+
+    # A safe-looking filename can link to a credential outside the checkout.
+    # Check ancestor directories too; lexical containment alone is insufficient.
+    $item = Get-Item -LiteralPath $TargetPath -Force
+    while ($item.FullName -ne $ProjectRoot) {
+        if ($item.LinkType) {
+            throw "Release inputs must not follow filesystem links: $TargetPath"
+        }
+        $item = Get-Item -LiteralPath (Split-Path -Parent $item.FullName) -Force
+    }
+}
+
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
@@ -168,12 +229,12 @@ if ($gitStatus -and -not $AllowDirty) {
     throw "Refusing to package a dirty working tree. Commit or stash changes, or rerun with -AllowDirty after reviewing every untracked file."
 }
 
-$gitArguments = @("-C", $ProjectRoot, "ls-files", "--cached")
+$gitArguments = @("-C", $ProjectRoot, "ls-files", "--cached", "-z")
 if ($AllowDirty) {
     $gitArguments += @("--others", "--exclude-standard")
 }
-$eligiblePaths = & git @gitArguments
-if ($LASTEXITCODE -ne 0 -or -not $eligiblePaths) {
+$eligiblePaths = @((Get-GitOutput -Arguments $gitArguments) -split "`0" | Where-Object { $_ -ne "" })
+if (-not $eligiblePaths) {
     throw "Git did not return any eligible release files."
 }
 
@@ -183,7 +244,10 @@ $files = @(
         Where-Object {
             (Test-Path -LiteralPath $_ -PathType Leaf) -and -not (Test-ExcludedPath $_)
         } |
-        ForEach-Object { Get-Item -LiteralPath $_ -Force }
+        ForEach-Object {
+            Assert-RegularReleaseInput -TargetPath $_
+            Get-Item -LiteralPath $_ -Force
+        }
 )
 
 if (-not $files -or $files.Count -eq 0) {

@@ -30,8 +30,8 @@ function settingString(settings: Record<string, string | boolean | number>, key:
 }
 
 export function SettingsPage() {
-  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: () => apiRequest<SettingsResponse>('/api/settings') })
-  const bootstrapQuery = useQuery({ queryKey: ['bootstrap'], queryFn: () => apiRequest<Bootstrap>('/api/v1/bootstrap') })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: ({ signal }) => apiRequest<SettingsResponse>('/api/settings', { signal }) })
+  const bootstrapQuery = useQuery({ queryKey: ['bootstrap'], queryFn: ({ signal }) => apiRequest<Bootstrap>('/api/v1/bootstrap', { signal }) })
   const retry = () => { void Promise.all([settingsQuery.refetch(), bootstrapQuery.refetch()]) }
 
   // Mount the editor only when both initial responses exist. Rendering blank

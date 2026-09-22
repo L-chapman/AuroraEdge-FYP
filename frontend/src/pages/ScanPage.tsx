@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ApiError, apiRequest, asBoolean, asNumber } from '../api/client'
 import type { ScanResponse, ScanResult } from '../api/types'
+import { IncompleteScanNotice } from '../components/IncompleteScanNotice'
 import { Button, Card, ConfirmDialog, Field, InlineNotice, PageHeader, StatusBadge } from '../components/ui'
 import { normaliseDomain, parseDomainList, validateDomain } from '../utils/domain'
 
@@ -32,24 +33,25 @@ function ResultCard({ result, onFix }: { result: ScanResult; onFix: (domain: str
   }
   const evaluation = result.evaluation ?? {}
   const scan = result.scan ?? {}
+  const incomplete = asBoolean(scan.scan_incomplete)
   const score = asNumber(evaluation.score, 0)
   return (
     <Card className="scan-result">
       <div className="scan-result__header">
         <div><p className="eyebrow">Scan result</p><h2>{result.domain}</h2></div>
-        <div className="score-lockup" aria-label={`Grade ${evaluation.grade ?? 'unknown'}, score ${score} out of 100`}>
-          <StatusBadge value={evaluation.grade ?? '—'} />
-          <strong>{score}<small>/100</small></strong>
+        <div className="score-lockup" aria-label={incomplete ? 'Scan incomplete; no security grade is available' : `Grade ${evaluation.grade ?? 'unknown'}, score ${score} out of 100`}>
+          <StatusBadge value={incomplete ? 'Incomplete' : evaluation.grade ?? '—'} />
+          <strong>{incomplete ? '—' : <>{score}<small>/100</small></>}</strong>
         </div>
       </div>
-      <div className="result-summary">
+      {incomplete ? <IncompleteScanNotice notes={scan.notes} /> : <div className="result-summary">
         <StatusBadge value={evaluation.severity ?? 'Unknown'} />
         <p>{evaluation.severity_description ?? evaluation.advice ?? 'Review the individual controls below.'}</p>
-      </div>
+      </div>}
       <ul className="check-grid" aria-label={`${result.domain} security controls`}>
         {checkFields.map(([key, label]) => {
           const passed = asBoolean(scan[key])
-          return <li key={key} className={passed ? 'check check--pass' : 'check check--fail'}><span aria-hidden="true">{passed ? '✓' : '!'}</span><strong>{label}</strong><small>{passed ? 'Present' : 'Needs attention'}</small></li>
+          return <li key={key} className={passed ? 'check check--pass' : incomplete ? 'check' : 'check check--fail'}><span aria-hidden="true">{passed ? '✓' : incomplete ? '?' : '!'}</span><strong>{label}</strong><small>{passed ? 'Present' : incomplete ? 'Not confirmed' : 'Needs attention'}</small></li>
         })}
       </ul>
       {evaluation.violations ? (
@@ -61,7 +63,7 @@ function ResultCard({ result, onFix }: { result: ScanResult; onFix: (domain: str
       <div className="button-row">
         <Link className="button button--secondary" to={`/domain/${encodeURIComponent(result.domain)}`}>View detail</Link>
         {result.saved ? <a className="button button--ghost" href={`/api/report/pdf/${encodeURIComponent(result.domain)}`}>Download PDF</a> : null}
-        <Button variant="danger" type="button" onClick={() => onFix(result.domain)}>Plan DNS fix</Button>
+        <Button variant="danger" type="button" disabled={incomplete} onClick={() => onFix(result.domain)}>Plan DNS fix</Button>
       </div>
     </Card>
   )

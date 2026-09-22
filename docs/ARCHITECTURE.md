@@ -27,23 +27,27 @@ Optional authorised write path:
 NorthFlux -> Cloudflare API -> verified DNS zone
 ```
 
-The application reads public security signals for any valid domain. DNS writes require configured credentials, a successful Cloudflare connection, and confirmation that the requested domain belongs to the configured zone.
+The application assesses public security signals for valid domains. HTTPS and SMTP scan connections require checked public destinations. DNS writes require configured credentials, confirmation that the requested domain belongs to the configured zone, and successful prerequisite reads. The connection test is read-only and cannot establish write permission.
 
 ## Components
 
 ### `scanner.py`
 
-Performs DNS, HTTPS, SMTP STARTTLS, and blocklist checks. It returns raw observations and avoids assigning business meaning to them.
+Performs DNS, HTTPS, SMTP STARTTLS, and blocklist checks. It returns observations and per-scan diagnostics. `scan_incomplete` marks lookup failures, exhausted time limits or ambiguous/invalid evidence that prevents a dependable assessment. A confirmed absent DNS answer is distinguished from a failed lookup.
+
+Scan DNS queries use bounded public resolvers. HTTPS/SMTP destinations are resolved, checked for private or special-purpose addresses, and connected using the checked numeric address. MTA-STS HTTPS validates certificates, accepts only a bounded plain-text response, does not follow redirects and does not inherit HTTP proxy settings. SMTP STARTTLS reports negotiated transport capability, not certificate identity. The scan has an overall time budget as well as per-operation limits.
 
 ### `rules.py`
 
-Turns scanner observations into findings, severity, score, grade, explanations, and remediation recommendations. This separation allows the rules engine to be tested with deterministic inputs.
+Turns scanner observations into findings, severity, score, grade, explanations, and remediation recommendations. This separation allows the rules engine to be tested with deterministic inputs. Evaluation of incomplete observations is provisional: consumers must respect `scan_incomplete`, not treat a calculated value as a confirmed grade. Persistence, the React UI and saved PDF reports suppress the grade for these results, and remediation generation returns manual review with no automatic callback.
 
 ### `frontend/`
 
 Contains the React 19 and TypeScript application built by Vite. React Router owns browser navigation; TanStack Query owns server-state refresh and invalidation; React Hook Form and Zod validate interactive forms. The application covers sign-in, overview, single and batch scanning, managed domains, domain detail and history, settings, DNS record generation, privacy, and error states.
 
-The API client uses same-origin credentials, reads the non-HttpOnly CSRF companion cookie for state-changing requests, and converts server errors into a consistent UI error shape. It does not store the operator token in `localStorage` or `sessionStorage`.
+The API client uses same-origin credentials, reads the non-HttpOnly CSRF companion cookie for state-changing requests, and converts server errors into a consistent UI error shape. It does not store the operator token in `localStorage` or `sessionStorage`. Session metadata is validated before access is granted. Cancelled requests cannot overwrite a newer session state; sign-out cancels pending session refreshes and clears protected cached data.
+
+Settings drafts are initialised before their controls become interactive and are not reset by background refreshes. Domain-specific page state is reset when the route's domain changes. The DNS generator validates final record-name lengths, encodes reporting addresses, and splits long zone-file TXT output into valid quoted chunks without changing the record value.
 
 ### `dashboard.py` and `api_models.py`
 
@@ -53,13 +57,19 @@ In production, or when `NORTHFLUX_SERVE_REACT=true`, FastAPI serves `frontend/di
 
 The dashboard module is still the main architecture debt. The frontend extraction creates a stable API boundary, but the remaining server routes and services should continue to move into smaller routers and service modules behind the existing tests.
 
+### `request_security.py`
+
+Shares small request safeguards across current and legacy routes: bounded request bodies, JSON-object validation and constant-time credential comparisons that safely handle untrusted text. These checks prevent malformed requests from becoming internal errors or unbounded body reads; they do not replace a deployment's network and access controls.
+
 ### `database.py`
 
 Stores scans, results, managed domains, alerts, and settings in SQLite with WAL mode. NorthFlux uses `state/northflux.db` for new installations and detects the legacy `state/auroraedge.db` so an existing installation does not lose its history during the rename.
 
+Additive schema updates retain existing rows. Incomplete scans are recorded with an explicit flag and null score/grade; managed-domain summaries retain the warning, and score averages exclude the ungraded result. Earlier rows cannot be retrospectively marked uncertain because that information was not recorded. Settings form changes are committed together or rolled back together.
+
 ### `dns_fix.py`
 
-Integrates with Cloudflare for authorised changes. The write layer checks zone ownership, selects TXT records by protocol prefix, refuses ambiguous duplicate records, retains existing DMARC tags when changing policy, and records actions in an audit log. DKIM changes require provider-supplied values and remain manual.
+Integrates with Cloudflare for authorised changes. The write layer checks zone ownership, selects TXT records by protocol prefix, refuses failed or ambiguous prerequisite reads, retains existing DMARC tags when changing policy, and records actions in an audit log. Missing SPF needs confirmed sending sources rather than an assumed provider. DKIM changes require provider-supplied values and remain manual. MTA-STS deployment checks existing host/route conflicts; provider operations remain multi-step and can require manual recovery after partial failure.
 
 ### `cli.py`
 
@@ -67,11 +77,15 @@ Provides single and batch scanning, report output, and explicit remediation comm
 
 ### `analysis.py`
 
-Calculates aggregate statistics and generates report charts and summaries.
+Calculates aggregate statistics and generates report charts and summaries. Generated analysis belongs under the configurable report root, not the tracked documentation folder. External values are escaped for report output, and missing/non-finite scores are not counted as real zero scores.
 
 ### `runtime_paths.py`
 
 Centralises project-relative defaults and optional `NORTHFLUX_STATE_DIR`, `NORTHFLUX_REPORTS_DIR`, and `NORTHFLUX_LOGS_DIR` overrides. This lets containers, services, and tests isolate mutable state without changing the process working directory.
+
+### `start.py`
+
+Provides the shared local launcher behind the Windows and Linux wrappers. Setup checks runtime versions, tracks the installed Python package inventory, checks frontend dependency presence, and rebuilds the UI. A changed or damaged setup is prepared again rather than trusted solely because a cache marker exists. Python requirements are still not a complete transitive lockfile.
 
 ## Request flow
 
@@ -123,9 +137,11 @@ The deprecated server-rendered interface remains available as a development fall
 - Demo mode is an explicit environment setting and is unavailable in production.
 - Scheduled monitoring is disabled by default.
 - Automatic remediation is a separate explicit opt-in.
+- Incomplete scans remain ungraded and do not authorise automatic remediation.
 - Adding a managed domain performs a read-only scan; DNS management requires both the global setting and explicit opt-in on that request.
 - Cloudflare writes are limited to the verified zone.
 - Multiple same-protocol TXT records cause the write to stop for manual review.
+- Failed prerequisite provider reads stop changes rather than being treated as missing records.
 - Production secrets are expected through the runtime environment.
 
 ## Refactor boundaries
@@ -157,4 +173,7 @@ The React migration has already separated presentation from server behaviour. Th
 - Scheduler leadership and database coordination support only one process.
 - SQLite backup and schema migration tooling need further automation.
 - Shared-token authentication has no named-user attribution or role-based access control.
-- Automated browser tests use deterministic scans and intentionally disable Cloudflare, so live network availability and authorised DNS changes require separate controlled validation.
+- Automated browser tests use deterministic scans and intentionally disable Cloudflare. No live Cloudflare write, Worker deployment or production deployment is claimed by this deep-debug pass.
+- Frontend coverage percentages cover selected deterministic modules, not the entire interface; browser and component checks provide separate evidence.
+
+See [Testing](TESTING.md) for the repeatable checks and the [deep-debug review](DEEP_DEBUG_REVIEW.md) for release-specific findings and verification evidence.

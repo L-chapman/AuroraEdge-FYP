@@ -31,6 +31,12 @@ WINDOWS = os.name == "nt"
 MIN_PYTHON = (3, 10)
 MIN_NODE = (22, 12, 0)
 PROBE_IMPORTS = "import uvicorn, fastapi, dns, rich, requests, matplotlib, numpy, reportlab"
+ENVIRONMENT_PROBE = (
+    "import importlib.metadata as m,json,sys; "
+    "print(json.dumps([list(sys.version_info[:3]),sys.platform,"
+    "sorted((d.metadata['Name'].lower(),d.version) for d in m.distributions() "
+    "if d.metadata['Name'])],separators=(',',':')))"
+)
 
 
 class LaunchError(Exception):
@@ -143,6 +149,12 @@ def fingerprint(paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def environment_signature(python: Path, root: Path) -> str:
+    """Notice package/interpreter changes without contacting a package registry."""
+    inventory = run([str(python), "-c", ENVIRONMENT_PROBE], root, capture=True)
+    return hashlib.sha256(inventory.encode("utf-8")).hexdigest()
+
+
 def prepare(root: Path, node: str, npm: str) -> Path:
     python = ensure_venv(root)
     cache_file = root / ".venv/.northflux-setup.json"
@@ -157,7 +169,9 @@ def prepare(root: Path, node: str, npm: str) -> Path:
         "frontend": fingerprint([root / "frontend/package.json", root / "frontend/package-lock.json"]),
         "node": run([node, "--version"], root, capture=True),
     }
-    python_ready = previous.get("python") == current["python"]
+    installed_signature = environment_signature(python, root)
+    python_ready = (previous.get("python") == current["python"]
+                    and previous.get("python_environment") == installed_signature)
     if python_ready:
         try:
             run([str(python), "-c", PROBE_IMPORTS], root, capture=True)
@@ -167,11 +181,25 @@ def prepare(root: Path, node: str, npm: str) -> Path:
     if not python_ready:
         print("[1/3] Installing Python dependencies (first run needs internet)...", flush=True)
         run([str(python), "-m", "pip", "install", "-r", str(root / "requirements.txt")], root)
+        # pip can finish after warning about an inconsistent existing environment.
+        # Do not cache that installation as successful or start the server with it.
+        run([str(python), "-c", PROBE_IMPORTS], root, capture=True)
+        run([str(python), "-m", "pip", "check"], root, capture=True)
+        installed_signature = environment_signature(python, root)
+    current["python_environment"] = installed_signature
     print("[2/3] Preparing the React dashboard...", flush=True)
     command = npm_command(node, npm)
-    if (previous.get("frontend") != current["frontend"]
-            or previous.get("node") != current["node"]
-            or not (root / "frontend/node_modules/vite/package.json").is_file()):
+    frontend_ready = (previous.get("frontend") == current["frontend"]
+                      and previous.get("node") == current["node"]
+                      and (root / "frontend/node_modules/vite/package.json").is_file())
+    if frontend_ready:
+        try:
+            # A single Vite file does not prove the remaining locked dependencies
+            # survived an interrupted install or manual node_modules cleanup.
+            run([*command, "ls", "--depth=0", "--json"], root / "frontend", capture=True)
+        except LaunchError:
+            frontend_ready = False
+    if not frontend_ready:
         run([*command, "ci"], root / "frontend")
     # Rebuild after every pull, including when dependencies have not changed.
     run([*command, "run", "build"], root / "frontend")

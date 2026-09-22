@@ -22,6 +22,14 @@ function renderDashboard() {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('Dashboard overview', () => {
+  it('distinguishes incomplete checks from unscanned domains without showing a provisional score', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response(payload({ stats: { average_score: 98 }, domains: [{ domain: 'example.com', last_scan_incomplete: true, last_grade: 'A', last_score: 98 }] })))
+    renderDashboard()
+    expect(await screen.findByText('Incomplete')).toBeVisible()
+    expect(screen.queryAllByText('98')).toHaveLength(0)
+    expect(within(screen.getByText('Average score').closest('section')!).getByText('—')).toBeVisible()
+  })
+
   it('does not invent a score or an active monitoring state for an empty workspace', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(response(payload()))
     renderDashboard()

@@ -2,7 +2,9 @@
 
 This guide covers two different needs: trying NorthFlux on your own computer, and keeping it running as a private service. A local launch does not make a server safe to expose to the Internet.
 
-For a lasting installation, the supported design is one Docker container. NorthFlux runs scheduled checks inside the application and stores its data in a local SQLite database. Run exactly one application worker and one container against the same stored data; multiple copies are not supported.
+For a lasting installation, the supported design is one Docker container for one operator, using a shared access token rather than individual accounts and roles. NorthFlux runs scheduled checks inside the application and stores its data in a local SQLite database. Run exactly one application worker and one container against the same stored data; multiple copies are not supported.
+
+This guide is an installation and validation procedure, not a claim that your server has been deployed or tested. The [deep-debug review](DEEP_DEBUG_REVIEW.md) records completed release checks; live production and Cloudflare changes require separate, authorised validation.
 
 ## Try it on Windows or Linux
 
@@ -22,6 +24,8 @@ sh ./start.sh
 
 The launcher prepares a private Python environment, installs the declared dependencies, builds the React interface, and starts the local service. Stop it with Ctrl+C. Files created during setup and use are kept out of Git. The local launch has no sign-in requirement unless you supply `DASH_TOKEN`; use it only on your own trusted computer.
 
+Before reusing setup, it compares the installed Python package inventory with the last successful setup and checks the frontend dependency tree. Missing or changed packages trigger preparation again; Python imports and dependency consistency are checked before a new setup is accepted. This catches common damaged-environment problems, but it is not a malware scan or a complete Python dependency lock. The interface is rebuilt on every launch so a source update does not leave the old UI running.
+
 For a machine without a desktop browser, use `python start.py --no-browser --port 8080` (or `python3` on Linux). `--setup-only` installs and builds without starting the server. `--smoke-test` starts a short, isolated check of the built interface and storage readiness, with temporary data and Cloudflare credentials removed, then stops. These are local review tools, not a production service manager. Inherited production mode is rejected by the ordinary local launcher; use the production setup below instead.
 
 The local application is reached at `http://127.0.0.1:8080`; it is not available to other computers. If the port is already in use, choose another with `--port`, rather than stopping an unrelated program. If Python, Node, or npm cannot be found, reopen the terminal after installing them. An interrupted package download can normally be retried by rerunning the launcher. If a `.venv` came from another operating system or is broken, follow the launcher's advice to rename it as a backup before trying again. Do not disable firewall, certificate, or security checks to make installation succeed.
@@ -35,6 +39,14 @@ The local application is reached at `http://127.0.0.1:8080`; it is not available
 - Optional least-privilege Cloudflare credentials for authorised remediation
 
 The Docker build prepares the React interface in a separate build stage. Node.js is not required on the deployment host and is not present in the final image. Docker must be configured to run Linux containers, including on Windows. A source-based deployment without Docker additionally requires Node.js 22.12 or newer to create `frontend/dist`.
+
+### Outbound scan access
+
+The scanner queries public DNS and connects only to checked public addresses for MTA-STS HTTPS and optional SMTP STARTTLS probes. Private, loopback and special-purpose destinations are rejected, including hostnames that mix public and private answers. Connections use the checked address rather than resolving the hostname again at connection time.
+
+Scan work has time limits. MTA-STS policies must be a small plain-text HTTPS response with a valid server certificate; redirects are not followed and the scan fetch does not inherit HTTP proxy environment settings. SMTP STARTTLS checks observe transport capability and negotiated encryption, not certificate identity or successful mail delivery. Internal-only mail systems and networks that require an outbound HTTP proxy are not supported by these direct scan probes.
+
+If DNS, HTTPS or SMTP access is blocked, expect an **Incomplete** warning and no saved grade. Resolve the network restriction or review the domain manually; do not weaken the address or certificate checks. A retry that completes is still a configuration assessment, not proof of every email-security property.
 
 ## Configure
 
@@ -127,6 +139,8 @@ Before updating:
 
 The React migration does not require a separate frontend data store: the UI consumes the existing FastAPI-backed SQLite data. To roll back, stop the service, deploy the previously recorded image or revision against the backed-up volumes, and verify readiness and sign-in. Restore the backup only if the older application cannot safely read the upgraded data; restoring unnecessarily discards newer scans and settings.
 
+The deep-debug update adds incomplete-scan flags without deleting existing rows. New incomplete scans keep their observations but have no stored score or grade and are excluded from score averages. Older rows retain their original results because earlier versions did not record this distinction; the migration does not revalidate them. Run fresh scans before relying on old evidence. An older application may not understand the new warnings, so verify rollback behaviour on a separate copy first.
+
 The deprecated server-rendered interface remains available only when development mode leaves `NORTHFLUX_SERVE_REACT` disabled. It retains inline resources and a third-party chart dependency and is not available as a production rollback strategy; roll back to a tested image instead.
 
 ## Safe remediation rollout
@@ -135,12 +149,14 @@ Monitoring and automatic remediation are separate settings and are disabled by d
 
 1. Add one domain you own or are explicitly authorised to manage.
 2. Run read-only scans and review the proposed records.
-3. Confirm the configured Cloudflare zone and token permissions.
+3. Confirm the configured Cloudflare zone and the token's permissions in Cloudflare. NorthFlux's connection test reads data; it does not prove DNS write permission.
 4. Test a manual fix on a controlled record.
 5. Enable monitoring.
 6. Enable automatic remediation only after the audit log and recovery path have been verified.
 
-DKIM remains manual because provider-specific selector targets and public keys cannot be inferred safely from MX records alone.
+An incomplete scan never authorises an automatic fix. Failed or ambiguous prerequisite DNS reads also stop a proposed change. New SPF records require an operator-confirmed list of sending services; NorthFlux does not assume a mail provider. DKIM remains manual because provider-specific selector targets and public keys cannot be inferred safely from MX records alone.
+
+The automated suite does not perform live DNS writes or deploy MTA-STS Workers. Use a controlled zone and an approved rollback plan for those checks, and inspect both the provider state and the audit log afterwards. See [Integrations](INTEGRATIONS.md) for credential scope and deployment limits.
 
 ## Configuration reference
 
@@ -163,6 +179,6 @@ Environment variables are settings supplied to the running application. Keep sec
 | `CF_ZONE_ID` | Cloudflare zone authorised for changes | Required for DNS fixes |
 | `CF_ACCOUNT_ID` | Cloudflare account | Required for Worker deployment |
 | `CF_API_KEY` / `CF_EMAIL` | Legacy Cloudflare sign-in method | Prefer a scoped API token |
-| `NORTHFLUX_PYTHON` | Python command used by the launch wrappers | Optional; normally leave unset |
+| `NORTHFLUX_PYTHON` | Python executable used by the launch wrappers and browser tests | Optional; use an exact executable path, without surrounding quotes or extra arguments. Paths containing spaces are supported. |
 
 The old `AURORAEDGE_LOG_LEVEL` setting is retained for compatibility. Absolute storage paths are recommended in service definitions. Restart the service after changing environment settings, and do not pass secret values in a public screenshot or bug report.

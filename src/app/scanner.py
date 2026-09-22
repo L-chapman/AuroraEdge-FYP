@@ -3,6 +3,11 @@ import re
 import socket
 import ssl
 import logging
+import http.client
+import ipaddress
+import threading
+import time
+from contextvars import ContextVar
 
 # Configure module logger
 logger = logging.getLogger("northflux.scanner")
@@ -25,19 +30,35 @@ SMTP_TIMEOUT = 10.0
 SCAN_TIMEOUT = 30.0
 MAX_SPF_RECURSION = 10
 MAX_SPF_FETCHES = 50
+_SCAN_ERRORS = ContextVar("northflux_scan_errors", default=None)
+_SCAN_DEADLINE = ContextVar("northflux_scan_deadline", default=None)
+
+
+def _scan_error(message: str) -> None:
+    errors = _SCAN_ERRORS.get()
+    if errors is not None and message not in errors:
+        errors.append(message)
+
+
+def _remaining_timeout(requested: float) -> float:
+    deadline = _SCAN_DEADLINE.get()
+    remaining = requested if deadline is None else min(requested, deadline - time.monotonic())
+    if remaining <= 0:
+        _scan_error("Scan time limit reached; some checks could not be completed")
+        raise TimeoutError("Scan time limit reached")
+    return remaining
 
 
 def _fresh_resolver() -> "dns.resolver.Resolver":
-    """Return a resolver that bypasses local DNS cache.
+    """Use bounded public DNS resolution with a private per-call cache.
 
-    Uses Cloudflare (1.1.1.1) and Google (8.8.8.8) public DNS servers
-    so that recently-changed records are picked up immediately &#8212; critical
-    for the auto-fix demo where records are modified via the Cloudflare
-    API seconds before a rescan.
+    Cloudflare (1.1.1.1) and Google (8.8.8.8) may still return cached answers;
+    a fresh local resolver does not guarantee immediate DNS propagation.
     """
     r = dns.resolver.Resolver(configure=False)
     r.nameservers = ["1.1.1.1", "8.8.8.8"]
-    r.lifetime = RESOLVER_TIMEOUT
+    r.lifetime = _remaining_timeout(RESOLVER_TIMEOUT)
+    r.timeout = r.lifetime
     r.cache = dns.resolver.Cache()  # private cache, no sharing
     return r
 
@@ -96,7 +117,56 @@ _DOMAIN_RE = re.compile(
 
 def is_valid_domain(domain: str) -> bool:
     """Check if a string looks like a valid domain name."""
-    return bool(_DOMAIN_RE.match(domain))
+    return isinstance(domain, str) and len(domain) <= 253 and bool(_DOMAIN_RE.fullmatch(domain))
+
+
+def _public_addresses(host: str) -> List[str]:
+    """Resolve once with bounded DNS queries; reject private/mixed destinations."""
+    if dns is None or not is_valid_domain(host):
+        raise ValueError("A valid public hostname is required")
+    addresses = []
+    resolver = _fresh_resolver()
+    for kind in ("A", "AAAA"):
+        try:
+            answer = resolver.resolve(host, kind, lifetime=_remaining_timeout(RESOLVER_TIMEOUT))
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            continue
+        for record in answer:
+            address = ipaddress.ip_address(str(record))
+            if (not address.is_global or address.is_multicast or address.is_reserved
+                    or (address.version == 6 and address.ipv4_mapped is not None)):
+                raise ValueError("Private or special-purpose network destinations are not scanned")
+            addresses.append(str(address))
+    if not addresses:
+        raise ValueError("No public address found")
+    return list(dict.fromkeys(addresses))[:4]
+
+
+def _connect_public(host: str, port: int, timeout: float):
+    """Connect to an already-vetted numeric address, preventing DNS rebinding."""
+    address = _public_addresses(host)[0]
+    family = socket.AF_INET6 if ipaddress.ip_address(address).version == 6 else socket.AF_INET
+    connection = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(_remaining_timeout(timeout))
+        connection.connect((address, port))
+        return connection
+    except Exception:
+        connection.close()
+        raise
+
+
+def _socket_deadline(connection, seconds: float):
+    """Stop slow-drip peers as well as peers that send nothing at all."""
+    def expire():
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+    timer = threading.Timer(_remaining_timeout(seconds), expire)
+    timer.daemon = True
+    timer.start()
+    return timer
 
 
 def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
@@ -106,9 +176,11 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
     """
     try:
         # Connect to SMTP server
-        sock = socket.create_connection((mx_host, port), timeout=SMTP_TIMEOUT)
+        sock = _connect_public(mx_host, port, SMTP_TIMEOUT)
+        deadline = None
         try:
-            sock.settimeout(SMTP_TIMEOUT)
+            deadline = _socket_deadline(sock, SMTP_TIMEOUT)
+            sock.settimeout(_remaining_timeout(SMTP_TIMEOUT))
 
             # Read banner
             banner = sock.recv(1024).decode("utf-8", errors="ignore")
@@ -135,6 +207,7 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE  # We're testing capability, not cert validity
 
+            sock.settimeout(_remaining_timeout(SMTP_TIMEOUT))
             ssl_sock = context.wrap_socket(sock, server_hostname=mx_host)
 
             # Get TLS version and cipher
@@ -164,6 +237,8 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
 
             return (grade, tls_version or "", f"{cipher_name} ({cipher_bits}-bit)")
         finally:
+            if deadline is not None:
+                deadline.cancel()
             if sock is not None:
                 try:
                     sock.close()
@@ -171,10 +246,13 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
                     pass
 
     except socket.timeout:
+        _scan_error(f"STARTTLS check could not be completed for {mx_host}: connection timeout")
         return ("F", "", "Connection timeout")
     except ConnectionRefusedError:
+        _scan_error(f"STARTTLS check could not be completed for {mx_host}: connection refused")
         return ("F", "", "Connection refused")
     except Exception as e:
+        _scan_error(f"STARTTLS check could not be completed for {mx_host}: connection or TLS error")
         logger.debug("STARTTLS check failed for %s: %s", mx_host, e)
         return ("F", "", f"Error: {str(e)[:50]}")
 
@@ -218,7 +296,10 @@ def _txt(name: str) -> List[str]:
     try:
         ans = _fresh_resolver().resolve(name, "TXT")
         return ["".join([(b.decode("utf-8") if isinstance(b, bytes) else b) for b in r.strings]) for r in ans]
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        return []
     except Exception:
+        _scan_error(f"DNS TXT lookup could not be completed for {name}")
         return []
 
 
@@ -228,15 +309,18 @@ def _mx(name: str) -> List[str]:
     try:
         ans = _fresh_resolver().resolve(name, "MX")
         return [str(r.exchange).rstrip(".") for r in ans]
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        return []
     except Exception:
+        _scan_error(f"DNS MX lookup could not be completed for {name}")
         return []
 
 
 def _spf_fetch(domain: str) -> Optional[str]:
-    for t in _txt(domain):
-        if t.lower().startswith("v=spf1"):
-            return t
-    return None
+    records = [record for record in _txt(domain) if re.match(r"^v=spf1(?:\s|$)", record, re.IGNORECASE)]
+    if len(records) > 1:
+        _scan_error("Multiple SPF records require manual review; none was selected")
+    return records[0] if len(records) == 1 else None
 
 
 def _spf_count(domain: str) -> Tuple[int, str]:
@@ -250,7 +334,7 @@ def _spf_count(domain: str) -> Tuple[int, str]:
         total = 0
         tokens = spf.split()
         for tok in tokens:
-            t = tok.lower()
+            t = tok.lower().lstrip("+-~?")
             if t.startswith("include:"):
                 total += 1
                 target = t.split(":", 1)[1]
@@ -300,6 +384,15 @@ def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
         for t in _txt(name):
             tl = t.lower()
             if tl.startswith("v=dkim1") or " v=dkim1" in tl:
+                tags = {}
+                for part in t.split(";"):
+                    key, separator, value = part.strip().partition("=")
+                    if separator:
+                        tags.setdefault(key.lower(), value.strip())
+                # An empty p= revokes the key; presence alone is not usable DKIM.
+                if not tags.get("p"):
+                    notes.append(f"{sel}:empty-or-revoked-key")
+                    continue
                 found.append(sel)
                 for part in t.split(";"):
                     part = part.strip()
@@ -310,6 +403,36 @@ def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
                         if "y" in val:
                             notes.append(f"{sel}:test")
     return sorted(set(found)), sorted(algos), notes
+
+
+def _fetch_mta_sts_policy(host: str) -> str:
+    """Fetch a small verified HTTPS policy without redirects or proxy inheritance."""
+    context = ssl.create_default_context()
+    connection = http.client.HTTPSConnection(host, timeout=HTTP_TIMEOUT, context=context)
+    raw = _connect_public(host, 443, HTTP_TIMEOUT)
+    deadline = None
+    try:
+        deadline = _socket_deadline(raw, HTTP_TIMEOUT)
+        raw.settimeout(_remaining_timeout(HTTP_TIMEOUT))
+        secure = context.wrap_socket(raw, server_hostname=host)
+        deadline.cancel()
+        deadline = _socket_deadline(secure, HTTP_TIMEOUT)
+        connection.sock = secure  # retain hostname verification/Host while pinning the IP
+        connection.request("GET", "/.well-known/mta-sts.txt", headers={"Accept": "text/plain"})
+        response = connection.getresponse()
+        if response.status != 200:
+            raise ValueError("MTA-STS requires HTTP 200; redirects are not followed")
+        if response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() != "text/plain":
+            raise ValueError("MTA-STS policy must be plain text")
+        body = response.read(10_241)
+        if len(body) > 10_240:
+            raise ValueError("MTA-STS policy exceeds the 10 KiB scan limit")
+        return body.decode("utf-8")
+    finally:
+        if deadline is not None:
+            deadline.cancel()
+        connection.close()
+        raw.close()
 
 
 def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
@@ -323,39 +446,51 @@ def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
     # Step 1: Check DNS TXT record at _mta-sts.{domain}
     txt_name = f"_mta-sts.{domain}"
     txt_records = _txt(txt_name)
-    has_dns = any(t.lower().startswith("v=stsv1") for t in txt_records)
-
-    if not has_dns:
+    candidates = [record for record in txt_records if record.startswith("v=STSv1;")]
+    if len(candidates) != 1:
+        if candidates:
+            _scan_error("Multiple MTA-STS records require manual review")
         return (False, "", 0, "")
-
-    # Step 2: Fetch the HTTPS policy file
-    if requests is None:
-        # DNS record present but cannot verify HTTPS &#8212; still mark present
-        return (True, "", 0, "")
-    url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
-    try:
-        r = requests.get(url, timeout=HTTP_TIMEOUT, stream=True)
-        if r.status_code != 200:
+    tags = {}
+    for field in candidates[0].split(";"):
+        if not field.strip():
+            continue
+        key, separator, value = field.strip().partition("=")
+        if not separator:
+            _scan_error("MTA-STS DNS record is invalid; review it before making changes")
             return (False, "", 0, "")
-        # Limit response size to 10 KB to prevent resource exhaustion
-        body = r.content[:10_240].decode("utf-8", errors="ignore")
-        r.close()
-        mode = ""
-        max_age = 0
-        first = ""
-        for i, line in enumerate(body.splitlines()):
-            if i == 0:
-                first = line.strip()
-            s = line.strip()
-            if s.lower().startswith("mode:"):
-                mode = s.split(":", 1)[1].strip().lower()
-            if s.lower().startswith("max_age:"):
-                try:
-                    max_age = int(s.split(":", 1)[1].strip())
-                except Exception:
-                    pass
-        return (True, mode, max_age, first)
+        tags.setdefault(key, value)
+    if not re.fullmatch(r"[A-Za-z0-9]{1,32}", tags.get("id", "")):
+        _scan_error("MTA-STS DNS policy ID is invalid; review it before making changes")
+        return (False, "", 0, "")
+    try:
+        body = _fetch_mta_sts_policy(f"mta-sts.{domain}")
+        fields = {}
+        mx_patterns = []
+        for line in body.splitlines():
+            key, separator, value = line.partition(":")
+            if not separator or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,31}", key):
+                _scan_error("MTA-STS HTTPS policy is invalid; review it before making changes")
+                return (False, "", 0, "")
+            value = value.strip(" \t")
+            if key == "mx":
+                pattern = value[2:] if value.startswith("*.") else value
+                if not is_valid_domain(pattern):
+                    _scan_error("MTA-STS HTTPS policy contains an invalid MX pattern")
+                    return (False, "", 0, "")
+                mx_patterns.append(value)
+            else:
+                fields.setdefault(key, value)  # RFC 8461: first non-repeated field wins
+        mode = fields.get("mode", "")
+        age_text = fields.get("max_age", "")
+        if (fields.get("version") != "STSv1" or mode not in {"enforce", "testing", "none"}
+                or not re.fullmatch(r"[0-9]{1,10}", age_text)
+                or int(age_text) > 31_557_600 or (mode != "none" and not mx_patterns)):
+            _scan_error("MTA-STS HTTPS policy has missing or invalid required fields")
+            return (False, "", 0, "")
+        return (True, mode, int(age_text), body.splitlines()[0])
     except Exception:
+        _scan_error("MTA-STS policy could not be verified; review it manually before changing DNS")
         return (False, "", 0, "")
 
 
@@ -405,7 +540,6 @@ _DNSBL_ZONES = [
     "zen.spamhaus.org",
     "bl.spamcop.net",
     "b.barracudacentral.org",
-    "dnsbl.sorbs.net",
     "dnsbl-1.uceprotect.net",
 ]
 
@@ -413,17 +547,24 @@ _DNSBL_ZONES = [
 def _resolve_a(host: str) -> List[str]:
     """Resolve A records for a hostname. Returns list of IP strings."""
     if dns is None:
+        _scan_error(f"MX address lookup could not be completed for {host}: DNS resolver unavailable")
         return []
     try:
         ans = _fresh_resolver().resolve(host, "A")
         return [str(r) for r in ans]
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        return []
     except Exception:
+        _scan_error(f"MX address lookup could not be completed for {host}")
         return []
 
 
 def _check_rbl(ip: str) -> List[str]:
     """Query DNSBL zones for *ip*.  Returns list of zone names that list it."""
     listed_on: List[str] = []
+    if dns is None:
+        _scan_error("DNSBL checks could not be completed: DNS resolver unavailable")
+        return listed_on
     parts = ip.split(".")
     if len(parts) != 4:
         return listed_on
@@ -431,10 +572,19 @@ def _check_rbl(ip: str) -> List[str]:
     for zone in _DNSBL_ZONES:
         query = f"{reversed_ip}.{zone}"
         try:
-            _fresh_resolver().resolve(query, "A")
-            listed_on.append(zone)
-        except Exception:
+            answer = _fresh_resolver().resolve(query, "A")
+            # Spamhaus 127.255.255.* responses signal blocked/invalid queries,
+            # not a reputation listing. DNS wildcard addresses are not listings.
+            codes = [ipaddress.IPv4Address(str(record)) for record in answer]
+            listing_codes = [code for code in codes if code in ipaddress.IPv4Network("127.0.0.0/24")]
+            if listing_codes:
+                listed_on.append(zone)
+            if len(listing_codes) != len(codes) or not codes:
+                _scan_error(f"DNSBL {zone} returned a provider error or unexpected response; reputation is unverified")
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
             pass
+        except Exception:
+            _scan_error(f"DNSBL lookup could not be completed for {zone}")
     return listed_on
 
 
@@ -488,11 +638,36 @@ def _domain_exists(domain: str) -> bool:
     try:
         _fresh_resolver().resolve(domain, "NS")
         return True
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+        return False
     except Exception:
+        _scan_error(f"DNS existence check could not be completed for {domain}")
         return False
 
 
-def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
+def _usable_dmarc(records: List[str]) -> bool:
+    """Reject ambiguity and malformed policy fields rather than awarding credit."""
+    if len(records) != 1:
+        return False
+    tags = {}
+    for field in records[0].split(";"):
+        if not field.strip():
+            continue
+        key, separator, value = field.strip().partition("=")
+        key = key.lower()
+        if not separator or key in tags:
+            return False
+        tags[key] = value.strip().lower()
+    if tags.get("p") not in {"none", "quarantine", "reject"}:
+        return False
+    if "sp" in tags and tags["sp"] not in {"none", "quarantine", "reject"}:
+        return False
+    if any(key in tags and tags[key] not in {"r", "s"} for key in ("adkim", "aspf")):
+        return False
+    return "pct" not in tags or bool(re.fullmatch(r"[0-9]{1,3}", tags["pct"]) and int(tags["pct"]) <= 100)
+
+
+def _scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
     """
     Comprehensive email security scan for a domain.
 
@@ -538,8 +713,10 @@ def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
     mx_present = len(mx) > 0
     # DMARC
     dmarc_txts = _txt(f"_dmarc.{d}")
-    dmarc_recs = [t for t in dmarc_txts if t.lower().startswith("v=dmarc1")]
-    dmarc_present = len(dmarc_recs) > 0
+    dmarc_recs = [t for t in dmarc_txts if re.match(r"^v=dmarc1(?:;|$)", t, re.IGNORECASE)]
+    dmarc_present = _usable_dmarc(dmarc_recs)
+    if dmarc_recs and not dmarc_present:
+        _scan_error("DMARC has duplicate or invalid policy fields; review the DNS record manually")
     dmarc_policy = ""
     dmarc_strength = ""
     if dmarc_present:
@@ -591,8 +768,9 @@ def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
         for tok in tokens:
             if tok.startswith("include:"):
                 spf_includes.append(tok.split(":", 1)[1])
-            if tok in ("-all", "~all", "?all", "+all"):
-                spf_all_mechanism = tok
+            if tok in ("all", "-all", "~all", "?all", "+all"):
+                spf_all_mechanism = "+all" if tok == "all" else tok
+                break  # later mechanisms cannot override the first matching all
 
     # DMARC subdomain policy (sp=) and alignment modes
     dmarc_sp = ""  # subdomain policy
@@ -664,3 +842,21 @@ def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
         "starttls_worst": starttls_worst,
         "notes": "; ".join(notes),
     }
+
+
+def scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]:
+    """Scan with per-call diagnostics so DNS failures never authorise blind fixes."""
+    errors: List[str] = []
+    token = _SCAN_ERRORS.set(errors)
+    deadline_token = _SCAN_DEADLINE.set(time.monotonic() + SCAN_TIMEOUT)
+    try:
+        if dns is None:
+            _scan_error("DNS resolver is unavailable; record absence could not be verified")
+        result = _scan_domain(domain, check_starttls=check_starttls)
+        result["scan_incomplete"] = bool(errors)
+        if errors:
+            result["notes"] = "; ".join(filter(None, [str(result.get("notes", "")), *errors]))
+        return result
+    finally:
+        _SCAN_ERRORS.reset(token)
+        _SCAN_DEADLINE.reset(deadline_token)
