@@ -84,7 +84,7 @@ Pending session requests are cancelled during sign-out and authentication failur
 
 Generated DNS text now respects TXT chunk limits, validates reporting-address edge cases and encodes mail addresses without double encoding. Incomplete results are visibly uncertain rather than green successes. The existing keyboard, narrow-screen, reduced-motion and security-policy checks remain in place.
 
-The browser harness now quotes Python executable paths containing spaces on Windows and Linux. A new end-to-end journey checks incomplete scanning, onboarding, stored history and PDF access. Its navigation waits target the arriving page rather than typing into the outgoing page's identically named field.
+The browser harness now quotes Python executable paths containing spaces on Windows and Linux. A new end-to-end journey checks incomplete scanning, onboarding, stored history and PDF access. Its navigation waits target the arriving page rather than typing into the outgoing page's identically named field. The first Linux pass also caught an incorrect helper expectation during the expired-session test: the application correctly redirected to login, while the helper expected the protected page. That expectation was corrected rather than weakening the application's session handling or adding automatic retries.
 
 Evidence: [frontend tests](TESTING.md#frontend-unit-and-component-suite), [browser journeys](../frontend/e2e/operator-journeys.spec.ts), [launch-command tests](../frontend/test-support/launch-command.test.ts).
 
@@ -123,7 +123,7 @@ The measured backend coverage is approximately **65% including branches**, not 1
 
 The local test framework emits an upstream deprecation warning; package audits can emit cache warnings while rebuilding stale cache entries. Those are not passing evidence for unsupported environments, but neither is an upstream warning automatically an application crash. No known dependency vulnerability was reported by the completed audits in this review. Recheck before subsequent releases.
 
-Windows Firefox could not launch on this machine in the earlier local checks; it must not be counted as passed here. CI additionally covers Python 3.10/3.12 on Windows and Ubuntu, clean launch with Node 22.12/24, Linux's four browser profiles, Windows Chromium, and the restricted production container. Packaging-only tests can be skipped inside a container that intentionally lacks PowerShell/Git. See [Testing](TESTING.md) for commands and the exact supported matrix.
+Windows Firefox could not launch on this machine in the earlier local checks; it must not be counted as passed here. CI additionally covers Python 3.10/3.12 on Windows and Ubuntu, clean launch with Node 22.12/24, Linux's four browser profiles, Windows Chromium, and the restricted production container. The same backend suite runs 612 cases on Ubuntu, 611 with one filename-related skip on Windows CI, and 607 with five packaging-tool skips inside the restricted container. See [Testing](TESTING.md) for commands and the exact supported matrix.
 
 ## What should improve next
 

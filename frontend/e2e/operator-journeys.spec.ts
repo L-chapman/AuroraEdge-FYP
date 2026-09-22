@@ -40,11 +40,11 @@ async function clearData(page: Page) {
   expect(statuses).toEqual([200, 200])
 }
 
-async function navigateTo(page: Page, name: 'Scan' | 'Domains' | 'Generator' | 'Settings') {
+async function navigateTo(page: Page, name: 'Scan' | 'Domains' | 'Generator' | 'Settings', expectedPath = name.toLowerCase()) {
   const link = page.getByRole('navigation').getByRole('link', { name, exact: true })
   if (!(await link.isVisible())) await page.getByRole('button', { name: 'Menu' }).click()
   await link.click()
-  await expect(page).toHaveURL(new RegExp(`/${name.toLowerCase()}$`))
+  await expect(page).toHaveURL(new RegExp(`/${expectedPath}$`))
   // Scan and Domains both have a textbox named Domain. Wait for the new page
   // before filling it, otherwise a fast test can type into the outgoing page.
   await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Email security, at a glance')
@@ -70,7 +70,7 @@ test('rejects a bad token, signs in without browser storage, and signs out', asy
   // Expired cookies must invalidate the cached React session as soon as a
   // protected query receives a 401, rather than leaving a stale dashboard.
   await context.clearCookies()
-  await navigateTo(page, 'Domains')
+  await navigateTo(page, 'Domains', 'login')
   await expect(page).toHaveURL(/\/login$/)
   await expect(page.getByRole('heading', { name: 'Operator sign in' })).toBeVisible()
   await page.getByLabel('Operator token').fill(token)
