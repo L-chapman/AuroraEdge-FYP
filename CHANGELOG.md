@@ -4,6 +4,7 @@ This project follows semantic versioning from the NorthFlux Security rename onwa
 
 ## 4.0.0 - Unreleased
 
+- Removed retired demonstration and live-DNS experiment scripts from the current product, retained fixed Git-history references, and archived the outdated architecture illustration without discarding academic or audit evidence. Current guides now point to the latest function audit.
 - Added a second [function-by-function audit and researched product comparison](docs/FUNCTION_AUDIT.md), including the current RFC 9989 compatibility gap.
 - Corrected fragmented SMTP replies, SPF branch counting, null-MX handling, DKIM/TLS-RPT parsing, provider detection and collision-safe Worker preparation.
 - Made generated DNS recommendations manual where sender inventory, real reporting destinations or TLS readiness cannot be established; retired unsafe live-DNS demonstration scripts.

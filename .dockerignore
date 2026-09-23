@@ -13,6 +13,12 @@ coverage.xml
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Local configuration and credentials must never enter the build context.
 .env

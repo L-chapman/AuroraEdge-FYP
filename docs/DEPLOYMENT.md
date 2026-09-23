@@ -4,7 +4,7 @@ This guide covers two different needs: trying NorthFlux on your own computer, an
 
 For a lasting installation, the supported design is one Docker container for one operator, using a shared access token rather than individual accounts and roles. NorthFlux runs scheduled checks inside the application and stores its data in a local SQLite database. Run exactly one application worker and one container against the same stored data; multiple copies are not supported.
 
-This guide is an installation and validation procedure, not a claim that your server has been deployed or tested. The [deep-debug review](DEEP_DEBUG_REVIEW.md) records completed release checks; live production and Cloudflare changes require separate, authorised validation.
+This guide is an installation and validation procedure, not a claim that your server has been deployed or tested. The [function audit](FUNCTION_AUDIT.md) records the latest review and verification, while the [deep-debug review](DEEP_DEBUG_REVIEW.md) preserves earlier evidence; live production and Cloudflare changes require separate, authorised validation.
 
 ## Try it on Windows or Linux
 

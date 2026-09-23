@@ -15,7 +15,7 @@ This report verifies the AuroraEdge repository against the **final project spec*
 Release-readiness addendum (2026-04-14):
 - The full automated suite was rerun with `python -m pytest -q` and finished at **397 passed, 0 skipped**.
 - `verify_system.py` now accepts `--domain` and `--offline` so it is less fragile for marking.
-- `docs/ARCHITECTURE.md`, `docs/architecture_diagram.svg`, and `docs/academic/archive/FINAL_RELEASE_NOTES.md` now cover the design and final release evidence explicitly.
+- `docs/ARCHITECTURE.md`, the [historical architecture diagram](architecture_diagram.svg), and `docs/academic/archive/FINAL_RELEASE_NOTES.md` now cover the design and final release evidence explicitly.
 - `scripts/create_submission_zip.ps1` creates a clean assessment ZIP without local environment and cache folders.
 
 Use this report when you need fast traceability from the written spec to the repository evidence.
@@ -227,7 +227,7 @@ A dissertation-ready lab protocol you can write up (and optionally execute):
 
 - **Spec text**: `docs/academic/archive/FYP_SPEC.md`
 - **Evaluator usage**: `README.md`, `docs/academic/archive/TESTING_GUIDE.md`
-- **Architecture overview**: `docs/ARCHITECTURE.md` and `docs/architecture_diagram.svg`
+- **Architecture overview**: `docs/ARCHITECTURE.md` and the [historical architecture diagram](architecture_diagram.svg)
 - **Release snapshot**: `docs/academic/archive/FINAL_RELEASE_NOTES.md`
 - **Core scanner**: `src/app/scanner.py`
 - **Rules + score**: `src/app/rules.py` (`evaluate`, `generate_remediation`)
