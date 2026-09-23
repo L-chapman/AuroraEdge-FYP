@@ -6,15 +6,17 @@ It brings the checks, explanations, scan history, and draft DNS recommendations 
 
 ## What a reviewer can try
 
-Start with the [local setup](../README.md), then follow this short route:
+For a presentation without live scans, start with the [isolated fictional showcase](screenshots/README.md) and [short recording script](INTERVIEW_GUIDE.md). For an authorised live assessment, use the [normal local setup](../README.md), then follow this route:
 
 1. Open **Scan** and check a domain you own or are authorised to assess. A scan reads public information; it does not automatically add the domain to monitoring or change its DNS.
 2. Read the grade, individual findings, and suggested next steps. If a check cannot finish reliably, NorthFlux shows **Incomplete**, explains why and withholds a grade. A completed grade summarises the implemented rules; it is not a security certification.
 3. Add an authorised domain under **Domains** to keep it in the managed list. Open its detail page to review its results and stored history.
 4. Open **Generator** to prepare email-security records. Review the values before copying anything into your DNS provider.
-5. Open **Settings**. Scheduled monitoring is off by default. The retained automatic-remediation setting is a compatibility control: current generated recommendations require manual review and do not trigger writes. You do not need Cloudflare credentials for the read-only tour.
+5. Open **Settings**. Scheduled monitoring is off by default. Current generated recommendations require manual review and do not trigger writes. Earlier stored remediation preferences are retained for compatibility, not offered as a working automation feature. Alerts appear inside the application; a stored legacy email address does not enable email delivery. You do not need Cloudflare credentials for the read-only tour.
 
 Use **Sign out** when finished with an authenticated session. Never use a real Cloudflare token in a public demonstration.
+
+The active overview requests fresh saved data every 60 seconds and provides a manual **Refresh** button. This is not continuous scanning: scheduled scans use the interval selected in Settings, and a manual scan is a separate action. Cloudflare verification reads provider information only; success does not prove DNS-write permission.
 
 ## The checks, without the alphabet soup
 
@@ -55,13 +57,13 @@ For the full component map, request flow, and storage design, continue to [Archi
 
 ## What the test evidence does—and does not—show
 
-The [testing guide](TESTING.md) explains how to repeat the checks. The [function audit](FUNCTION_AUDIT.md) records the latest review and completed verification; the [deep-debug review](DEEP_DEBUG_REVIEW.md) preserves the preceding review's evidence. Automated checks include backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene. Reported frontend coverage percentages apply to selected logic modules, not every UI page or interaction.
+The [release evidence](RELEASE_EVIDENCE.md) identifies the revision and checks actually completed; the [testing guide](TESTING.md) explains how to repeat them. The [function audit](FUNCTION_AUDIT.md) and [deep-debug review](DEEP_DEBUG_REVIEW.md) preserve earlier review evidence. Automated checks include backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene. Reported frontend coverage percentages apply to selected logic modules, not every UI page or interaction.
 
 Browser tests use controlled sample scans and disable Cloudflare writes. This makes failures repeatable and prevents a test run from changing a live domain. It does **not** verify every external DNS service, every network, or an operator's real Cloudflare permissions. The settings connection test only reads provider data; it cannot prove write permission. No live Cloudflare write or production deployment is claimed by the deep-debug release. Those need separate, authorised checks on the intended deployment.
 
 ## Honest release boundaries
 
-This is a personal project with a substantial implemented and tested feature set. The supported design is one application instance for a single operator—not a hosted multi-customer service. It currently has a shared access token rather than individual accounts and roles. The server's main application module is still large and is a documented refactoring target.
+This began as Leon Chapman's independent home project, AuroraEdge, before becoming his Belfast Metropolitan College final-year project. AI assistance contributed to the later modernisation and review; the [interview guide](INTERVIEW_GUIDE.md) connects design decisions and fixes to inspectable code and tests. The supported design is one application instance for a single operator—not a hosted multi-customer service. It currently has a shared access token rather than individual accounts and roles. The server's main application module is still large and is a documented refactoring target.
 
 A public server also needs HTTPS, protected storage, backups, and a tested recovery plan. A local launch working successfully is not the same as a production installation being ready. See [Deployment](DEPLOYMENT.md) for that distinction.
 

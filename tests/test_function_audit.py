@@ -305,6 +305,38 @@ def test_real_generated_guidance_is_manual_review_not_failed(provider, monkeypat
         assert result["pre_fix_score"] is None
 
 
+@pytest.mark.parametrize("legacy_remediation", ["true", "false"])
+def test_legacy_remediation_flag_never_makes_generated_onboarding_advice_write(
+    operator, provider, legacy_remediation,
+):
+    from app.dns_fix import CloudflareDNS
+
+    client, db = operator
+    cf, writer, _ = provider
+    db.set_setting("automatic_remediation", legacy_remediation)
+    cf.generate_fixes.side_effect = lambda scan: CloudflareDNS.generate_fixes(cf, scan)
+    cf.detect_email_provider.return_value = {"provider": "unknown"}
+
+    response = client.post("/api/managed-domains", json={
+        "domain": "example.com", "automatic_remediation": True,
+    })
+
+    assert response.status_code == 200
+    assert db.get_setting("automatic_remediation") == legacy_remediation
+    assert db.get_managed_domains()[0]["domain"] == "example.com"
+    writer.assert_not_called()
+    for operation in (
+        "fix_spf", "fix_dmarc", "fix_tls_rpt", "fix_dkim",
+        "fix_mta_sts_dns", "deploy_mta_sts_worker",
+        "create_or_update_txt", "create_or_update_cname", "create_or_update_a",
+    ):
+        getattr(cf, operation).assert_not_called()
+    if legacy_remediation == "true":
+        cf.generate_fixes.assert_called_once()
+    else:
+        cf.generate_fixes.assert_not_called()
+
+
 def test_event_stream_stops_after_session_revocation(monkeypatch):
     from starlette.requests import Request
 

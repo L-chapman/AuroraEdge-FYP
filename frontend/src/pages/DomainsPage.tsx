@@ -54,7 +54,7 @@ export function DomainsPage() {
       setRemoveDomain(null)
       await invalidate()
       setMessageTone('success')
-      setMessage(`${removed} was removed from monitoring. Its scan history is retained.`)
+      setMessage(`${removed} was removed from managed domains and any scheduled scanning. Its scan history is retained.`)
     },
   })
 
@@ -102,15 +102,15 @@ export function DomainsPage() {
           </Field>
           <Button type="submit" disabled={addMutation.isPending}>{addMutation.isPending ? 'Adding and scanning…' : 'Add domain'}</Button>
         </form>
-        <p className="field__hint">Adding a domain runs an initial read-only scan. It never changes DNS automatically.</p>
+        <p className="field__hint">Adding a domain runs an initial read-only scan. It does not change DNS or enable scheduled scanning. Manage the schedule in Settings.</p>
       </Card>
       {message ? <InlineNotice tone={messageTone}>{message}</InlineNotice> : null}
       {errorMessage ? <InlineNotice tone="danger">{errorMessage}</InlineNotice> : null}
 
       <Card>
-        <div className="section-heading"><div><p className="eyebrow">Portfolio</p><h2>{domainsQuery.data.count} monitored domain{domainsQuery.data.count === 1 ? '' : 's'}</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">Portfolio</p><h2>{domainsQuery.data.count} managed domain{domainsQuery.data.count === 1 ? '' : 's'}</h2></div></div>
         {domainsQuery.data.domains.length === 0 ? (
-          <EmptyState title="No domains under management" description="Add your first domain above, or run a one-off scan without adding it to monitoring." action={<Link className="button button--secondary" to="/scan">Open scanner</Link>} />
+          <EmptyState title="No domains under management" description="Add your first domain above, or run a one-off scan without adding it to your managed list." action={<Link className="button button--secondary" to="/scan">Open scanner</Link>} />
         ) : (
           <div className="domain-card-grid">
             {domainsQuery.data.domains.map((item) => (
@@ -136,9 +136,9 @@ export function DomainsPage() {
 
       <ConfirmDialog
         open={Boolean(removeDomain)}
-        title={`Stop monitoring ${removeDomain ?? 'this domain'}?`}
-        description="The domain will leave continuous monitoring. Existing scan history and reports are retained until you explicitly delete them."
-        confirmLabel="Remove from monitoring"
+        title={`Remove ${removeDomain ?? 'this domain'} from managed domains?`}
+        description="The domain will leave your managed list and any scheduled scanning. Existing scan history and reports are retained until you explicitly delete them."
+        confirmLabel="Remove managed domain"
         error={removeError}
         dangerous
         busy={removeMutation.isPending}

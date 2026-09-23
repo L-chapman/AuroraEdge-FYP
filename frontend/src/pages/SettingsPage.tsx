@@ -14,10 +14,8 @@ z.config({ jitless: true })
 
 const settingsSchema = z.object({
   org_name: z.string().trim().max(120, 'Organisation name must be 120 characters or fewer.'),
-  alert_email: z.union([z.literal(''), z.email('Enter a valid email address.')]),
   monitor_interval: z.enum(['6', '12', '24', '48', '168']),
   monitoring_enabled: z.boolean(),
-  automatic_remediation: z.boolean(),
   cf_zone_id: z.string().trim().max(80),
   cf_account_id: z.string().trim().max(80),
   cf_api_token: z.string().max(512),
@@ -53,7 +51,7 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
   const [clearOpen, setClearOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
-  const [cloudflareResult, setCloudflareResult] = useState<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean> } | null>(null)
+  const [cloudflareResult, setCloudflareResult] = useState<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean | null> } | null>(null)
   const queryClient = useQueryClient()
   const form = useForm<SettingsForm>({
     resolver: zodResolver(settingsSchema),
@@ -62,10 +60,8 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
     // must never reset a draft, move the caret, or replace selected text.
     defaultValues: {
       org_name: settingString(settings, 'org_name'),
-      alert_email: settingString(settings, 'alert_email'),
       monitor_interval: (['6', '12', '24', '48', '168'].includes(settingString(settings, 'monitor_interval')) ? settingString(settings, 'monitor_interval') : '24') as SettingsForm['monitor_interval'],
       monitoring_enabled: asBoolean(settings.monitoring_enabled),
-      automatic_remediation: asBoolean(settings.automatic_remediation),
       cf_zone_id: settingString(settings, 'cf_zone_id'),
       cf_account_id: settingString(settings, 'cf_account_id'),
       cf_api_token: '',
@@ -90,7 +86,7 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
   })
 
   const testCloudflare = useMutation({
-    mutationFn: () => apiRequest<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean> }>('/api/settings/test-cloudflare', { method: 'POST' }),
+    mutationFn: () => apiRequest<{ ok: boolean; message: string; zone_name?: string; permissions?: Record<string, boolean | null> }>('/api/settings/test-cloudflare', { method: 'POST' }),
     onSuccess: setCloudflareResult,
   })
 
@@ -119,9 +115,10 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
             <Field label="Organisation name" htmlFor="org-name" error={form.formState.errors.org_name?.message}>
               <input id="org-name" {...form.register('org_name')} />
             </Field>
-            <Field label="Alert email" htmlFor="alert-email" hint="Reserved for deployment-level notification integrations." error={form.formState.errors.alert_email?.message}>
-              <input id="alert-email" type="email" autoComplete="email" {...form.register('alert_email')} />
-            </Field>
+            <div className="field">
+              <h3>In-app alerts</h3>
+              <p className="field__hint">Monitoring alerts appear in NorthFlux. Email and webhook delivery are not available in this version. Any saved contact email is kept unchanged.</p>
+            </div>
           </div>
         </Card>
 
@@ -132,8 +129,12 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
               <select id="monitor-interval" {...form.register('monitor_interval')}><option value="6">Every 6 hours</option><option value="12">Every 12 hours</option><option value="24">Every 24 hours</option><option value="48">Every 48 hours</option><option value="168">Weekly</option></select>
             </Field>
             <div className="toggle-stack">
-              <label className="toggle"><input type="checkbox" {...form.register('monitoring_enabled')} /><span><strong>Continuous monitoring</strong><small>Periodically rescan managed domains.</small></span></label>
-              <label className="toggle toggle--danger"><input type="checkbox" {...form.register('automatic_remediation')} /><span><strong>Automatic remediation</strong><small>High risk: may change authorised Cloudflare DNS records after drift. Policy and reporting changes still require manual review; this does not automatically enforce email protection.</small></span></label>
+              <label className="toggle"><input type="checkbox" {...form.register('monitoring_enabled')} /><span><strong>Scheduled scanning</strong><small>Rescan managed domains at the selected interval and show alerts in NorthFlux.</small></span></label>
+              <div className="notice notice--info">
+                <strong>Manual DNS review</strong>
+                <p>Generated recommendations do not change DNS. Review them and publish approved records through your DNS provider.</p>
+                <p>Any saved automatic-remediation preference is retained for compatibility; it does not enable automatic DNS changes.</p>
+              </div>
             </div>
           </div>
         </Card>
@@ -146,11 +147,12 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
             <Field label="Account ID" htmlFor="cf-account"><input id="cf-account" autoComplete="off" {...form.register('cf_account_id')} /></Field>
             {!production ? <Field label="API token" htmlFor="cf-token" hint="The current token is never displayed. Leave blank to keep it unchanged."><input id="cf-token" type="password" autoComplete="new-password" {...form.register('cf_api_token')} /></Field> : null}
           </div>
-          <div className="button-row"><Button type="button" variant="secondary" disabled={testCloudflare.isPending || unavailable || save.isPending} onClick={() => { setCloudflareResult(null); testCloudflare.mutate() }}>{testCloudflare.isPending ? 'Testing saved configuration…' : 'Test saved connection'}</Button></div>
-          {cloudflareResult ? <InlineNotice tone={cloudflareResult.ok ? 'success' : 'warning'}><strong>{cloudflareResult.ok ? 'Connection verified.' : 'Connection unavailable.'}</strong> {cloudflareResult.message}{cloudflareResult.zone_name ? ` Zone: ${cloudflareResult.zone_name}.` : ''}</InlineNotice> : null}
+          <p className="field__hint">This read-only check uses the saved configuration. It does not change DNS or verify write permission. Save edits first to check a different configuration.</p>
+          <div className="button-row"><Button type="button" variant="secondary" disabled={testCloudflare.isPending || unavailable || save.isPending} onClick={() => { setCloudflareResult(null); testCloudflare.mutate() }}>{testCloudflare.isPending ? 'Checking saved read access…' : 'Check saved read access'}</Button></div>
+          {cloudflareResult ? <InlineNotice tone={cloudflareResult.ok ? 'success' : 'warning'}><strong>{cloudflareResult.ok ? 'Read check completed.' : 'Read check unavailable.'}</strong> {cloudflareResult.message}{cloudflareResult.zone_name ? ` Zone: ${cloudflareResult.zone_name}.` : ''}</InlineNotice> : null}
         </Card>
 
-        <div className="sticky-actions"><Button type="submit" disabled={save.isPending || unavailable || !form.formState.isDirty}>{save.isPending ? 'Saving…' : 'Save settings'}</Button><span aria-live="polite">{form.formState.isDirty ? 'Unsaved changes' : 'No unsaved edits'}</span></div>
+        <div className="form-actions"><Button type="submit" disabled={save.isPending || unavailable || !form.formState.isDirty}>{save.isPending ? 'Saving…' : 'Save settings'}</Button><span aria-live="polite">{form.formState.isDirty ? 'Unsaved changes' : 'No unsaved edits'}</span></div>
       </form>
 
       <Card className="danger-zone">

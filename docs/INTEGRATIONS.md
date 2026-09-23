@@ -2,7 +2,7 @@
 
 ## Cloudflare
 
-Cloudflare is optional. Read-only scanning works without it. The current generated recommendations are all manual: SPF, DMARC, DKIM, TLS-RPT and MTA-STS need sender, destination or certificate-readiness checks that a DNS snapshot cannot supply. The retained automatic-remediation setting is a compatibility setting, not a promise that these findings will trigger writes. Guarded low-level DNS and Worker methods remain available for separately reviewed explicit integrations.
+Cloudflare is optional. Read-only scanning works without it. The current generated recommendations are all manual: SPF, DMARC, DKIM, TLS-RPT and MTA-STS need sender, destination or certificate-readiness checks that a DNS snapshot cannot supply. Older stored automatic-remediation settings are preserved for compatibility, not presented as working automation; enabling a legacy flag does not make these recommendations write-capable. Guarded low-level DNS and Worker methods remain available for separately reviewed explicit integrations.
 
 The settings connection test makes read-only probes. A successful result confirms only what those reads establish; it does **not** prove that the token can edit DNS or deploy a Worker. Confirm permissions in Cloudflare and perform any live validation separately on an authorised test zone. The [deep-debug review](DEEP_DEBUG_REVIEW.md) does not claim a live Cloudflare write or deployment test.
 
@@ -26,7 +26,13 @@ MTA-STS Worker deployment checks observed MX names and existing host/route recor
 
 Worker names now include a hash of the full domain to avoid dot/hyphen collisions. An existing same-name script is not overwritten automatically. Older Worker deployments need manual migration and policy review. The application prevents overlapping same-domain remediation orchestration within its one process; direct low-level calls and external administrators are not coordinated by that lock.
 
-Legacy live-DNS demo reset/restore scripts are retired. Their offline preview remains available, but they must not be used to weaken a public zone or as a rollback mechanism. See the [function audit](FUNCTION_AUDIT.md) for the safety rationale and current standards limitations.
+Legacy live-DNS demo reset/restore scripts and their old command-line preview were removed from the current product. Historical source is linked from the [academic archive](academic/README.md); it is not a supported setup or rollback tool. The separate [controlled browser showcase](screenshots/README.md) uses fictional fixtures for presentation, not live DNS changes. See the [function audit](FUNCTION_AUDIT.md) for the safety rationale and current standards limitations.
+
+## Alerts and refresh
+
+Scheduled monitoring can create alerts inside NorthFlux. Outbound email and webhook delivery are not implemented; a retained legacy alert-email value does not configure a notification service. The current interface explains this limitation instead of offering an active delivery field.
+
+The active dashboard requests updated saved data every 60 seconds and supports manual refresh. This does not initiate a new scan or turn monitoring on. Scheduled scan timing is controlled separately in Settings.
 
 ## Reverse proxy
 

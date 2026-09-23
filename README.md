@@ -6,9 +6,9 @@ Understand your domain's email defences. Find the gaps. Make informed changes.
 
 NorthFlux Security is a self-hosted email security workspace. It checks the public settings that help prevent people impersonating your domain, turns the findings into understandable scores and recommendations, and keeps a history so you can see what changed.
 
-You run it on your own computer or server. The interface is built with **React and TypeScript**, with a Python service handling checks, reports and optional DNS changes.
+You run it on your own computer or server. The interface is built with **React and TypeScript**, with a Python service handling checks, reports and manual-review recommendations.
 
-![NorthFlux dashboard with three example domains](docs/screenshots/overview.png)
+![NorthFlux dashboard with fictional example domains](docs/screenshots/overview.png)
 
 *The screenshot uses fictional test results for example domains, not customer data or a live security assessment.*
 
@@ -18,7 +18,7 @@ You run it on your own computer or server. The interface is built with **React a
 |---|---|
 | Could someone impersonate our email domain? | Check who is allowed to send email, how messages are signed, and how receivers should handle suspicious messages. |
 | What needs attention first? | See a score, grade, individual findings and suggested next steps. A score is a guide, not a security guarantee. |
-| Has anything changed? | Save domains, compare scan history, and optionally enable scheduled checks and change alerts. |
+| Has anything changed? | Save domains, compare scan history, and optionally enable scheduled checks with in-app alerts. No outbound email is sent. |
 | How do I share the findings? | Generate PDF, CSV and Markdown reports. |
 | What should the records look like? | Build draft DNS records using your mail provider and settings. Review them before publishing. |
 | How should I fix a finding? | Review the proposed records and manual steps. Sender coverage, reporting destinations and mail-server readiness need confirmation before enforcement changes. |
@@ -28,6 +28,8 @@ Checks include SPF, DKIM and DMARC (email identity); MTA-STS, TLS-RPT and STARTT
 If a lookup fails or important records are ambiguous, the result is **Incomplete**, not a confident grade. The interface explains what could not be checked and keeps that warning in history and reports. Resolve the uncertainty before making changes; even complete scans produce manual-review recommendations, not automatic enforcement. Finding a record alone does not prove that every policy setting is safe.
 
 **You stay in control:** scanning does not change DNS. Scheduled monitoring is off by default. Generated DNS recommendations are now review-first and manual: NorthFlux will not guess that stricter mail handling is safe. The Cloudflare connection is optional; guarded low-level write functions remain for separately reviewed integrations, not unattended enforcement from a scan alone.
+
+The active dashboard requests fresh saved data every **60 seconds**, or when you select **Refresh**. This refresh does not run a new domain scan. Scheduled scans use their own configured interval. Cloudflare connection checks are read-only and do not prove permission to change DNS.
 
 NorthFlux checks published configuration, not actual message delivery or incoming DMARC reports. It does not yet implement the complete policy-discovery changes in the May 2026 DMARC standard. Read the [current function audit and product comparison](docs/FUNCTION_AUDIT.md) before treating it as equivalent to a managed email-security service.
 
@@ -91,11 +93,11 @@ NorthFlux is more than a static dashboard. It joins a network scanner, explainab
 - **Usable workflows:** responsive navigation, keyboard controls, understandable failures and reduced-motion support.
 - **Repeatable delivery:** locked frontend dependencies, declared Python requirements, automated browser journeys, Windows/Linux checks and a source package that excludes secrets and local data.
 
-Read the [guided project tour](docs/PROJECT_TOUR.md), [architecture](docs/ARCHITECTURE.md), or [test guide](docs/TESTING.md) for the implementation and its limits. The tour points to the relevant source files so claims can be inspected rather than taken on trust.
+Start with the [guided project tour](docs/PROJECT_TOUR.md), then use the [two-to-three-minute reviewer script](docs/INTERVIEW_GUIDE.md) and [fictional showcase setup](docs/screenshots/README.md). The script is a proposed walkthrough, not evidence that a recording has been performed. The [architecture](docs/ARCHITECTURE.md) and [test guide](docs/TESTING.md) explain the implementation and its limits.
 
 ## What is tested?
 
-The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions. Check the badge above for the current default branch. The [function audit](docs/FUNCTION_AUDIT.md) records the latest review and comparison; the [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) preserves the previous release's evidence.
+The [revision-specific release evidence](docs/RELEASE_EVIDENCE.md) distinguishes completed checks from work not run. The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions; the badge above follows the current default branch, not necessarily the checkout you are reviewing. The [function audit](docs/FUNCTION_AUDIT.md) and [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) preserve the preceding reviews and their evidence.
 
 | Area | Automated checks |
 |---|---|
@@ -115,7 +117,7 @@ src/app/        Scanning, scoring, API, storage, reports and integrations
 tests/          Python behaviour and security tests
 docs/           Current product guides
 docs/academic/  Clearly separated original research and development history
-scripts/        Test, demonstration and release tools
+scripts/        Isolated browser-test harness and source-release tools
 start.py        Shared Windows/Linux local launcher
 ```
 
@@ -125,7 +127,7 @@ Generated reports, saved scan data, logs, installed dependencies and build outpu
 
 Created by **Leon Chapman**, NorthFlux began as the independent home project **AuroraEdge** and later became a Belfast Metropolitan College final-year project. The GitHub address keeps the original name so existing links continue to work. The [academic archive](docs/academic/README.md) preserves that history; current product instructions are in the [documentation index](docs/INDEX.md).
 
-This is an independently developed, single-operator project—not a claim of commercial adoption or a security certification. Only assess systems you are authorised to test, and review proposed DNS changes before applying them.
+This is a personal, AI-assisted, single-operator project—not a claim of commercial adoption or a security certification. AI coding assistance contributed to the modernisation, debugging, tests and documentation; the [reviewer guide](docs/INTERVIEW_GUIDE.md) explains how to discuss that work without claiming every line was manually authored. Only assess systems you are authorised to test, and review proposed DNS changes before applying them.
 
 Feedback and contributions are welcome: see [Contributing](CONTRIBUTING.md). Report vulnerabilities privately through the [security policy](SECURITY.md). See [Privacy](docs/PRIVACY.md) for what the application stores.
 
