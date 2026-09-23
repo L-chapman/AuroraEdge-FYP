@@ -6,6 +6,10 @@ Start with the guide that matches what you want to do. The everyday guides expla
 |---|---|
 | Understand the project and try it locally | [Main README](../README.md) |
 | Review the features and the engineering behind them | [Project tour](PROJECT_TOUR.md) |
+| Give a short demonstration and explain design decisions | [Reviewer and interview guide](INTERVIEW_GUIDE.md) |
+| Use fictional data and reproduce the showcase images | [Showcase and screenshots](screenshots/README.md) |
+| Check evidence for the exact revision being reviewed | [Release evidence](RELEASE_EVIDENCE.md) |
+| See the current bounded work and deferred scope | [Implementation plan](IMPLEMENTATION_PLAN.md) |
 | Run a private, lasting installation | [Deployment](DEPLOYMENT.md) |
 | See what has actually been tested, or run the checks | [Testing](TESTING.md) |
 | Read the deep-debug findings, fixes and next priorities | [Deep-debug review](DEEP_DEBUG_REVIEW.md) |
@@ -19,6 +23,6 @@ Start with the guide that matches what you want to do. The everyday guides expla
 
 ## Earlier project work
 
-NorthFlux began as AuroraEdge and later became Leon Chapman's final-year project. The original specification, notebook, development stages, studies, and figures are preserved together in the [academic archive](academic/README.md). Nothing there is required to install the current application.
+NorthFlux began as Leon Chapman's independent home project, AuroraEdge, and later became his Belfast Metropolitan College final-year project. The original specification, notebook, development stages, studies, and figures are preserved together in the [academic archive](academic/README.md). Nothing there is required to install the current application.
 
 Archived material describes earlier versions and may contain outdated commands or claims. Use the guides above for the current product.

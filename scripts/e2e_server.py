@@ -8,6 +8,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from e2e_fixtures import FIXTURE_SERVER_ID, label_fixture_html
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ROOT = PROJECT_ROOT / "frontend" / ".e2e-data"
@@ -39,6 +41,7 @@ atexit.register(_clean_runtime_root, strict=False)
 os.environ.update(
     {
         "NORTHFLUX_ENV": "development",
+        "NORTHFLUX_DEMO_MODE": "false",
         "NORTHFLUX_SERVE_REACT": "true",
         "NORTHFLUX_FRONTEND_DIST": str(PROJECT_ROOT / "frontend" / "dist"),
         "NORTHFLUX_STATE_DIR": str(RUNTIME_ROOT / "state"),
@@ -58,6 +61,28 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from app import dashboard  # noqa: E402
 from app import database as database_module  # noqa: E402
+
+
+# This label is served by the test harness, not inserted by screenshot code.
+# Keep the real compiled React assets and normal security headers unchanged.
+_unlabelled_spa_response = dashboard._spa_index_response
+
+
+def _fixture_spa_response():
+    original = _unlabelled_spa_response()
+    if original is None:
+        return None
+    html = (dashboard.FRONTEND_DIST / "index.html").read_text(encoding="utf-8")
+    return dashboard.HTMLResponse(
+        label_fixture_html(html),
+        headers={
+            "Cache-Control": "no-store",
+            "X-NorthFlux-Fixture-Server": FIXTURE_SERVER_ID,
+        },
+    )
+
+
+dashboard._spa_index_response = _fixture_spa_response
 
 
 def _close_test_database() -> None:
@@ -106,7 +131,10 @@ def deterministic_scan(domain: str, check_starttls: bool = False) -> dict:
         "rbl_listings": 0,
         "starttls_grade": "A",
         "starttls_worst": "TLSv1.2",
-        "notes": "A DNS lookup timed out in this synthetic example" if incomplete else "Deterministic browser-test scan",
+        "notes": (
+            "A DNS lookup timed out in this fictional fixture; no live domain was assessed."
+            if incomplete else "Fictional browser-test fixture; no live domain was assessed."
+        ),
         "scan_incomplete": incomplete,
         "check_starttls": check_starttls,
     }

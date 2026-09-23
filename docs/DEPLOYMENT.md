@@ -4,7 +4,7 @@ This guide covers two different needs: trying NorthFlux on your own computer, an
 
 For a lasting installation, the supported design is one Docker container for one operator, using a shared access token rather than individual accounts and roles. NorthFlux runs scheduled checks inside the application and stores its data in a local SQLite database. Run exactly one application worker and one container against the same stored data; multiple copies are not supported.
 
-This guide is an installation and validation procedure, not a claim that your server has been deployed or tested. The [function audit](FUNCTION_AUDIT.md) records the latest review and verification, while the [deep-debug review](DEEP_DEBUG_REVIEW.md) preserves earlier evidence; live production and Cloudflare changes require separate, authorised validation.
+This guide is an installation and validation procedure, not a claim that your server has been deployed or tested. The [release evidence](RELEASE_EVIDENCE.md) identifies revision-specific checks; the [function audit](FUNCTION_AUDIT.md) and [deep-debug review](DEEP_DEBUG_REVIEW.md) preserve earlier reviews. Live production and Cloudflare changes require separate, authorised validation.
 
 ## Try it on Windows or Linux
 
@@ -29,6 +29,8 @@ Before reusing setup, it compares the installed Python package inventory with th
 For a machine without a desktop browser, use `python start.py --no-browser --port 8080` (or `python3` on Linux). `--setup-only` installs and builds without starting the server. `--smoke-test` starts a short, isolated check of the built interface and storage readiness, with temporary data and Cloudflare credentials removed, then stops. These are local review tools, not a production service manager. Inherited production mode is rejected by the ordinary local launcher; use the production setup below instead.
 
 The local application is reached at `http://127.0.0.1:8080`; it is not available to other computers. If the port is already in use, choose another with `--port`, rather than stopping an unrelated program. If Python, Node, or npm cannot be found, reopen the terminal after installing them. An interrupted package download can normally be retried by rerunning the launcher. If a `.venv` came from another operating system or is broken, follow the launcher's advice to rename it as a backup before trying again. Do not disable firewall, certificate, or security checks to make installation succeed.
+
+For a fictional presentation instead of live domain checks, use the [isolated browser showcase](screenshots/README.md). It is a local development harness, not a production deployment or a service to expose publicly. The retired DNS-reset scripts are no longer included.
 
 ## Production prerequisites
 
@@ -145,18 +147,20 @@ The deprecated server-rendered interface remains available only when development
 
 ## Safe remediation rollout
 
-Monitoring is disabled by default. Current generated DNS recommendations are manual-review only; the retained automatic-remediation setting is a compatibility control, not an unattended deployment feature. Recommended rollout:
+Monitoring is disabled by default. Current generated DNS recommendations are manual-review only. Older stored remediation preferences remain for compatibility, but the current interface does not offer them as active automation. Recommended rollout:
 
 1. Add one domain you own or are explicitly authorised to manage.
 2. Run read-only scans and review the proposed records.
 3. Confirm the configured Cloudflare zone and the token's permissions in Cloudflare. NorthFlux's connection test reads data; it does not prove DNS write permission.
 4. Confirm provider-specific values, sender coverage and mail-server readiness before testing a manual fix on a controlled record.
 5. Verify both provider state and actual mail behaviour, and keep a tested recovery path.
-6. Enable read-only monitoring if required. Leave the compatibility remediation setting disabled; it does not make current recommendations automatic.
+6. Enable read-only monitoring if required. A retained legacy remediation flag does not make current recommendations automatic.
 
 An incomplete scan never authorises an automatic fix. Failed or ambiguous prerequisite DNS reads also stop a proposed change. New SPF records require an operator-confirmed list of sending services; NorthFlux does not assume a mail provider. DKIM remains manual because provider-specific selector targets and public keys cannot be inferred safely from MX records alone.
 
 The automated suite does not perform live DNS writes or deploy MTA-STS Workers. The guarded low-level methods are retained for separately reviewed integrations, not the generated-recommendation workflow. Use a controlled zone and an approved rollback plan for any such checks, and inspect both the provider state and the audit log afterwards. See [Integrations](INTEGRATIONS.md) for credential scope and deployment limits.
+
+Monitoring alerts are shown inside NorthFlux; outbound email and webhook notifications are not implemented. A legacy saved email address is not a delivery configuration. The active dashboard refreshes saved data every 60 seconds; that display refresh is separate from the configured monitoring interval and does not launch scans.
 
 ## Configuration reference
 

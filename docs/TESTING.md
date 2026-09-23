@@ -6,7 +6,7 @@ A passing test run is evidence for a particular version and environment—not a 
 
 The historical React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is evidence for that version only. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for tested revisions.
 
-For the latest review, use the [function audit and verification record](FUNCTION_AUDIT.md). The [previous deep-debug record](DEEP_DEBUG_REVIEW.md) remains evidence for its earlier revision. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
+Use [revision-specific release evidence](RELEASE_EVIDENCE.md) for completed runs and [the function audit](FUNCTION_AUDIT.md) for the earlier code review. The [previous deep-debug record](DEEP_DEBUG_REVIEW.md) remains evidence for its earlier revision. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
 
 | Layer | Environment and checks |
 |---|---|
@@ -102,7 +102,7 @@ Playwright controls real browser engines to exercise the interface. The same jou
 - CSRF rejection and the public privacy route; and
 - narrow-screen navigation.
 
-The presentation checks cover all main pages at 320px with reduced motion, keyboard dismissal of the mobile menu, and saved-result rendering without uncaught browser errors or application CSP violations. [Interface screenshots](screenshots/README.md) are generated from this same isolated test setup when explicitly requested.
+The presentation checks cover all main pages at 320px with reduced motion, keyboard dismissal of the mobile menu, and a fictional reviewer journey without uncaught browser errors or application CSP violations. The journey includes saved complete/incomplete scans, history, generator output and Settings. [Interface screenshots](screenshots/README.md) are generated from this same isolated test setup only in explicit capture mode.
 
 Install the Playwright-managed browsers once, then run the suite from `frontend/`:
 
@@ -116,6 +116,12 @@ cd ..
 On Linux CI, browser system packages are installed with `npx playwright install --with-deps chromium firefox webkit`. The test runner first creates a production frontend build, then starts `scripts/e2e_server.py` at `127.0.0.1:4173`. That server uses the ignored `frontend/.e2e-data/` state/report/log root, a deterministic fake scanner, an operator test token, blank Cloudflare environment values, and a disabled Cloudflare write layer. The root is cleaned at startup and shutdown. Browser tests therefore cannot modify a live DNS zone.
 
 If the intended Python executable is not on your command path, set `NORTHFLUX_PYTHON` to its exact executable path. Paths containing spaces are supported; do not supply a shell command with extra arguments. This also lets the browser suite use the project's `.venv` rather than an unrelated system installation.
+
+The fixture server labels its HTML with a fictional-data notice and an identity
+header. Browser journeys require that identity before logging in or resetting
+test data, so a mistaken server override fails instead of clearing an ordinary
+installation. The label is harness-only; normal production assets and content
+security rules are unchanged. Never use the fixture token or server in production.
 
 Playwright retains traces, screenshots, and video only on failure. GitHub Actions uploads that evidence for seven days when the UI job fails. A browser failing to launch because its operating-system dependencies are missing is an environment failure, not a passing product test; use the supported Linux CI job as the release gate after resolving any host-specific launch problem. In the migration's local Windows checks, Firefox could not launch (`spawn UNKNOWN`); all four browser projects passed on Linux CI. That local limitation must not be reported as a Windows Firefox pass.
 
@@ -171,7 +177,7 @@ Automated tests do not replace checking a real deployment. For a release candida
 3. Scan a known public domain without Cloudflare credentials.
 4. Restart and confirm scan history remains present.
 5. Add an authorised managed domain and confirm onboarding does not change DNS.
-6. Confirm monitoring and the retained automatic-remediation compatibility setting are disabled by default, and that generated recommendations remain manual-review only.
+6. Confirm scheduled scanning is disabled by default. Settings must explain manual-only recommendations and in-app alerts without offering an active automatic-remediation or email-delivery control; ordinary edits preserve any older compatibility values.
 7. Verify `/health` and `/ready` return success.
 8. Confirm the production CSP does not contain `unsafe-inline` and that browser assets load only from the application origin.
 9. Generate CSV, Markdown, and PDF output and inspect it for unescaped input.

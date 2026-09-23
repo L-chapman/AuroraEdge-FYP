@@ -2150,7 +2150,8 @@ def _auto_fix_domain(domain: str, scan_result: dict = None, should_continue=None
         scan_result = scan_domain(domain, check_starttls=False)
         scan_result["domain"] = domain
 
-    # Generate and apply ALL fixes &#8212; zero human intervention
+    # Generated recommendations are manual-only. This compatibility loop may
+    # execute only callbacks supplied by a separately reviewed integration.
     fixes = cf.generate_fixes(scan_result)
     applied = []
     failed = []
@@ -2182,11 +2183,10 @@ def _auto_fix_domain(domain: str, scan_result: dict = None, should_continue=None
 @app.get("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
 @app.post("/api/settings/test-cloudflare", dependencies=[Depends(require_token)])
 def api_test_cloudflare():
-    """Test the current Cloudflare connection using stored credentials.
+    """Read-check the saved Cloudflare connection; never test a provider write.
 
-    Returns ``zone_name`` so the frontend can perform a quick ownership
-    pre-check before allowing auto-fix.  Also probes Workers API access
-    and returns a granular permissions breakdown.
+    Returns the observed zone name and read-access probe results. These reads
+    do not establish permission to edit DNS or deploy Workers.
     """
     if not HAS_DB:
         return {"ok": False, "message": "Database not available", "zone_name": "", "workers": False, "permissions": {}}

@@ -113,6 +113,34 @@ def test_settings_validation_cannot_partially_save(isolated_api):
     assert database.get_setting("cf_zone_id") == "previous-zone"
 
 
+@pytest.mark.parametrize("legacy_remediation", ["true", "false"])
+@pytest.mark.parametrize("legacy_email", ["alerts@example.com", "old non-email value"])
+def test_active_settings_save_preserves_omitted_compatibility_values(
+    isolated_api, legacy_remediation, legacy_email,
+):
+    client, database, scanner = isolated_api
+    database.set_settings({
+        "automatic_remediation": legacy_remediation,
+        "alert_email": legacy_email,
+    })
+
+    response = client.post("/api/settings", json={
+        "org_name": "Fictional review workspace",
+        "monitoring_enabled": "false",
+        "monitor_interval": "12",
+    })
+
+    assert response.status_code == 200
+    assert set(response.json()["saved"]) == {
+        "org_name", "monitoring_enabled", "monitor_interval",
+    }
+    saved = client.get("/api/settings").json()["settings"]
+    assert saved["automatic_remediation"] == legacy_remediation
+    assert saved["alert_email"] == legacy_email
+    assert saved["org_name"] == "Fictional review workspace"
+    scanner.assert_not_called()
+
+
 @pytest.mark.parametrize("value", [{"enabled": True}, [True], "maybe", None])
 def test_settings_reject_invalid_safety_switch_values(isolated_api, value):
     client, database, _ = isolated_api

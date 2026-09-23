@@ -4,7 +4,10 @@ import { expect, test, type Page } from '@playwright/test'
 const token = 'northflux-e2e-operator-token-0123456789'
 
 async function signIn(page: Page) {
-  await page.goto('/login')
+  const response = await page.goto('/login')
+  // Fail before authentication or the destructive fixture reset if a URL
+  // override accidentally points this suite at an operational installation.
+  expect(response?.headers()['x-northflux-fixture-server']).toBe('northflux-disposable-fixtures-v1')
   await page.getByLabel('Operator token').fill(token)
   await page.getByRole('button', { name: 'Sign in securely' }).click()
   await expect(page).toHaveURL(/\/$/)
@@ -145,7 +148,7 @@ test('shows partial DNS-change failures and manual actions without an old grade'
   await page.getByRole('textbox', { name: 'Domain', exact: true }).fill('example.com')
   await page.getByRole('button', { name: 'Run security scan' }).click()
   await expect(page.getByRole('heading', { name: 'example.com' })).toBeVisible()
-  await page.getByRole('button', { name: 'Plan DNS fix' }).click()
+  await page.getByRole('button', { name: 'Review DNS recommendations' }).click()
   await expect(page.getByRole('dialog')).toContainText('This review does not change DNS records.')
   await page.getByRole('button', { name: 'Review recommendations' }).click()
   const outcome = page.getByRole('region', { name: 'DNS change outcome for example.com' })
@@ -166,7 +169,7 @@ test('enrols, rescans, opens, and removes a managed domain with confirmation', a
   const added = await addResponse
   expect(added.status()).toBe(200)
   expect((await added.json()).initial_scan).toEqual({ grade: 'A+', score: 98, severity: 'INFO' })
-  await expect(page.getByText(/example.com is now monitored/)).toBeVisible()
+  await expect(page.getByText(/example.com is now managed/)).toBeVisible()
   await page.getByRole('link', { name: 'Details' }).click()
   await expect(page.getByRole('heading', { name: 'Email authentication coverage' })).toBeVisible()
   const rescanResponse = page.waitForResponse((response) => response.url().includes('/api/rescan/'))
@@ -175,8 +178,8 @@ test('enrols, rescans, opens, and removes a managed domain with confirmation', a
   await expect(page.getByText(/Rescan complete/)).toBeVisible()
   await navigateTo(page, 'Domains')
   await page.getByRole('button', { name: 'Remove' }).click()
-  await expect(page.getByRole('dialog')).toContainText('Stop monitoring example.com')
-  await page.getByRole('button', { name: 'Remove from monitoring' }).click()
+  await expect(page.getByRole('dialog')).toContainText('Remove example.com from managed domains?')
+  await page.getByRole('button', { name: 'Remove managed domain' }).click()
   await expect(page.getByText('No domains under management')).toBeVisible()
 })
 
@@ -219,11 +222,12 @@ test('keeps incomplete scans visibly uncertain through onboarding, history and r
 test('saves independent monitoring settings and protects destructive deletion', async ({ page }) => {
   await navigateTo(page, 'Settings')
   await page.getByLabel('Organisation name').fill('NorthFlux Test Operator')
-  await page.getByText('Continuous monitoring', { exact: true }).click()
+  await page.getByRole('checkbox', { name: /Scheduled scanning/ }).check()
   await page.getByRole('button', { name: 'Save settings' }).click()
   await expect(page.getByRole('status').filter({ hasText: /Saved/ })).toBeVisible()
-  await page.getByRole('button', { name: 'Test saved connection' }).click()
-  await expect(page.getByText('Connection unavailable.')).toBeVisible()
+  await page.getByRole('button', { name: 'Check saved read access' }).click()
+  await expect(page.getByText('Read check unavailable.')).toBeVisible()
+  await expect(page.getByText(/does not change DNS or verify write permission/)).toBeVisible()
   await page.getByRole('button', { name: 'Clear all scan data' }).click()
   await expect(page.getByRole('dialog')).toContainText('cannot be undone')
   await page.getByRole('button', { name: 'Cancel' }).click()
@@ -267,6 +271,52 @@ test('saves independent monitoring settings and protects destructive deletion', 
   })
   expect(retainedState).toEqual({ domainCount: 0, organisation: 'NorthFlux Test Operator' })
 })
+
+for (const automaticRemediation of [false, true]) {
+  test(`explains manual-only DNS guidance and preserves an old remediation preference of ${automaticRemediation}`, async ({ page }) => {
+    // Seed compatibility data only in the disposable, provider-disabled server.
+    const legacyEmail = 'legacy contact value, not a valid email'
+    const seededStatus = await page.evaluate(async ({ automaticRemediation, legacyEmail }) => {
+      const csrf = document.cookie.split('; ').find((item) => item.startsWith('northflux_csrf='))?.split('=')[1]
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': decodeURIComponent(csrf ?? '') },
+        body: JSON.stringify({ automatic_remediation: automaticRemediation, alert_email: legacyEmail }),
+      })
+      return response.status
+    }, { automaticRemediation, legacyEmail })
+    expect(seededStatus).toBe(200)
+    await navigateTo(page, 'Settings')
+    await expect(page.getByRole('heading', { name: 'In-app alerts' })).toBeVisible()
+    await expect(page.getByText(/Email and webhook delivery are not available/)).toBeVisible()
+    await expect(page.getByText(/Generated recommendations do not change DNS/)).toBeVisible()
+    await expect(page.getByRole('checkbox', { name: /Automatic remediation/i })).toHaveCount(0)
+    await expect(page.getByLabel('Alert email')).toHaveCount(0)
+
+    await page.getByLabel('Organisation name').fill('Compatibility review workspace')
+    await page.getByRole('checkbox', { name: /Scheduled scanning/ }).check()
+    const savedResponse = page.waitForResponse((response) => response.url().endsWith('/api/settings') && response.request().method() === 'POST')
+    await page.getByRole('button', { name: 'Save settings' }).click()
+    const saved = await savedResponse
+    expect(saved.status()).toBe(200)
+    expect(saved.request().postDataJSON()).not.toHaveProperty('automatic_remediation')
+    expect(saved.request().postDataJSON()).not.toHaveProperty('alert_email')
+    await expect(page.getByRole('status').filter({ hasText: /Saved 5 settings/ })).toBeVisible()
+
+    const stored = await page.request.get('/api/settings')
+    expect(stored.status()).toBe(200)
+    expect((await stored.json()).settings).toMatchObject({
+      org_name: 'Compatibility review workspace',
+      monitoring_enabled: 'true',
+      automatic_remediation: String(automaticRemediation),
+      alert_email: legacyEmail,
+    })
+    await page.reload()
+    await expect(page.getByLabel('Organisation name')).toHaveValue('Compatibility review workspace')
+    await expect(page.getByRole('checkbox', { name: /Scheduled scanning/ })).toBeChecked()
+    await expect(page.getByText(/Generated recommendations do not change DNS/)).toBeVisible()
+  })
+}
 
 test('rejects a cookie-authenticated mutation without CSRF and supports public privacy', async ({ page }) => {
   const response = await page.evaluate(async () => {

@@ -67,7 +67,7 @@ function ResultCard({ result, onFix }: { result: ScanResult; onFix: (domain: str
       <div className="button-row">
         {result.saved ? <Link className="button button--secondary" to={`/domain/${encodeURIComponent(result.domain)}`}>View detail</Link> : null}
         {result.saved ? <a className="button button--ghost" href={`/api/report/pdf/${encodeURIComponent(result.domain)}`}>Download PDF</a> : null}
-        <Button variant="danger" type="button" disabled={incomplete} onClick={() => onFix(result.domain)}>Plan DNS fix</Button>
+        <Button variant="secondary" type="button" disabled={incomplete} onClick={() => onFix(result.domain)}>Review DNS recommendations</Button>
       </div>
     </Card>
   )
@@ -174,8 +174,8 @@ export function ScanPage() {
           <fieldset className="option-grid">
             <legend>Scan options</legend>
             <label><input type="checkbox" checked={saveHistory} onChange={(event) => setSaveHistory(event.target.checked)} /><span><strong>Save to scan history</strong><small>Required for PDF reports and historical comparisons.</small></span></label>
-            <label><input type="checkbox" checked={manageDomains} onChange={(event) => setManageDomains(event.target.checked)} /><span><strong>Add to continuous monitoring</strong><small>Add successfully scanned domains to your managed list.</small></span></label>
-            <label><input type="checkbox" checked={includeGuidance} onChange={(event) => setIncludeGuidance(event.target.checked)} /><span><strong>Generate remediation guidance</strong><small>Suggestions may require manual review; no DNS records are changed by a scan.</small></span></label>
+            <label><input type="checkbox" checked={manageDomains} onChange={(event) => setManageDomains(event.target.checked)} /><span><strong>Add to managed domains</strong><small>Keep successfully scanned domains in your list. Scheduled scanning must be enabled separately in Settings.</small></span></label>
+            <label><input type="checkbox" checked={includeGuidance} onChange={(event) => setIncludeGuidance(event.target.checked)} /><span><strong>Include recommendations</strong><small>All recommendations require manual review; a scan does not change DNS.</small></span></label>
           </fieldset>
           {formError ? <InlineNotice tone="danger">{formError}</InlineNotice> : null}
           {requestError ? <InlineNotice tone="danger">{requestError}</InlineNotice> : null}

@@ -48,6 +48,14 @@ afterEach(() => {
 })
 
 describe('ScanPage completed-result state', () => {
+  it('separates managed-domain enrolment from scheduled scanning and DNS changes', () => {
+    renderScanner()
+    expect(screen.getByRole('checkbox', { name: /Add to managed domains/ })).not.toBeChecked()
+    expect(screen.getByText(/Scheduled scanning must be enabled separately in Settings/)).toBeVisible()
+    expect(screen.getByText(/All recommendations require manual review; a scan does not change DNS/)).toBeVisible()
+    expect(screen.queryByRole('checkbox', { name: /continuous monitoring/i })).not.toBeInTheDocument()
+  })
+
   it('distinguishes intentional Null MX from a broken inbound-mail configuration', async () => {
     const payload = successfulScan('example.com')
     Object.assign(payload.results[0]!.scan, { null_mx: true, mx_present: false, spf_present: false })
@@ -73,7 +81,7 @@ describe('ScanPage completed-result state', () => {
     expect(await screen.findByRole('heading', { name: 'example.com' })).toBeVisible()
     expect(screen.getByLabelText('Scan incomplete; no security grade is available')).toBeVisible()
     expect(screen.getByRole('status')).toHaveTextContent('SPF lookup timed out.')
-    expect(screen.getByRole('button', { name: 'Plan DNS fix' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review DNS recommendations' })).toBeDisabled()
     expect(screen.queryByLabelText('Grade A, score 90 out of 100')).not.toBeInTheDocument()
   })
 
@@ -139,7 +147,7 @@ describe('ScanPage completed-result state', () => {
     renderScanner()
     await user.type(screen.getByLabelText('Domain'), 'example.com')
     await user.click(screen.getByRole('button', { name: 'Run security scan' }))
-    await user.click(await screen.findByRole('button', { name: 'Plan DNS fix' }))
+    await user.click(await screen.findByRole('button', { name: 'Review DNS recommendations' }))
     const dialog = screen.getByRole('dialog', { name: 'Review DNS recommendations for example.com?' })
     expect(dialog).toHaveTextContent('This review does not change DNS records.')
     expect(within(dialog).queryByRole('button', { name: 'Verify and apply' })).not.toBeInTheDocument()

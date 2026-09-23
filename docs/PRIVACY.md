@@ -26,4 +26,13 @@ The production React frontend is built from repository-pinned dependencies and s
 
 The frontend bundle is public application code. Never place Cloudflare credentials, dashboard tokens, personal data, or environment-specific secrets in `frontend/`, Vite build variables, or `frontend/dist`. Authentication exchanges the operator token for an HttpOnly server session; the React client does not persist that token in local or session storage. A non-HttpOnly CSRF companion cookie is readable by the client by design and is not an authentication credential.
 
-For a public demonstration, disable Cloudflare credentials and automatic remediation, use a dedicated non-sensitive dataset, and avoid exposing internal domain names or infrastructure details.
+Current generated recommendations require manual review and do not change DNS.
+Scheduled scanning is a separate opt-in; saving a managed domain does not enable
+it. Alerts are displayed in the application, not sent by email or webhook.
+Older stored contact/remediation preferences are preserved for compatibility,
+not offered as active delivery or automatic-change controls.
+
+For a demonstration, use the [isolated fictional fixtures](screenshots/README.md)
+and no real provider credentials or operational data. Prefer a local walkthrough
+or recording; never expose the development fixture server publicly. Public
+service exposure requires a separately reviewed deployment and access policy.

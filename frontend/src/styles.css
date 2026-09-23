@@ -223,8 +223,8 @@ input[aria-invalid="true"] { border-color: var(--danger); }
 .control > strong { font-size: .72rem; }
 .control--pass > span, .control--pass > strong { color: var(--success); }
 .control--fail > span, .control--fail > strong { color: var(--danger); }
-.sticky-actions { position: sticky; z-index: 10; bottom: 1rem; display: flex; align-items: center; gap: 1rem; width: fit-content; margin-left: auto; padding: .55rem; border: 1px solid var(--border); border-radius: .8rem; background: rgb(9 17 30 / 92%); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
-.sticky-actions span { padding-right: .5rem; color: var(--muted); font-size: .74rem; }
+.form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; width: fit-content; max-width: 100%; margin-left: auto; padding: .55rem; border: 1px solid var(--border); border-radius: .8rem; background: rgb(9 17 30 / 92%); box-shadow: var(--shadow); }
+.form-actions span { padding-right: .5rem; color: var(--muted); font-size: .74rem; }
 .danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 2rem; border-color: rgb(255 127 146 / 30%); }
 .danger-zone p { margin-bottom: 0; color: var(--muted); }
 
