@@ -28,6 +28,10 @@ Worker names now include a hash of the full domain to avoid dot/hyphen collision
 
 Legacy live-DNS demo reset/restore scripts and their old command-line preview were removed from the current product. Historical source is linked from the [academic archive](academic/README.md); it is not a supported setup or rollback tool. The separate [controlled browser showcase](screenshots/README.md) uses fictional fixtures for presentation, not live DNS changes. See the [function audit](FUNCTION_AUDIT.md) for the safety rationale and current standards limitations.
 
+### Command-line compatibility
+
+Use `--remediation` with a normal command-line scan to display manual-review recommendations. Displaying this advice requires Rich (included in the normal installation) and omitting `--quiet`. The older `--apply-fix` option remains recognised for compatibility and still requires configured Cloudflare access and its existing connection check. It does not turn today's manual recommendations into automatic DNS changes. Its help and status output explicitly explain that limit; the retained low-level integration path is not an approved-change workflow, and a successful connection read does not prove permission to write.
+
 ## Alerts and refresh
 
 Scheduled monitoring can create alerts inside NorthFlux. Outbound email and webhook delivery are not implemented; a retained legacy alert-email value does not configure a notification service. The current interface explains this limitation instead of offering an active delivery field.
