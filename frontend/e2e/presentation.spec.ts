@@ -20,9 +20,12 @@ test('keeps every main page accessible at 320px with reduced motion', async ({ p
   await page.getByLabel('Operator token').fill(token)
   await page.getByRole('button', { name: 'Sign in securely' }).click()
   await expect(page).toHaveURL(/\/$/)
+  await expect(page.getByRole('heading', { name: 'Email security, at a glance' })).toBeVisible()
 
   for (const route of ['/', '/scan', '/domains', '/generator', '/settings', '/privacy']) {
-    await page.goto(route)
+    // Sign-in already routed to '/'. Audit that document before leaving it:
+    // a second navigation here can abort its first dashboard fetch in WebKit.
+    if (route !== '/') await page.goto(route)
     await expect(page.locator('h1')).toBeVisible()
     await expect(page.getByText('Loading…', { exact: true })).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

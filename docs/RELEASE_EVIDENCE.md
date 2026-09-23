@@ -231,3 +231,25 @@ tests check record integrity, not a hard five-request admission ceiling. These
 are follow-up design/hardening items, not capabilities claimed by this refactor.
 Routes, cookie settings, origin/CSRF checks, dynamic token reads, the scheduler,
 database schema and provider behaviour were not changed.
+
+### Follow-up browser-test correction
+
+The first hosted NF-03 run at `db3234bae914079ff540199889f473f8ae8efc2b`
+[failed one Linux WebKit presentation check](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35832811867).
+The other 67 Linux browser executions passed, as did the Windows browser,
+backend, frontend, launcher, quality, secret and container jobs; packaging was
+correctly blocked. This failed run is not release evidence.
+
+The retained trace showed the test hard-navigating to `/` immediately after
+the sign-in redirect, before the first dashboard fetch had settled. WebKit
+reported a fetch access-control error during that redundant navigation; all
+14 recorded API responses were successful. The correction waits for the loaded
+dashboard heading and audits that initial document before visiting the other
+pages. The separate reviewer journey still reloads the dashboard explicitly.
+Error, accessibility, narrow-screen and reduced-motion assertions remain in
+place, with zero retries and no ignored errors. Product code and CORS policy
+are unchanged. CI now runs this WebKit journey 20 times on Linux before the
+unchanged full browser matrix; these are repeated executions, not 20 new
+scenarios. Repeat-test results and the final hosted run are recorded in
+[PR #8](https://github.com/L-chapman/AuroraEdge-FYP/pull/8), not inferred from
+the earlier local successes above.
