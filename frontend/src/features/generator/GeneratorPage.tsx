@@ -87,7 +87,7 @@ function TextOutput({ label, text }: { label: string; text: string }) {
     <div className="dns-generator-output">
       <div className="dns-generator-output__heading">
         <h3>{label}</h3>
-        <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
+        <CopyButton key={text} text={text} label={`Copy ${label.toLowerCase()}`} />
       </div>
       <pre tabIndex={0} aria-label={label}><code>{text}</code></pre>
     </div>
@@ -182,7 +182,8 @@ function DmarcGenerator() {
         </div>
         <div className="dns-generator-field">
           <label htmlFor="dmarc-percentage">Policy percentage</label>
-          <input id="dmarc-percentage" type="number" min={0} max={100} step={1} value={Number.isNaN(input.percentage) ? '' : input.percentage} onChange={(event) => setInput({ ...input, percentage: event.target.valueAsNumber })} />
+          <input id="dmarc-percentage" aria-describedby="dmarc-percentage-help" type="number" min={0} max={100} step={1} value={Number.isNaN(input.percentage) ? '' : input.percentage} onChange={(event) => setInput({ ...input, percentage: event.target.valueAsNumber })} />
+          <p id="dmarc-percentage-help" className="dns-generator-help">Legacy compatibility field (pct). Modern receivers may ignore it; it does not guarantee sampled enforcement.</p>
         </div>
         <div className="dns-generator-field">
           <label htmlFor="dmarc-aggregate">Aggregate report email addresses</label>
@@ -226,7 +227,7 @@ function MtaStsGenerator() {
           </div>
           <div className="dns-generator-field">
             <label htmlFor="mta-max-age">Max age in seconds</label>
-            <input id="mta-max-age" type="number" min={0} max={31557600} step={1} value={input.maxAge} onChange={(event) => setInput({ ...input, maxAge: event.target.valueAsNumber })} />
+            <input id="mta-max-age" type="number" min={0} max={31557600} step={1} value={Number.isNaN(input.maxAge) ? '' : input.maxAge} onChange={(event) => setInput({ ...input, maxAge: event.target.valueAsNumber })} />
           </div>
         </div>
         <div className="dns-generator-field">

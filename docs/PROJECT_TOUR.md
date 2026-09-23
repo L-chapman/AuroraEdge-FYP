@@ -2,7 +2,7 @@
 
 NorthFlux helps an operator answer a practical question: **is this domain's public email configuration doing what it should, and what needs attention?**
 
-It brings the checks, explanations, scan history, and optional DNS changes into one self-hosted application. Self-hosted means the operator runs the service and keeps its stored results on their own computer or server. It is a configuration assessment tool, not a mailbox scanner, spam filter, or guarantee that email cannot be forged.
+It brings the checks, explanations, scan history, and draft DNS recommendations into one self-hosted application. Self-hosted means the operator runs the service and keeps its stored results on their own computer or server. It is a configuration assessment tool, not a mailbox scanner, spam filter, or guarantee that email cannot be forged.
 
 ## What a reviewer can try
 
@@ -12,7 +12,7 @@ Start with the [local setup](../README.md), then follow this short route:
 2. Read the grade, individual findings, and suggested next steps. If a check cannot finish reliably, NorthFlux shows **Incomplete**, explains why and withholds a grade. A completed grade summarises the implemented rules; it is not a security certification.
 3. Add an authorised domain under **Domains** to keep it in the managed list. Open its detail page to review its results and stored history.
 4. Open **Generator** to prepare email-security records. Review the values before copying anything into your DNS provider.
-5. Open **Settings**. Notice that scheduled monitoring and automatic fixes are separate choices, both off by default. You do not need Cloudflare credentials for the read-only tour.
+5. Open **Settings**. Scheduled monitoring is off by default. The retained automatic-remediation setting is a compatibility control: current generated recommendations require manual review and do not trigger writes. You do not need Cloudflare credentials for the read-only tour.
 
 Use **Sign out** when finished with an authenticated session. Never use a real Cloudflare token in a public demonstration.
 
@@ -35,7 +35,7 @@ Public DNS, network restrictions, mail-server behaviour, and third-party service
 
 “Record found” means the relevant check found a record, not that every policy setting is safe. STARTTLS checks whether encrypted transport can be negotiated; it is not proof of the server's identity or successful delivery. Private network destinations are deliberately excluded from the scanner's direct connections.
 
-If a scan is incomplete, its warning stays visible in saved history and PDF reports, and no automatic fix is offered. This prevents a timeout being mistaken for a missing record that should be created. Resolve the cause in the scan notes and run a fresh check before making changes.
+If a scan is incomplete, its warning stays visible in saved history and PDF reports. This prevents a timeout being mistaken for a missing record that should be created. Resolve the cause in the scan notes and run a fresh check before making changes. Even after a complete scan, current generated recommendations require manual review; NorthFlux cannot infer whether enforcement changes are safe for your senders and mail servers.
 
 ## What is involved behind the interface
 
@@ -44,11 +44,11 @@ The engineering is more than displaying a scan response. The application must ha
 | Design problem | How the project handles it | Where to inspect it |
 |---|---|---|
 | Separate observations from conclusions | The scanner collects evidence; the rules engine turns it into findings and advice. The rules can be tested without a live domain. | [Scanner](../src/app/scanner.py), [rules](../src/app/rules.py) |
-| Keep uncertainty visible | Failed or ambiguous checks remain ungraded in the interface and saved history; automatic changes are blocked until usable evidence is available. | [Scanner](../src/app/scanner.py), [database](../src/app/database.py), [DNS write layer](../src/app/dns_fix.py) |
+| Keep uncertainty visible | Failed or ambiguous checks remain ungraded in the interface and saved history. Generated recommendations require manual review, not automatic enforcement. | [Scanner](../src/app/scanner.py), [database](../src/app/database.py), [DNS write layer](../src/app/dns_fix.py) |
 | Keep a responsive, consistent interface | React pages share a typed request client, reusable form controls, loading states, and error handling. Late responses do not undo sign-out or replace a settings draft. | [Frontend source](../frontend/src/), [browser journeys](../frontend/e2e/operator-journeys.spec.ts) |
 | Keep concurrent work from corrupting history | Database access is coordinated, related changes are saved together, and stale scans are prevented from restoring data after it has been cleared. | [Database](../src/app/database.py), [application](../src/app/dashboard.py), [tests](../tests/) |
 | Protect operator access | Sign-in creates an expiring server session. Browser requests that change data need a separate anti-forgery check; the access token is not saved in browser storage. | [API models](../src/app/api_models.py), [application](../src/app/dashboard.py), [security policy](../SECURITY.md) |
-| Avoid unintended DNS changes | Read-only scanning, monitoring, and automatic fixes are separate. Writes check the configured Cloudflare zone, preserve unrelated records, stop on ambiguous records, and leave an audit log. | [DNS write layer](../src/app/dns_fix.py), [integrations](INTEGRATIONS.md) |
+| Avoid unintended DNS changes | Scanning and monitoring do not publish generated recommendations. Guarded low-level writes remain for separately reviewed integrations; they check the configured Cloudflare zone, preserve unrelated records, stop on ambiguous records, and leave an audit log. | [DNS write layer](../src/app/dns_fix.py), [integrations](INTEGRATIONS.md) |
 | Make builds inspectable and repeatable | Frontend dependencies are locked; Python dependencies are declared but not fully locked. Automated checks, a separate frontend build, and a restricted production container are part of the release workflow. | [Build workflow](../.github/workflows/ci.yml), [Dockerfile](../Dockerfile), [testing](TESTING.md) |
 
 For the full component map, request flow, and storage design, continue to [Architecture](ARCHITECTURE.md).

@@ -5,6 +5,7 @@ import { ApiError, apiRequest, asBoolean, asNumber, displayDate } from '../api/c
 import type { DomainDetailResponse, DomainHistoryResponse } from '../api/types'
 import { IncompleteScanNotice } from '../components/IncompleteScanNotice'
 import { Button, Card, ConfirmDialog, ErrorState, InlineNotice, LoadingState, PageHeader, StatusBadge } from '../components/ui'
+import { emailControlStatus } from '../utils/emailControl'
 
 const controls = [
   ['spf_present', 'SPF', 'Which services can send your email'],
@@ -122,6 +123,7 @@ function DomainDetail({ domain }: { domain: string }) {
       />
       {message ? <InlineNotice tone={messageTone}>{message}</InlineNotice> : null}
       {incomplete ? <IncompleteScanNotice notes={result.notes} /> : null}
+      {asBoolean(result.null_mx) ? <InlineNotice>This domain explicitly declines incoming email (Null MX). Outgoing email authentication still needs review.</InlineNotice> : null}
       {detail.isError ? <InlineNotice tone="warning">The saved result is shown, but the latest background refresh could not be loaded.</InlineNotice> : null}
       {mutationError ? <InlineNotice tone="danger">{mutationError instanceof ApiError ? mutationError.detail : 'The operation failed.'}</InlineNotice> : null}
       <section className="detail-hero" aria-label="Domain score">
@@ -132,7 +134,10 @@ function DomainDetail({ domain }: { domain: string }) {
 
       <Card>
         <div className="section-heading"><div><p className="eyebrow">Records checked</p><h2>Email authentication coverage</h2><p className="section-description">These checks show whether records were found, not whether every policy setting is safe.</p></div></div>
-        <div className="control-list">{controls.map(([key, name, description]) => { const passed = asBoolean(result[key]); return <article key={key} className={passed ? 'control control--pass' : incomplete ? 'control' : 'control control--fail'}><span aria-hidden="true">{passed ? '✓' : incomplete ? '?' : '!'}</span><div><h3>{name}</h3><p>{description}</p></div><strong>{passed ? 'Record found' : incomplete ? 'Not confirmed' : 'Not found'}</strong></article> })}</div>
+        <div className="control-list">{controls.map(([key, name, description]) => {
+          const status = emailControlStatus(result, key)
+          return <article key={key} className={`control${status.tone ? ` control${status.tone}` : ''}`}><span aria-hidden="true">{status.marker}</span><div><h3>{name}</h3><p>{description}</p></div><strong>{status.label}</strong></article>
+        })}</div>
       </Card>
 
       <Card>

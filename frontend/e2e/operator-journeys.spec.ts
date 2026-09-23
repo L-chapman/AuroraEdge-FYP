@@ -104,7 +104,10 @@ test('runs an explicit scan without silently enrolling the domain', async ({ pag
 
 test('submits a batch in one request and validates the 20-domain limit', async ({ page }) => {
   await navigateTo(page, 'Scan')
-  await page.getByRole('tab', { name: 'Batch scan' }).click()
+  await page.getByRole('tab', { name: 'Single domain' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Batch scan' })).toBeFocused()
+  await expect(page.getByRole('tabpanel', { name: 'Batch scan' })).toBeVisible()
   const requests: string[] = []
   page.on('request', (request) => { if (request.url().endsWith('/api/scan')) requests.push(request.url()) })
   await page.getByRole('textbox', { name: 'Domains', exact: true }).fill('example.com\nweak.example.com')
@@ -115,6 +118,43 @@ test('submits a batch in one request and validates the 20-domain limit', async (
   await page.getByRole('textbox', { name: 'Domains', exact: true }).fill(Array.from({ length: 21 }, (_, index) => `d${index}.example.com`).join('\n'))
   await page.getByRole('button', { name: 'Run security scan' }).click()
   await expect(page.getByRole('alert')).toContainText('no more than 20')
+})
+
+test('returns to the requested scan and its domain after sign-in', async ({ page, context }) => {
+  await context.clearCookies()
+  await page.goto('/scan?domain=example.com#scan-single-panel')
+  await expect(page.getByRole('heading', { name: 'Operator sign in' })).toBeVisible()
+  await page.getByLabel('Operator token').fill(token)
+  await page.getByRole('button', { name: 'Sign in securely' }).click()
+  await expect(page).toHaveURL(/\/scan\?domain=example.com#scan-single-panel$/)
+  await expect(page.getByRole('textbox', { name: 'Domain', exact: true })).toHaveValue('example.com')
+})
+
+test('shows partial DNS-change failures and manual actions without an old grade', async ({ page }) => {
+  // Exercise presentation only; no request reaches the disabled provider layer.
+  await page.route('**/api/apply-fix', (route) => route.fulfill({
+    json: {
+      domain: 'example.com', status: 'partial', verification_status: 'incomplete', history_saved: false,
+      verification: 'The latest verification scan was incomplete.',
+      applied: [{ type: 'DMARC', message: 'DMARC change submitted.' }],
+      failed: [{ type: 'TLS-RPT', message: 'Provider refused the report record.' }],
+      manual_actions: [{ type: 'SPF', description: 'Confirm every sending service.', steps: 'Review provider instructions before changing SPF.' }],
+    },
+  }))
+  await navigateTo(page, 'Scan')
+  await page.getByRole('textbox', { name: 'Domain', exact: true }).fill('example.com')
+  await page.getByRole('button', { name: 'Run security scan' }).click()
+  await expect(page.getByRole('heading', { name: 'example.com' })).toBeVisible()
+  await page.getByRole('button', { name: 'Plan DNS fix' }).click()
+  await expect(page.getByRole('dialog')).toContainText('This review does not change DNS records.')
+  await page.getByRole('button', { name: 'Review recommendations' }).click()
+  const outcome = page.getByRole('region', { name: 'DNS change outcome for example.com' })
+  await expect(outcome).toBeVisible()
+  await expect(outcome).toContainText('Provider refused the report record.')
+  await expect(outcome).toContainText('Review provider instructions before changing SPF.')
+  await expect(outcome.locator('.notice--success')).toHaveCount(0)
+  await expect(page.locator('.score-lockup')).toHaveCount(0)
+  await expect(outcome.getByRole('link', { name: 'Review saved verification' })).toHaveCount(0)
 })
 
 test('enrols, rescans, opens, and removes a managed domain with confirmation', async ({ page }) => {

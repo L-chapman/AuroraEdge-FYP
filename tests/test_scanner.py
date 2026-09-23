@@ -17,6 +17,7 @@ def test_scan_spf_missing(monkeypatch):
 
 
 def test_scan_dmarc_present_quarantine(monkeypatch):
+    monkeypatch.setattr(scanner, "_mx_blacklist_check", lambda hosts: (0, []))
     def fake_txt(name: str):
         if name.startswith("_dmarc."):
             return ["v=DMARC1; p=quarantine; rua=mailto:d@example.com"]

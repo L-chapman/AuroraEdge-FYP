@@ -7,7 +7,7 @@ import csv
 import json
 import asyncio
 import logging
-import subprocess
+import math
 import concurrent.futures
 import hashlib
 import secrets
@@ -17,6 +17,7 @@ import html as html_lib
 import time as _time
 import importlib.util
 from contextlib import asynccontextmanager
+from functools import wraps
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
@@ -156,7 +157,6 @@ except ImportError:
 
 
 logger = logging.getLogger("northflux")
-DEMO_RESET_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "demo_prep.py"
 
 
 def _is_enabled(value: object, default: bool = False) -> bool:
@@ -359,7 +359,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         # Prevent caching of API and dynamic HTML responses
-        if "text/html" in response.headers.get("content-type", "") or "application/json" in response.headers.get("content-type", ""):
+        if (
+            "text/html" in response.headers.get("content-type", "")
+            or "application/json" in response.headers.get("content-type", "")
+            or request.url.path.startswith(("/download/", "/api/report/"))
+        ):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -541,6 +545,12 @@ def require_token(req: Request):
     if not want:
         if _is_production():
             raise HTTPException(status_code=503, detail="Authentication is not configured")
+        # Even an intentionally open local instance must reject browser writes
+        # from unrelated sites (including simple text/plain JSON requests).
+        origin = req.headers.get("origin")
+        if req.method.upper() not in {"GET", "HEAD", "OPTIONS", "TRACE"} and origin is not None:
+            if not constant_time_equal(origin.rstrip("/"), _expected_origin(req)):
+                raise HTTPException(status_code=403, detail="Invalid request origin")
         return  # No token set -> open access in local development
 
     # Explicit bearer credentials are not ambient browser authority, so they do
@@ -733,7 +743,7 @@ def _normalise_score(value: object, *, optional: bool = False) -> Optional[int]:
         return None
     try:
         return max(0, min(100, int(value or 0)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None if optional else 0
 
 
@@ -986,13 +996,21 @@ def api_v1_dashboard():
     )
 
 
+def _contained_report(path: Path, root: Path) -> bool:
+    """Exclude directories and report links that escape their storage root."""
+    try:
+        return path.is_file() and path.resolve().is_relative_to(root.resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
 def list_csvs() -> List[Path]:
     """List all CSV report files, newest first."""
     files: List[Path] = []
     if REPORTS.exists():
-        files.extend(REPORTS.glob("*_results_*.csv"))
+        files.extend(p for p in REPORTS.glob("*_results_*.csv") if _contained_report(p, REPORTS))
     if REPORTS_ROOT.exists():
-        files.extend(REPORTS_ROOT.glob("*_results_*.csv"))
+        files.extend(p for p in REPORTS_ROOT.glob("*_results_*.csv") if _contained_report(p, REPORTS_ROOT))
     files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
     return files
 
@@ -1021,7 +1039,7 @@ def _latest_pair() -> tuple[Optional[Path], Optional[Path]]:
         return None, None
     newest = files[0]
     md = newest.with_suffix(".md")
-    return newest, (md if md.exists() else None)
+    return newest, (md if _contained_report(md, newest.parent) else None)
 
 
 def _severity_counts(rows: List[Dict[str, str]]) -> Dict[str, int]:
@@ -1041,6 +1059,8 @@ def _grade_counts(rows: List[Dict[str, str]]) -> Dict[str, int]:
     """Count results by letter grade."""
     counts = {"A+": 0, "A": 0, "B": 0, "C": 0, "D": 0, "F": 0}
     for r in rows:
+        if _is_enabled(r.get("scan_incomplete")):
+            continue
         grade = (r.get("grade", "") or "").upper()
         if grade in counts:
             counts[grade] += 1
@@ -1053,9 +1073,13 @@ def _score_stats(rows: List[Dict[str, str]]) -> Dict[str, float]:
     """Calculate score statistics."""
     scores = []
     for r in rows:
+        if _is_enabled(r.get("scan_incomplete")):
+            continue
         try:
-            scores.append(float(r.get("score", 0)))
-        except Exception:
+            score = float(r.get("score"))
+            if math.isfinite(score) and 0 <= score <= 100:
+                scores.append(score)
+        except (ValueError, TypeError, OverflowError):
             continue
     if not scores:
         return {"avg": 0.0, "min": 0.0, "max": 0.0, "count": 0}
@@ -1135,7 +1159,7 @@ def readiness():
 
 
 @app.get("/api/stream", dependencies=[Depends(require_token)])
-async def stream_updates():
+async def stream_updates(request: Request):
     """
     Server-Sent Events endpoint for real-time updates.
     Clients can subscribe to this for live dashboard updates.
@@ -1144,6 +1168,13 @@ async def stream_updates():
     async def event_generator():
         last_check = 0.0
         while True:
+            # An open connection is not permanent authority. Stop disclosing
+            # reports after sign-out, expiry or operator token rotation.
+            try:
+                require_token(request)
+            except HTTPException:
+                yield f"data: {json.dumps({'type': 'session_expired'})}\n\n"
+                return
             has_update, mtime = _check_for_updates()
             if has_update or mtime != last_check:
                 # Send update event
@@ -1217,6 +1248,17 @@ def api_summary():
     }
 
 
+def _saved_scan_evidence(row: Dict) -> Dict:
+    """Keep extensible observations without overriding authoritative columns."""
+    try:
+        raw = json.loads(row.get("raw_json") or "{}")
+        if isinstance(raw, dict):
+            return {**raw, **row}
+    except (ValueError, TypeError, RecursionError):
+        pass
+    return row
+
+
 @app.get("/api/domain/{domain}", dependencies=[Depends(require_token)])
 def api_domain(domain: str):
     """Get latest result for a specific domain &#8212; checks DB first, falls back to CSV."""
@@ -1230,7 +1272,7 @@ def api_domain(domain: str):
             db = get_database()
             history = db.get_domain_history(clean, limit=1)
             if history:
-                return {"domain": clean, "result": history[0], "source": "database"}
+                return {"domain": clean, "result": _saved_scan_evidence(history[0]), "source": "database"}
         except Exception:
             logger.exception("Failed to retrieve the latest result for %s", clean)
             raise HTTPException(status_code=500, detail="Failed to retrieve domain data")
@@ -1275,11 +1317,12 @@ def api_search(
                 if domain_name in seen_domains:
                     continue
                 seen_domains.add(domain_name)
-                rows.append(row)
+                rows.append(_saved_scan_evidence(row))
         except Exception:
-            rows = []
+            logger.exception("Failed to search saved results")
+            raise HTTPException(status_code=500, detail="Failed to search saved results")
 
-    if not rows:
+    else:
         csv_file, _ = _latest_pair()
         if not csv_file:
             return {"results": [], "count": 0, "total": 0}
@@ -1291,19 +1334,21 @@ def api_search(
         # Apply filters
         if q and q.lower() not in row.get("domain", "").lower():
             continue
-        if severity and row.get("severity", "").upper() != severity.upper():
+        if severity and str(row.get("severity") or "").upper() != severity.upper():
             continue
-        if grade and row.get("grade", "").upper() != grade.upper():
+        if grade and str(row.get("grade") or "").upper() != grade.upper():
             continue
 
         try:
-            score = float(row.get("score", 0))
-        except ValueError:
-            score = 0
+            score = float(row.get("score"))
+            if _is_enabled(row.get("scan_incomplete")) or not math.isfinite(score) or not 0 <= score <= 100:
+                score = None
+        except (ValueError, TypeError, OverflowError):
+            score = None
 
-        if min_score is not None and score < min_score:
+        if min_score is not None and (score is None or score < min_score):
             continue
-        if max_score is not None and score > max_score:
+        if max_score is not None and (score is None or score > max_score):
             continue
 
         results.append(row)
@@ -1375,7 +1420,7 @@ def api_history(domain: str, limit: int = Query(20, ge=1, le=100)):
 
     try:
         db = get_database()
-        history = db.get_domain_history(clean, limit)
+        history = [_saved_scan_evidence(row) for row in db.get_domain_history(clean, limit)]
         return {"domain": clean, "history": history, "count": len(history)}
     except Exception as e:
         logger.error("Failed to fetch history for %s: %s", clean, e)
@@ -1597,13 +1642,18 @@ def download_latest(kind: str = "csv"):
 @app.get("/download/{filename}", dependencies=[Depends(require_token)])
 def download_file(filename: str):
     """Download a specific report file."""
-    # Sanitize filename
+    # Only report formats are downloadable, never arbitrary local files or
+    # Windows alternate streams. Resolve the final path to reject escaped links.
     safe_name = Path(filename).name
+    if safe_name != filename or any(char in filename for char in "/\\:") or Path(filename).suffix.lower() not in {".csv", ".md"}:
+        raise HTTPException(status_code=404, detail="Report not found")
     file_path = REPORTS / safe_name
-    if not file_path.exists():
+    reports_root = REPORTS.resolve()
+    if not file_path.is_file():
         file_path = REPORTS_ROOT / safe_name
+        reports_root = REPORTS_ROOT.resolve()
 
-    if not file_path.exists():
+    if not file_path.is_file() or not file_path.resolve().is_relative_to(reports_root):
         raise HTTPException(status_code=404, detail="File not found")
 
     if file_path.suffix == ".csv":
@@ -1861,7 +1911,13 @@ async def api_add_managed_domain(request: Request):
                 detail="Scan data changed during onboarding; remediation cancelled",
             )
         try:
-            fix_result = await asyncio.to_thread(_auto_fix_domain, domain, scan_result)
+            fix_result = await asyncio.to_thread(
+                _auto_fix_domain, domain, scan_result,
+                should_continue=lambda: (
+                    db.get_data_generation() == data_generation
+                    and _is_enabled(db.get_setting("automatic_remediation", "false"))
+                ),
+            )
             result["auto_fix"] = fix_result
         except Exception:
             logger.exception("Onboarding remediation failed for %s", domain)
@@ -1896,14 +1952,20 @@ async def api_add_managed_domain(request: Request):
                         "the post-remediation result was not saved"
                     ),
                 )
-            new_grade = re_eval.get("grade", grade)
-            new_score = re_eval.get("score", score)
-            result["post_fix_scan"] = {
-                "grade": new_grade,
-                "score": new_score,
-                "severity": re_eval.get("severity", "OK"),
-                "improved": new_score > score,
-            }
+            if rescan.get("scan_incomplete"):
+                result["post_fix_scan"] = {
+                    "scan_incomplete": True,
+                    "error": "Changes were submitted, but verification was incomplete. No post-change grade is available.",
+                }
+            else:
+                new_grade = re_eval.get("grade", grade)
+                new_score = re_eval.get("score", score)
+                result["post_fix_scan"] = {
+                    "grade": new_grade,
+                    "score": new_score,
+                    "severity": re_eval.get("severity", "OK"),
+                    "improved": new_score > score,
+                }
         except HTTPException:
             raise
         except Exception:
@@ -2018,10 +2080,34 @@ def _apply_cf_settings(db):
     _load_cf_runtime_settings(db)
 
 
+_remediation_lock = threading.Lock()
+_remediation_in_progress: set[str] = set()
+
+
+def _serialise_domain_remediation(operation):
+    """Reject overlapping manual/scheduled changes instead of queuing stale work."""
+    @wraps(operation)
+    def run(domain: str, *args, **kwargs):
+        key = domain.strip().lower().rstrip(".")
+        with _remediation_lock:
+            if key in _remediation_in_progress:
+                raise HTTPException(status_code=409, detail="A DNS change for this domain is already in progress")
+            _remediation_in_progress.add(key)
+        try:
+            return operation(domain, *args, **kwargs)
+        finally:
+            with _remediation_lock:
+                _remediation_in_progress.discard(key)
+    return run
+
+
+@_serialise_domain_remediation
 def _auto_fix_domain(domain: str, scan_result: dict = None, should_continue=None) -> dict:
     """
-    Automatically scan and fix ALL DNS issues for a domain via Cloudflare.
-    No human in the loop &#8212; applies every available fix.
+    Compatibility orchestration for explicitly enabled provider integrations.
+    Current generated recommendations are manual and never supply a write
+    callback. Separately reviewed callbacks still require ownership and
+    cancellation checks; this is not unattended mail-policy enforcement.
 
     Args:
         domain: The domain name to fix
@@ -3192,13 +3278,20 @@ def home():
             continue
         clean_record = dict(record)
         clean_record["domain"] = clean_domain
-        clean_record["last_grade"] = str(record.get("last_grade") or "F").upper()
+        incomplete = _is_enabled(record.get("last_scan_incomplete"))
+        clean_record["last_scan_incomplete"] = incomplete
+        clean_record["last_grade"] = str(record.get("last_grade") or "").upper()
         if clean_record["last_grade"] not in allowed_grades:
-            clean_record["last_grade"] = "F"
+            clean_record["last_grade"] = None
         try:
-            clean_record["last_score"] = max(0, min(100, int(record.get("last_score") or 0)))
+            clean_record["last_score"] = (
+                max(0, min(100, int(record["last_score"])))
+                if not incomplete and record.get("last_score") is not None else None
+            )
         except (TypeError, ValueError):
-            clean_record["last_score"] = 0
+            clean_record["last_score"] = None
+        if clean_record["last_score"] is None:
+            clean_record["last_grade"] = None
         try:
             previous_score = record.get("previous_score")
             clean_record["previous_score"] = (
@@ -3215,16 +3308,25 @@ def home():
 
     # Compute stats from managed domains
     scores = [d["last_score"] for d in valid_domains if d.get("last_score") is not None]
-    avg_score = round(sum(scores) / len(scores)) if scores else 0
+    avg_score = round(sum(scores) / len(scores)) if scores else None
+    unknown_count = total_domains - len(scores)
     grades = {}
     for d in valid_domains:
-        g = d.get("last_grade") or "F"
-        grades[g] = grades.get(g, 0) + 1
+        g = d.get("last_grade")
+        if g:
+            grades[g] = grades.get(g, 0) + 1
     passing = sum(1 for d in valid_domains if (d.get("last_score") or 0) >= 70)
-    failing = total_domains - passing
-    worst = sorted(valid_domains, key=lambda d: d.get("last_score") or 0)[:5]
+    failing = len(scores) - passing
+    worst = sorted(
+        (d for d in valid_domains if d.get("last_score") is not None),
+        key=lambda d: d["last_score"],
+    )[:5]
     # Overall health colour
-    if avg_score >= 85:
+    if avg_score is None:
+        health_colour = "var(--text-muted)"
+        health_label = "Unknown"
+        health_icon = "&#8505;&#65039;"
+    elif avg_score >= 85:
         health_colour = "var(--success)"
         health_label = "Good"
         health_icon = "&#9989;"
@@ -3256,19 +3358,20 @@ def home():
     domain_rows_html = ""
     for d in sorted(valid_domains, key=lambda x: x.get("last_score") or 0):
         dom = d["domain"]
-        g = d.get("last_grade") or "F"
-        g_cls = g.lower().replace("+", "-plus")
-        s = d.get("last_score") or 0
+        g = d.get("last_grade") or ("Incomplete" if d.get("last_scan_incomplete") else "Not scanned")
+        g_cls = g.lower().replace("+", "-plus") if d.get("last_grade") else "info"
+        s = d.get("last_score")
+        score_label = f"{s}/100" if s is not None else "Not available"
         prev = d.get("previous_score")
         drift = ""
-        if prev is not None and prev != s:
+        if s is not None and prev is not None and prev != s:
             drift = f' <span style="color:var(--success);font-size:.75rem;">&#9650;{s-prev}</span>' if s > prev else f' <span style="color:var(--danger);font-size:.75rem;">&#9660;{prev-s}</span>'
         last_scan = _escape((d.get("last_scan_at") or "")[:16].replace("T", " "))
         domain_rows_html += f"""
         <tr>
             <td><a href="/domain/{dom}" style="color:var(--accent);text-decoration:none;font-weight:500;">{dom}</a></td>
             <td><span class="grade-badge {g_cls}">{g}</span></td>
-            <td>{s}/100{drift}</td>
+            <td>{score_label}{drift}</td>
             <td style="color:var(--text-secondary);font-size:.85rem;">{last_scan}</td>
         </tr>"""
 
@@ -3309,11 +3412,13 @@ def home():
                 <div style="width:{bar_w}%;height:100%;border-radius:4px;background:{'var(--danger)' if s < 50 else 'var(--warning)' if s < 70 else 'var(--success)'};"></div>
             </div>
         </div>"""
+    if unknown_count:
+        attention_html += f'<p style="color:var(--text-muted);">{unknown_count} domain(s) have incomplete or unavailable scan evidence. Rescan before relying on their results.</p>'
     if not attention_html:
         attention_html = '<p style="color:var(--text-muted);text-align:center;padding:24px 0;">All domains scoring well!</p>'
 
     # &#9472;&#9472; Check if CSV report dashboard also needed &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
-    csv_file, md_file = _latest_pair()
+    csv_file, md_file = _latest_pair() if not HAS_DB else (None, None)
 
     if total_domains == 0:
         _grade_dist_html = '<p style="color:var(--text-muted);text-align:center;padding:24px 0;">Add domains in <a href="/domains" style="color:var(--accent);">My Domains</a> to see grade data.</p>'
@@ -3399,8 +3504,8 @@ def home():
             </div>
             <div class="stat-card">
                 <div class="stat-icon score">&#128202;</div>
-                <div class="stat-value" style="color:{health_colour};">{avg_score}</div>
-                <div class="stat-label">Average Score</div>
+                <div class="stat-value" style="color:{health_colour};">{avg_score if avg_score is not None else 'Not available'}</div>
+                <div class="stat-label">Average Score (complete scans)</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon high">{health_icon}</div>
@@ -3501,7 +3606,9 @@ def _build_report_dashboard(rows, csv_file, md_file, base_html):
     table_rows = ""
     for r in rows:
         r = _escape_record(r)
-        grade = r.get("grade", "F")
+        incomplete = _is_enabled(r.get("scan_incomplete"))
+        grade = "Incomplete" if incomplete else r.get("grade") or "Not available"
+        score = "Not available" if incomplete else r.get("score", "Not available")
         grade_class = grade.lower().replace("+", "-plus")
         severity = r.get("severity", "OK")
         domain = r.get("domain", "")
@@ -3510,15 +3617,19 @@ def _build_report_dashboard(rows, csv_file, md_file, base_html):
         dmarc = f'<span class="check-icon check-yes">&#10003;</span> {dmarc_val}' if r.get("dmarc_present") == "True" else '<span class="check-icon check-no">&#10007;</span>'
         dkim = '<span class="check-icon check-yes">&#10003;</span>' if r.get("dkim_present") == "True" else '<span class="check-icon check-no">&#10007;</span>'
         sts = '<span class="check-icon check-yes">&#10003;</span>' if r.get("mta_sts_present") == "True" else '<span class="check-icon check-no">&#10007;</span>'
-        sev_class = severity.lower() if severity.lower() in ["ok", "warn", "high", "info"] else "ok"
+        sev_class = severity.lower() if severity.lower() in ["ok", "warn", "high", "info"] else "high"
+        if incomplete:
+            spf = dmarc = dkim = sts = "Uncertain"
         table_rows += f"""
         <tr data-grade="{grade}" data-severity="{severity}">
             <td class="domain-cell"><a href="/domain/{domain}">{domain}</a></td>
             <td><span class="grade-badge {grade_class}">{grade}</span></td>
-            <td class="score-cell">{r.get("score", 0)}</td>
+            <td class="score-cell">{score}</td>
             <td><span class="status-badge {sev_class}">{severity}</span></td>
             <td>{spf}</td><td>{dmarc}</td><td>{dkim}</td><td>{sts}</td>
         </tr>"""
+        if r.get("notes"):
+            table_rows += f'<tr><td colspan="8">Notes: {r["notes"]}</td></tr>'
 
     downloads = '<a href="/download/latest?kind=csv" class="btn btn-secondary" style="font-size:.85rem;padding:8px 16px;">Download CSV</a>'
     if md_file:
@@ -4307,11 +4418,12 @@ function displayResults(data) {
             continue;
         }
 
-        const scan = result.scan;
-        const ev = result.evaluation;
+        const scan = result.scan || {};
+        const ev = result.evaluation || {};
         const remediation = result.remediation || [];
-
-        const grade = ev.grade || 'F';
+        const incomplete = scan.scan_incomplete === true || scan.scan_incomplete === 1 || scan.scan_incomplete === 'True';
+        const grade = incomplete ? 'Incomplete' : (ev.grade || 'Not available');
+        const score = incomplete ? 'Not available' : (ev.score ?? 'Not available');
         const gradeClass = grade.toLowerCase().replace('+', '-plus');
         const severityClass = (ev.severity || 'ok').toLowerCase();
 
@@ -4340,7 +4452,7 @@ function displayResults(data) {
 
             <div class="result-stats">
                 <div class="result-stat clickable" data-action="score-breakdown" data-result-index="${resultIndex}">
-                    <div class="result-stat-value">${ev.score || 0}</div>
+                    <div class="result-stat-value">${score}</div>
                     <div class="result-stat-label">Score</div>
                     <div class="stat-hint">Click for breakdown</div>
                 </div>
@@ -4360,7 +4472,10 @@ function displayResults(data) {
 
             <!-- Expandable Details Section -->
             <div class="result-details" id="details-${resultId}" style="display: none;">
-                <h3 style="margin: 20px 0 12px; color: var(--text-secondary);">&#128269; Security Checks</h3>
+                <h3 style="margin: 20px 0 12px; color: var(--text-secondary);">&#128269; Observed Records</h3>
+                <p>Record presence is not a validation result. Review the findings and recommendations.</p>
+                ${incomplete ? '<p>Incomplete scan. Rescan before relying on these findings or applying automatic fixes.</p>' : ''}
+                ${scan.notes ? `<p>Notes: ${scan.notes}</p>` : ''}
                 <div class="checks-grid">
                     ${renderCheckEnhanced('SPF', scan.spf_present, scan.spf_all ? 'All: ' + scan.spf_all : '', 'R2_SPF_MISSING')}
                     ${renderCheckEnhanced('DMARC', scan.dmarc_present, scan.dmarc_policy ? 'Policy: ' + scan.dmarc_policy : '', 'R4_DMARC_MISSING')}
@@ -4421,16 +4536,15 @@ function displayResults(data) {
                 `).join('')}
             </div>
             ` : `
-            <div class="all-good-banner">
-                <span class="all-good-icon">&#9989;</span>
-                <span>All security checks passed! No remediation needed.</span>
+            <div class="${!incomplete && ev.violation_count === 0 ? 'all-good-banner' : 'severity-banner info'}">
+                <span>${incomplete ? 'Scan incomplete. Recommendations are not reliable until a complete scan is available.' : ev.violation_count === 0 ? 'No issues were identified by these checks. This is not a guarantee of security.' : 'Recommendations were not requested or are unavailable. Review the reported issues.'}</span>
             </div>
             `}
 
             <!-- Action Buttons -->
             <div class="result-actions">
                 <button class="action-btn secondary" data-action="rescan" data-result-index="${resultIndex}">&#128260; Rescan</button>
-                ${ev.violation_count > 0 ? `<button class="action-btn primary" data-action="auto-fix" data-result-index="${resultIndex}" style="background:var(--warning);color:#000;">&#128295; Auto-Fix DNS</button>` : ''}
+                ${!incomplete && ev.violation_count > 0 ? `<button class="action-btn primary" data-action="auto-fix" data-result-index="${resultIndex}" style="background:var(--warning);color:#000;">&#128295; Auto-Fix DNS</button>` : ''}
                 <button class="action-btn secondary" data-action="history" data-result-index="${resultIndex}">&#128202; View History</button>
                 <button class="action-btn primary" data-action="export" data-result-index="${resultIndex}">&#128229; Export Report</button>
             </div>
@@ -4452,7 +4566,10 @@ function displayResults(data) {
             const domain = rawResult.domain;
 
             if (action === 'toggle-details') toggleDetails(element.dataset.target);
-            else if (action === 'score-breakdown') showScoreBreakdown(domain, rawResult.evaluation?.score || 0);
+            else if (action === 'score-breakdown') {
+                if (rawResult.scan?.scan_incomplete) showToast('Incomplete scan: no reliable score is available.', 'warning');
+                else showScoreBreakdown(domain, rawResult.evaluation?.score ?? 'Not available');
+            }
             else if (action === 'toggle-raw') toggleRawData(element.dataset.target);
             else if (action === 'toggle-remediation') toggleRemediation(element.dataset.target);
             else if (action === 'copy-example') {
@@ -4604,7 +4721,7 @@ async function autoFixFromScan(domain) {
         } else if (!msg) {
             msg = 'No issues found &#8212; domain looks good!';
         }
-        const hasFailures = (data.failed && data.failed.length > 0);
+        const hasFailures = (data.failed && data.failed.length > 0) || ['incomplete', 'failed'].includes(data.verification_status);
         const hasApplied = (data.applied && data.applied.length > 0);
         hideProgressPopup();
         updateAutoFixOverlay('Done.', 100);
@@ -4797,7 +4914,7 @@ function renderCheckEnhanced(name, present, detail, ruleId) {
     return `
         <div class="check-item ${status}" onclick="showCheckInfo('${name}', ${present}, '${ruleId}')" style="cursor: pointer;">
             <span class="check-name">${name}</span>
-            <span class="check-status ${status}">${icon} ${detail}</span>
+            <span class="check-status ${status}">${icon} ${present ? 'Record found' : 'Not found'} ${detail}</span>
             <span class="check-hint">Click for info</span>
         </div>
     `;
@@ -4805,7 +4922,7 @@ function renderCheckEnhanced(name, present, detail, ruleId) {
 
 async function showCheckInfo(name, present, ruleId) {
     if (present) {
-        alert(name + ' check PASSED\\n\\nThis security control is properly configured.');
+        alert(name + ' record found\\n\\nRecord presence does not prove that this control is valid or correctly configured. Review the scan findings.');
         return;
     }
 
@@ -4836,15 +4953,15 @@ Reference: ${data.rfc || 'See email security RFCs'}
 document.addEventListener('DOMContentLoaded', () => {
     const container = document.getElementById('quickDomains');
     if (container) {
-        // Featured demo domain (pre-configured for auto-fix)
+        // Read-only example; the live reset/restore workflow is retired.
         if (demoModeEnabled) {
             const demoBtn = document.createElement('button');
             demoBtn.className = 'quick-domain demo-domain';
             demoBtn.appendChild(document.createTextNode('\u2B50 ' + demoDomain + ' '));
             const demoLabel = document.createElement('small');
-            demoLabel.textContent = '(Auto-Fix Demo)';
+            demoLabel.textContent = '(Read-only example)';
             demoBtn.appendChild(demoLabel);
-            demoBtn.title = 'Pre-configured demo domain &#8212; scan this then click Auto-Fix DNS';
+            demoBtn.title = 'Read-only scan example; review recommendations before making any DNS changes';
             demoBtn.onclick = () => addQuickDomain(demoDomain);
             container.appendChild(demoBtn);
         }
@@ -5051,17 +5168,22 @@ async def api_apply_fix(request: Request):
     return await asyncio.to_thread(_apply_fix_sync, domain, requested)
 
 
+@_serialise_domain_remediation
 def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Dict:
     """Run one already-validated remediation request in a worker thread."""
     if not HAS_DNS_FIX:
         raise HTTPException(status_code=501, detail="DNS fix module not available")
 
-    # Always load the latest CF credentials from the database
-    if HAS_DB:
-        try:
-            _apply_cf_settings(get_database())
-        except Exception:
-            pass
+    # Capture cancellation state before slow provider reads, and never proceed
+    # with potentially stale credentials if the settings refresh fails.
+    try:
+        persistence_db = get_database() if HAS_DB else None
+        data_generation = persistence_db.get_data_generation() if persistence_db else None
+        if persistence_db:
+            _apply_cf_settings(persistence_db)
+    except Exception:
+        logger.exception("Could not load current remediation settings")
+        raise HTTPException(status_code=503, detail="Current remediation settings could not be loaded")
 
     cf = get_cloudflare_client()
     if not cf:
@@ -5076,11 +5198,6 @@ def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Di
         raise HTTPException(
             status_code=503, detail=f"Cloudflare connection failed: {msg}"
         )
-
-    persistence_db = get_database() if HAS_DB else None
-    data_generation = (
-        persistence_db.get_data_generation() if persistence_db else None
-    )
 
     # OWNERSHIP CHECK: refuse to modify DNS for domains outside the configured zone
     owned, ownership_msg = cf.verify_domain_ownership(domain)
@@ -5107,6 +5224,14 @@ def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Di
 
     for fix in fixes:
         fix_type = fix.get("type", "Unknown")
+
+        if persistence_db and persistence_db.get_data_generation() != data_generation:
+            failed_fixes.append({
+                "type": fix_type, "success": False,
+                "message": "Remediation cancelled because the operator changed scan data or removed a domain.",
+                "priority": "WARN",
+            })
+            break
 
         # Manual-only items (no auto_fix function)
         if fix.get("manual") or fix.get("auto_fix") is None:
@@ -5274,8 +5399,8 @@ def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Di
         status = "partial"
     elif applied_fixes and failed_fixes:
         status = "partial"
-    elif not applied_fixes and not failed_fixes and not manual_actions:
-        status = "no_action"
+    elif not applied_fixes and not failed_fixes:
+        status = "manual_review" if manual_actions else "no_action"
     else:
         status = "failed"
 
@@ -5292,8 +5417,8 @@ def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Di
         "grade": None if uncertain else final_eval.get("grade", ""),
         "score": None if uncertain else final_eval.get("score", 0),
         "violations": final_eval.get("violation_count", 0),
-        "pre_fix_grade": pre_fix_eval.get("grade", ""),
-        "pre_fix_score": pre_fix_eval.get("score", 0),
+        "pre_fix_grade": None if scan_result.get("scan_incomplete") else pre_fix_eval.get("grade", ""),
+        "pre_fix_score": None if scan_result.get("scan_incomplete") else pre_fix_eval.get("score", 0),
         "verification": verification_note,
         "verification_status": verification_status,
         "history_saved": history_saved,
@@ -5304,179 +5429,21 @@ def _apply_fix_sync(domain: str, requested_fix_types: Optional[List[str]]) -> Di
 
 @app.post("/api/demo/reset", dependencies=[Depends(require_token)])
 async def api_demo_reset(request: Request):
-    """
-    Intentionally reset the demo domain to a weak state for repeatable classroom testing.
-
-    POST body (optional):
-    {
-        "domain": "the configured demo domain",
-        "restore": false                 // true => restore strong state
-    }
-    """
+    """The legacy live-DNS weakening exercise is deliberately unavailable."""
     if _is_production() or not _is_enabled(os.environ.get("NORTHFLUX_DEMO_MODE")):
         raise HTTPException(status_code=404, detail="Demo mode is not enabled")
-    if not HAS_DB:
-        raise HTTPException(status_code=501, detail="Database not available")
-
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    domain, d_err = _sanitize_domain(body.get("domain", DEMO_DOMAIN))
-    if d_err:
-        raise HTTPException(status_code=400, detail=d_err)
-    if domain != DEMO_DOMAIN:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Demo reset is restricted to {DEMO_DOMAIN}",
-        )
-
-    restore = bool(body.get("restore", False))
-    action = "restore" if restore else "reset"
-
-    db = get_database()
-    db.add_managed_domain(DEMO_DOMAIN, notes="Auto-Fix demo domain")
-    data_generation = db.get_data_generation()
-
-    # Ensure runtime Cloudflare settings are synced and present.
-    try:
-        _apply_cf_settings(db)
-    except Exception:
-        pass
-    token = db.get_setting("cf_api_token", "").strip()
-    zone = db.get_setting("cf_zone_id", "").strip()
-    if not token or not zone:
-        raise HTTPException(
-            status_code=503,
-            detail="Cloudflare credentials are missing. Configure API Token and Zone ID in Settings first.",
-        )
-
-    if not DEMO_RESET_SCRIPT.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Demo reset script not found: {DEMO_RESET_SCRIPT}",
-        )
-
-    cmd = [sys.executable, str(DEMO_RESET_SCRIPT)]
-    if restore:
-        cmd.append("--restore")
-    run_env = os.environ.copy()
-    # demo_prep.py prints emoji; force UTF-8 output so Windows cp1252 consoles do not crash.
-    run_env["PYTHONIOENCODING"] = "utf-8"
-    run_env["PYTHONUTF8"] = "1"
-
-    try:
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            cmd,
-            cwd=str(Path(__file__).resolve().parents[2]),
-            env=run_env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Demo reset timed out after 120 seconds")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to run demo reset: {e}")
-
-    out = (proc.stdout or "").strip()
-    err = (proc.stderr or "").strip()
-    tail_lines = [ln for ln in (out + ("\n" + err if err else "")).splitlines() if ln.strip()]
-    tail = "\n".join(tail_lines[-8:])
-
-    if proc.returncode != 0:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Demo {action} failed. {tail or 'See server logs for details.'}",
-        )
-
-    scan_summary = {}
-    if HAS_SCANNER:
-        try:
-            import time
-
-            def _matches_target_state(scan: Dict, restoring: bool) -> bool:
-                spf_all = str(scan.get("spf_all") or "").strip().lower()
-                dmarc_policy = str(scan.get("dmarc_policy") or "").strip().lower()
-                dmarc_pct = int(scan.get("dmarc_pct") or 0)
-                mta_present = bool(scan.get("mta_sts_present"))
-                if restoring:
-                    return (
-                        spf_all == "-all"
-                        and dmarc_policy == "reject"
-                        and dmarc_pct >= 100
-                        and mta_present
-                    )
-                # reset target: any clearly weakened/missing control is enough
-                return (
-                    spf_all == "~all"
-                    and dmarc_policy == "quarantine"
-                    and dmarc_pct < 100
-                    and not mta_present
-                )
-
-            matched_scan = None
-            matched_eval = None
-            last_scan = None
-            last_eval = None
-            for attempt in range(8):
-                if attempt > 0:
-                    time.sleep(6)
-                cur_scan = await asyncio.to_thread(scan_domain, DEMO_DOMAIN, False)
-                cur_scan["domain"] = DEMO_DOMAIN
-                cur_eval = evaluate(cur_scan)
-                last_scan, last_eval = cur_scan, cur_eval
-
-                if _matches_target_state(cur_scan, restore):
-                    matched_scan, matched_eval = cur_scan, cur_eval
-                    break
-
-            # Use the first matching state if available, otherwise the latest scan.
-            # Avoid choosing "best/worst" snapshots because DNS-related checks can be
-            # transient and produce confusing score mismatches across consecutive rescans.
-            scan_result = matched_scan or last_scan or {}
-            evaluation = matched_eval or last_eval or {}
-            grade = evaluation.get("grade", "F")
-            score = evaluation.get("score", 0)
-            severity = evaluation.get("severity", "OK")
-            saved = db.write_scan_results(
-                [(DEMO_DOMAIN, scan_result, evaluation)],
-                notes=f"Demo {action} verification scan for {DEMO_DOMAIN}",
-                expected_generation=data_generation,
-                save_history=True,
-                update_managed=True,
-            )
-            scan_summary = {
-                "grade": grade,
-                "score": score,
-                "severity": severity,
-                "violations": evaluation.get("violation_count", 0),
-                "saved": saved,
-            }
-        except Exception:
-            # Keep reset flow successful even if verification scan fails.
-            scan_summary = {}
-
-    return {
-        "ok": True,
-        "domain": DEMO_DOMAIN,
-        "action": action,
-        "message": (
-            "Demo domain restored to strong state."
-            if restore
-            else "Demo domain reset to intentionally weak state."
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Live DNS demo reset/restore has been retired for safety. "
+            "Use offline sample scenarios; use the guarded remediation workflow "
+            "only with an authorised test zone and a recovery plan."
         ),
-        "script_tail": tail,
-        "scan": scan_summary,
-    }
+    )
 
 
 @app.get("/api/fix-status", dependencies=[Depends(require_token)])
-async def api_fix_status():
+def api_fix_status():
     """
     Check if Cloudflare DNS auto-fix is available.
 
@@ -5518,7 +5485,7 @@ def test_hub():
     demo_display = "block" if demo_mode_enabled else "none"
     demo_example = f"{DEMO_DOMAIN} (demo), " if demo_mode_enabled else ""
     demo_help = (
-        f" Try <strong>{DEMO_DOMAIN}</strong> to test Auto-Fix."
+        f" <strong>{DEMO_DOMAIN}</strong> is a read-only example, not a live DNS-reset test."
         if demo_mode_enabled
         else ""
     )
@@ -5571,31 +5538,22 @@ def test_hub():
             </p>
         </div>
         
-        <!-- Auto-Fix Demo Guide -->
+        <!-- Retired live-DNS demonstration notice -->
         <div class="demo-guide" style="display:{demo_display}; background:rgba(234,179,8,0.10); border:1px solid rgba(234,179,8,0.4); border-radius:12px; padding:20px 24px; margin-bottom:24px;">
-            <h3 style="margin:0 0 10px; color:#fde68a;">&#11088; Auto-Fix Demo Guide</h3>
+            <h3 style="margin:0 0 10px; color:#fde68a;">Read-only Demonstration</h3>
             <p style="margin:0 0 8px; color:#e2e8f0; line-height:1.6;">
-                The domain <strong style="color:#fde68a;">{DEMO_DOMAIN}</strong> has been pre-configured with
-                <strong>intentionally weakened</strong> email security records (SPF softfail, DMARC quarantine at 50%, no MTA-STS)
-                so you can see the automated remediation engine detect and fix real issues.
+                Live-DNS reset and restore are retired. This page cannot prepare a weakened zone or restore a previous DNS configuration.
+                Use read-only scans of domains you are authorised to assess; no particular state is assumed for <strong>{DEMO_DOMAIN}</strong>.
             </p>
             <ol style="margin:8px 0 0; padding-left:20px; color:#cbd5e1; line-height:1.8;">
-                <li>Click the <strong style="color:#fde68a;">&#11088; {DEMO_DOMAIN} (Auto-Fix Demo)</strong> button below, then press <strong>Scan Domain</strong>.</li>
-                <li>Review the security grade and the list of violations flagged.</li>
-                <li>Click the <strong style="color:#f59e0b;">&#128295; Auto-Fix DNS</strong> button on the results to let NorthFlux Security automatically create the missing records via the Cloudflare API.</li>
-                <li>Hit <strong>&#128260; Rescan</strong> to confirm the fixes have been applied and watch the grade improve.</li>
+                <li>Enter an authorised domain and press <strong>Scan Domain</strong>.</li>
+                <li>Review the findings and any incomplete-check notes. Current generated recommendations require manual review.</li>
+                <li>Before publishing changes, confirm provider-specific values and keep an approved recovery plan.</li>
+                <li>After separately reviewed changes, rescan and inspect the evidence; a higher score is not proof of successful mail delivery.</li>
             </ol>
             <p style="margin:10px 0 0; color:#94a3b8; font-size:0.85rem;">
-                You may also run read-only scans of other public domains. Only <em>{DEMO_DOMAIN}</em> supports this demo workflow because it is the authorised Cloudflare-managed zone.
+                Do not use a public zone for destructive demonstrations. Historical scripts retain an offline preview only, not a rollback mechanism.
             </p>
-            <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-                <button id="resetDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(false)" style="border-color:rgba(234,179,8,0.6); color:#fde68a;">
-                    &#9851; Reset Demo DNS (Re-break for retest)
-                </button>
-                <button id="restoreDemoBtn" class="action-btn secondary" onclick="resetDemoDomain(true)">
-                    &#9989; Restore Demo DNS (Strong state)
-                </button>
-            </div>
         </div>
         
         <!-- Tab Navigation -->
@@ -5726,8 +5684,9 @@ def domain_detail(domain: str):
         except Exception:
             pass
 
-    # Fallback to CSV
-    if not result:
+    # Legacy CSV fallback is only available without database support. Never
+    # resurrect deleted history (or mask a database failure) from old exports.
+    if not result and not HAS_DB:
         csv_file, _ = _latest_pair()
         if csv_file:
             rows = load_csv(csv_file)
@@ -5740,7 +5699,7 @@ def domain_detail(domain: str):
         # Navigation is read-only; an explicit action starts a scan.
         return RedirectResponse(url=f"/scan?domain={domain}", status_code=303)
 
-    result = _escape_record(result)
+    result = _escape_record(_saved_scan_evidence(result))
 
     # Normalise &#8212; DB stores integers (0/1), CSV stores strings ("True"/"False")
     def _bool(val):
@@ -5752,9 +5711,10 @@ def domain_detail(domain: str):
             return val == 1
         return str(val).strip().lower() in ("true", "1", "yes")
 
-    grade = result.get("grade") or "F"
+    incomplete = _bool(result.get("scan_incomplete"))
+    grade = "Incomplete" if incomplete else result.get("grade") or "Not available"
     grade_class = grade.lower().replace("+", "-plus")
-    score = result.get("score") or 0
+    score = "Not available" if incomplete or result.get("score") is None else result["score"]
     severity = result.get("severity") or "OK"
     violation_count = result.get("violation_count") or 0
 
@@ -5773,16 +5733,16 @@ def domain_detail(domain: str):
          f"Logo: {result.get('bimi_logo', 'N/A') or 'Not set'}"),
         ("MX Records", _bool(result.get("mx_present")),
          f"{result.get('mx_count', 0)} records"),
-        ("Blacklists", result.get("rbl_listings", 0) == 0,
-         "Clean" if result.get("rbl_listings", 0) == 0 else f"Listed on {result.get('rbl_listings', 0)} DNSBL(s)"),
+        ("Blacklists", str(result.get("rbl_listings", "")) == "0",
+         "No listings found by these checks" if str(result.get("rbl_listings", "")) == "0" else f"Listings: {result.get('rbl_listings', 'Not available')}"),
     ]
 
     checks_html = ""
     for name, present, details in checks:
-        status = (
-            '<span class="check-yes">PASS</span>'
-            if present
-            else '<span class="check-no">FAIL</span>'
+        status = "Uncertain" if incomplete else (
+            "No listings found" if name == "Blacklists" and present else
+            "Review listings" if name == "Blacklists" else
+            "Record found" if present else "Not found"
         )
         checks_html += f"""
         <tr>
@@ -5807,14 +5767,16 @@ def domain_detail(domain: str):
                             <thead><tr><th>Date</th><th>Grade</th><th>Score</th><th>Severity</th><th>Violations</th></tr></thead>
                             <tbody>"""
                 for h in history:
+                    h = _escape_record(_saved_scan_evidence(h))
+                    h_incomplete = _bool(h.get("scan_incomplete"))
                     scan_date = (h.get("scanned_at") or "")[:16].replace("T", " ")
-                    h_grade = h.get("grade") or "?"
+                    h_grade = "Incomplete" if h_incomplete else h.get("grade") or "Not available"
                     h_gc = h_grade.lower().replace("+", "-plus")
                     history_html += f"""
                                 <tr>
                                     <td>{scan_date}</td>
                                     <td><span class="grade-badge {h_gc}" style="font-size:0.8rem;padding:2px 8px;">{h_grade}</span></td>
-                                    <td>{h.get('score', 0)}</td>
+                                    <td>{'Not available' if h_incomplete or h.get('score') is None else h['score']}</td>
                                     <td>{h.get('severity', 'OK')}</td>
                                     <td>{h.get('violation_count', 0)}</td>
                                 </tr>"""
@@ -5828,9 +5790,10 @@ def domain_detail(domain: str):
                 chart_labels = []
                 chart_scores = []
                 for h in reversed(history):  # oldest first
+                    h = _saved_scan_evidence(h)
                     chart_labels.append((h.get("scanned_at") or "")[:16].replace("T", " "))
-                    chart_scores.append(h.get("score", 0))
-                labels_json = json.dumps(chart_labels)
+                    chart_scores.append(None if _bool(h.get("scan_incomplete")) else h.get("score"))
+                labels_json = json.dumps(chart_labels).replace("<", "\\u003c")
                 scores_json = json.dumps(chart_scores)
                 timeline_chart_html = f"""
                 <div class="section-card" style="margin-bottom: 24px;">
@@ -5932,13 +5895,15 @@ def domain_detail(domain: str):
 
         <div class="detail-actions">
             <button class="btn btn-primary" id="rescanBtn" onclick="rescanThisDomain()">&#128260; Rescan Now</button>
-            <button class="btn btn-secondary" onclick="fixDomain()" style="background:var(--warning);color:#000;border-color:var(--warning);">&#128295; Auto-Fix DNS</button>
+            <button class="btn btn-secondary" id="autoFixBtn" {'disabled' if incomplete else ''} onclick="fixDomain()" style="background:var(--warning);color:#000;border-color:var(--warning);">&#128295; Auto-Fix DNS</button>
             <a href="/api/report/pdf/{domain}" class="btn btn-secondary" style="background:var(--accent);color:#000;border-color:var(--accent);">&#128196; Download PDF Report</a>
             <a href="/domains" class="btn btn-secondary">&#8592; Back to My Domains</a>
         </div>
 
         <div class="section-card" style="margin-bottom: 24px;">
-            <h2>&#128269; Security Checks</h2>
+            <h2>&#128269; Observed Records</h2>
+            <p>Finding a record does not prove it is valid or correctly configured. Review the findings below.</p>
+            <p>{'This scan is incomplete. Rescan before relying on its findings or applying automatic fixes.' if incomplete else ''} {result.get('notes') or ''}</p>
             <div class="table-container">
                 <table>
                     <thead>
@@ -5958,7 +5923,7 @@ def domain_detail(domain: str):
         <div class="section-card">
             <h2>&#128221; Violations & Recommendations</h2>
             <p style="margin-bottom: 12px;"><strong>Issues:</strong> {result.get("violations") or "None"}</p>
-            <p><strong>Advice:</strong> {result.get("advice") or "All checks passed"}</p>
+            <p><strong>Advice:</strong> {result.get("advice") or "No recommendation recorded. Review the scan evidence."}</p>
         </div>
 
         {_footer_html()}
@@ -5966,6 +5931,10 @@ def domain_detail(domain: str):
 
     <script>
     async function fixDomain() {{
+        if ({'true' if incomplete else 'false'}) {{
+            alert('This scan is incomplete. Rescan before applying automatic fixes.');
+            return;
+        }}
         if (!confirm('Auto-Fix will attempt to update DNS records for {domain} via Cloudflare.' + String.fromCharCode(10,10) + 'Proceed?')) return;
         try {{
             showProgressPopup('Applying Auto-Fix DNS', 'Checking Cloudflare access for {domain}...');
@@ -6156,16 +6125,18 @@ def domains_page():
                 continue
             domain_text = _escape(domain_value)
             grade_order = ["A+", "A", "B", "C", "D", "F"]
+            incomplete = _is_enabled(d.get("last_scan_incomplete"))
             raw_grade = str(d.get("last_grade") or "").upper()
-            grade = raw_grade if raw_grade in grade_order else "&#8212;"
+            grade = "Incomplete" if incomplete else raw_grade if raw_grade in grade_order else "Not scanned"
             try:
-                score = max(0, min(100, int(d.get("last_score") or 0)))
+                score = max(0, min(100, int(d["last_score"]))) if not incomplete and d.get("last_score") is not None else None
             except (TypeError, ValueError):
-                score = 0
-            grade_class = grade.lower().replace("+", "-plus") if grade != "&#8212;" else "f"
+                score = None
+            score_label = f"{score}/100" if score is not None else "Not available"
+            grade_class = grade.lower().replace("+", "-plus") if grade in grade_order else "info"
             prev_grade = str(d.get("previous_grade") or "").upper()
             drift = ""
-            if prev_grade in grade_order and prev_grade != grade:
+            if grade in grade_order and prev_grade in grade_order and prev_grade != grade:
                 old_i = grade_order.index(prev_grade)
                 new_i = grade_order.index(grade) if grade in grade_order else 5
                 if new_i > old_i:
@@ -6187,12 +6158,12 @@ def domains_page():
                     </div>
                     <div class="domain-card-grade">
                         <span class="grade-badge {grade_class}" style="font-size:1.4rem;padding:8px 16px;">{grade}</span>
-                        <div style="text-align:center;margin-top:4px;font-size:0.8rem;color:var(--text-muted);">{score}/100</div>
+                        <div style="text-align:center;margin-top:4px;font-size:0.8rem;color:var(--text-muted);">{score_label}</div>
                     </div>
                 </div>
                 <div class="domain-card-actions">
                     <button class="action-btn primary" onclick="rescanManaged(this.closest('.domain-card').dataset.domain)">&#128260; Rescan</button>
-                    <button class="action-btn secondary" onclick="fixDomain(this.closest('.domain-card').dataset.domain)">&#128295; Auto-Fix</button>
+                    <button class="action-btn secondary auto-fix" {'disabled' if incomplete else ''} onclick="fixDomain(this.closest('.domain-card').dataset.domain)">&#128295; Auto-Fix</button>
                     <a href="/domain/{domain_text}" class="action-btn secondary">&#128203; Details</a>
                     <button class="action-btn secondary" onclick="removeDomain(this.closest('.domain-card').dataset.domain)" style="margin-left:auto;color:var(--danger);">&#10005; Remove</button>
                 </div>
@@ -6409,6 +6380,7 @@ def domains_page():
     }}
 
     async function addDomain(btn) {{
+        btn = btn || document.querySelector('.add-domain-form .btn-primary');
         const domain = document.getElementById('newDomain').value.trim();
         if (!domain) {{ alert('Please enter a domain'); return; }}
         btn.disabled = true;
@@ -6457,8 +6429,9 @@ def domains_page():
             }}
             // Update the card in-place
             const ev = data.evaluation || {{}};
-            const grade = ev.grade || 'F';
-            const score = ev.score || 0;
+            const incomplete = Boolean(data.scan?.scan_incomplete);
+            const grade = incomplete ? 'Incomplete' : (ev.grade || 'Not available');
+            const score = incomplete ? null : ev.score;
             const gradeClass = grade.toLowerCase().replace('+', '-plus');
             if (card) {{
                 const gradeBadge = card.querySelector('.grade-badge');
@@ -6467,7 +6440,9 @@ def domains_page():
                     gradeBadge.className = 'grade-badge ' + gradeClass;
                 }}
                 const scoreEl = card.querySelector('.domain-card-grade div');
-                if (scoreEl) scoreEl.textContent = score + '/100';
+                if (scoreEl) scoreEl.textContent = score == null ? 'Not available' : score + '/100';
+                const fixBtn = card.querySelector('.auto-fix');
+                if (fixBtn) fixBtn.disabled = incomplete;
                 const metaEl = card.querySelector('.domain-card-meta');
                 if (metaEl) metaEl.textContent = 'Last scanned: ' + new Date().toISOString().slice(0,16).replace('T',' ');
                 card.style.opacity = '1';
@@ -6608,7 +6583,11 @@ def domains_page():
             html += '</div>';
             setProgress(100);
 
-            if (data.applied && data.applied.length > 0 && (!data.manual_actions || data.manual_actions.length === 0)) {{
+            if (['incomplete', 'failed'].includes(data.verification_status)) {{
+                status.textContent = 'Verification is incomplete or failed. Rescan before relying on these changes.';
+            }} else if (data.failed && data.failed.length > 0) {{
+                status.textContent = 'Some fixes failed. Review the results below.';
+            }} else if (data.applied && data.applied.length > 0 && (!data.manual_actions || data.manual_actions.length === 0)) {{
                 status.textContent = '\u2705 All fixes applied successfully!';
             }} else if (data.applied && data.applied.length > 0) {{
                 status.textContent = '\u26A0\uFE0F Some fixes applied \u2014 manual steps still needed';
@@ -6622,7 +6601,7 @@ def domains_page():
                 status.textContent = '\u26A0\uFE0F Some fixes failed';
             }}
 
-            if (hasContent || data.grade) results.innerHTML = html;
+            results.innerHTML = html;
         }} catch(e) {{
             status.textContent = '\u274C Error: ' + e.message;
         }}
@@ -6688,7 +6667,7 @@ def generator_page():
                 <div class="logo" style="font-size:1.5rem;">&#128736;&#65039;</div>
                 <div>
                     <h1>DNS Record Generator</h1>
-                    <p class="subtitle">Build RFC-compliant email security records interactively</p>
+                    <p class="subtitle">Draft email security records for review before publishing</p>
                 </div>
             </div>
         </header>
@@ -6736,8 +6715,9 @@ def generator_page():
                 <input type="text" id="dmarc_rua" placeholder="dmarc@example.com" oninput="genDMARC()">
                 <label>Forensic Report Email (ruf=)</label>
                 <input type="text" id="dmarc_ruf" placeholder="" oninput="genDMARC()">
-                <label>Percentage</label>
+                <label>Legacy Percentage (pct)</label>
                 <input type="number" id="dmarc_pct" value="100" min="0" max="100" oninput="genDMARC()">
+                <p>Legacy compatibility only: RFC 9989 does not define pct sampling. Do not rely on this field to limit enforcement.</p>
                 <div class="gen-output" id="dmarc_out"><button class="copy-btn" onclick="copyRec('dmarc_out')">Copy</button></div>
             </div>
 
@@ -6805,7 +6785,7 @@ def generator_page():
         const ips = document.getElementById('spf_ips').value.split(',').map(s=>s.trim()).filter(Boolean);
         const all = document.getElementById('spf_all').value;
         let parts = ['v=spf1'];
-        ips.forEach(ip => parts.push(ip.includes('/') || ip.includes(':') ? 'ip6:'+ip : 'ip4:'+ip));
+        ips.forEach(ip => parts.push(ip.includes(':') ? 'ip6:'+ip : 'ip4:'+ip));
         inc.forEach(i => parts.push('include:'+i));
         parts.push(all);
         const rec = parts.join(' ');
@@ -6818,7 +6798,12 @@ def generator_page():
         const sp = document.getElementById('dmarc_sp').value;
         const rua = document.getElementById('dmarc_rua').value.trim();
         const ruf = document.getElementById('dmarc_ruf').value.trim();
-        const pct = parseInt(document.getElementById('dmarc_pct').value) || 100;
+        const pctText = document.getElementById('dmarc_pct').value.trim();
+        const pct = pctText === '' ? 100 : Number(pctText);
+        if (!Number.isInteger(pct) || pct < 0 || pct > 100) {{
+            setGeneratedOutput('dmarc_out', 'Enter a whole percentage from 0 to 100. This legacy field does not guarantee sampling.');
+            return;
+        }}
         let parts = ['v=DMARC1', 'p=' + p];
         if (sp) parts.push('sp=' + sp);
         if (pct < 100) parts.push('pct=' + pct);
@@ -6921,7 +6906,7 @@ def settings_page():
         except Exception:
             pass
 
-    cf_badge = '<span class="status-chip connected">Connected</span>' if cf_token_set and zone_id else '<span class="status-chip not-connected">Not configured</span>'
+    cf_badge = '<span class="status-chip ready">Configured, not verified</span>' if (cf_token_set or cf_api_key_set) and zone_id else '<span class="status-chip not-connected">Not configured</span>'
 
     _cf_token_current = (
         f'<div class="current-value">Configured via {cf_token_source}</div>'
@@ -7207,7 +7192,7 @@ def settings_page():
                         <input type="checkbox" id="automaticRemediation" {"checked" if automatic_remediation else ""} style="width:18px;height:18px;">
                         Allow automatic DNS remediation
                     </label>
-                    <small>Disabled by default. When enabled, monitoring may change authorised Cloudflare DNS zones.</small>
+                    <small>Compatibility setting, disabled by default. Current generated recommendations require manual review and do not trigger DNS writes.</small>
                 </div>
                 <div class="form-row" style="margin-top:16px;">
                     <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
@@ -7222,9 +7207,9 @@ def settings_page():
             <div class="settings-card full-width">
                 <h3>&#9729;&#65039; Cloudflare Integration {cf_badge}</h3>
                 <p class="card-desc">
-                    Connect your Cloudflare account to enable one-click DNS auto-fix.
-                    Enter your API token, Zone ID, and optionally Account ID, Global API Key, and account email below.
-                    Your credentials are stored locally and never leave this server.
+                    Cloudflare is optional for read-only scans. Configured credentials support connection checks and separately reviewed integrations, not automatic enforcement from generated recommendations.
+                    Local-development credentials are stored in plaintext in the local database; production credentials come from the protected runtime environment.
+                    Credentials are sent to Cloudflare over HTTPS to authenticate provider requests. A saved credential is not proof of access; Test Connection checks read access only, not write permission.
                 </p>
 
                 <!-- Token creation guide -->

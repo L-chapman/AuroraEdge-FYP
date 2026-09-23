@@ -24,6 +24,15 @@ function renderDomain(path: string) {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('Domain detail route safety', () => {
+  it('explains Null MX from saved raw evidence without claiming outgoing authentication is safe', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => String(input).startsWith('/api/history/')
+      ? response({ domain: 'example.com', count: 0, history: [] })
+      : response({ domain: 'example.com', result: { grade: 'B', score: 80, raw_json: JSON.stringify({ null_mx: true }) }, source: 'database' }))
+    renderDomain('/domain/example.com')
+    expect(await screen.findByText('No incoming mail')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Outgoing email authentication still needs review')
+    expect(screen.getAllByText('Not applicable')).toHaveLength(2)
+  })
   it('reports an incomplete rescan as a warning instead of a successful grade', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       if (String(input).startsWith('/api/rescan/')) return response({ evaluation: { grade: 'A', score: 98 }, scan: { scan_incomplete: true } })

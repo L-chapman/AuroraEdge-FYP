@@ -21,13 +21,15 @@ You run it on your own computer or server. The interface is built with **React a
 | Has anything changed? | Save domains, compare scan history, and optionally enable scheduled checks and change alerts. |
 | How do I share the findings? | Generate PDF, CSV and Markdown reports. |
 | What should the records look like? | Build draft DNS records using your mail provider and settings. Review them before publishing. |
-| Can I apply a fix? | Use the optional Cloudflare connection for supported changes to a zone you are authorised to manage. |
+| How should I fix a finding? | Review the proposed records and manual steps. Sender coverage, reporting destinations and mail-server readiness need confirmation before enforcement changes. |
 
 Checks include SPF, DKIM and DMARC (email identity); MTA-STS, TLS-RPT and STARTTLS (delivery protection); mail routing, BIMI and blocklist signals. [The project tour](docs/PROJECT_TOUR.md) explains how the pieces fit together without requiring a security background.
 
-If a lookup fails or important records are ambiguous, the result is **Incomplete**, not a confident grade. The interface explains what could not be checked, keeps that warning in history and reports, and blocks automatic fixes until a usable scan is available. Finding a record alone does not prove that every policy setting is safe.
+If a lookup fails or important records are ambiguous, the result is **Incomplete**, not a confident grade. The interface explains what could not be checked and keeps that warning in history and reports. Resolve the uncertainty before making changes; even complete scans produce manual-review recommendations, not automatic enforcement. Finding a record alone does not prove that every policy setting is safe.
 
-**You stay in control:** scanning does not change DNS. Scheduled monitoring and automatic fixes are separate, disabled-by-default choices. Cloudflare is optional.
+**You stay in control:** scanning does not change DNS. Scheduled monitoring is off by default. Generated DNS recommendations are now review-first and manual: NorthFlux will not guess that stricter mail handling is safe. The Cloudflare connection is optional; guarded low-level write functions remain for separately reviewed integrations, not unattended enforcement from a scan alone.
+
+NorthFlux checks published configuration, not actual message delivery or incoming DMARC reports. It does not yet implement the complete policy-discovery changes in the May 2026 DMARC standard. Read the [current function audit and product comparison](docs/FUNCTION_AUDIT.md) before treating it as equivalent to a managed email-security service.
 
 ## Try it on your computer
 
@@ -93,7 +95,7 @@ Read the [guided project tour](docs/PROJECT_TOUR.md), [architecture](docs/ARCHIT
 
 ## What is tested?
 
-The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions. Check the badge above for the current default branch. The [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) records the release's findings, fixes, completed checks and remaining limits.
+The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions. Check the badge above for the current default branch. The [function audit](docs/FUNCTION_AUDIT.md) records the latest review and comparison; the [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) preserves the previous release's evidence.
 
 | Area | Automated checks |
 |---|---|

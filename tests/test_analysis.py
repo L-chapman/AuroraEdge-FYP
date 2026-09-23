@@ -53,6 +53,32 @@ def test_empty_statistics():
     assert stats == {}
 
 
+def test_incomplete_live_scores_and_grades_are_not_aggregated():
+    from app.analysis import calculate_statistics
+    stats = calculate_statistics([
+        {"scan_incomplete": "True", "score": 95, "grade": "A+", "spf_present": False},
+        {"scan_incomplete": False, "score": 0, "grade": "F", "spf_present": True},
+    ])
+    assert stats["score_avg"] == stats["score_min"] == stats["score_max"] == 0
+    assert stats["grade_distribution"] == {"F": 1}
+    assert stats["incomplete_domains"] == 1
+    assert stats["complete_domains"] == 1
+    assert stats["check_presence_pct"]["spf"] == 100
+
+
+def test_all_incomplete_analysis_is_unknown_not_zero(tmp_path):
+    from app.analysis import calculate_statistics, generate_summary_report
+    rows = [{"scan_incomplete": True, "score": "", "grade": "", "notes": "DNS timed out"}]
+    stats = calculate_statistics(rows)
+    assert stats["score_avg"] is None
+    assert stats["score_min"] is None and stats["score_max"] is None
+    assert stats["grade_distribution"] == {}
+    report = generate_summary_report(rows, tmp_path / "partial.md").read_text(encoding="utf-8")
+    assert "Not available" in report
+    assert "Incomplete scans:** 1" in report
+    assert "0.0/100" not in report
+
+
 def test_statistics_accept_live_booleans_and_skip_non_finite_scores():
     from app.analysis import calculate_statistics
 

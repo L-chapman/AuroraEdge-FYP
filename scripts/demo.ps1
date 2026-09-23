@@ -231,15 +231,10 @@ function Launch-Dashboard {
     Write-Host "  Press Ctrl+C to stop the server." -ForegroundColor DarkGray
     Write-Host ""
     
-    # Open the browser after a short delay
-    Start-Job -ScriptBlock {
-        Start-Sleep -Seconds 2
-        Start-Process "http://127.0.0.1:8080"
-    } | Out-Null
-    
-    Set-Location $SrcDir
-    $env:DASH_TOKEN = ""
-    python -m uvicorn app.dashboard:app --host 127.0.0.1 --port 8080
+    # Keep operator authentication and use the same readiness/React safeguards
+    # as the public launcher. Production HTTP mode remains rejected.
+    Set-Location $ProjectRoot
+    python (Join-Path $ProjectRoot "start.py")
 }
 
 function Open-TestHub {

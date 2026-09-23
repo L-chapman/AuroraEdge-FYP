@@ -4,6 +4,12 @@ This project follows semantic versioning from the NorthFlux Security rename onwa
 
 ## 4.0.0 - Unreleased
 
+- Added a second [function-by-function audit and researched product comparison](docs/FUNCTION_AUDIT.md), including the current RFC 9989 compatibility gap.
+- Corrected fragmented SMTP replies, SPF branch counting, null-MX handling, DKIM/TLS-RPT parsing, provider detection and collision-safe Worker preparation.
+- Made generated DNS recommendations manual where sender inventory, real reporting destinations or TLS readiness cannot be established; retired unsafe live-DNS demonstration scripts.
+- Fixed search crashes/stale fallback data, individual-save rollback, history deletion, onboarding cancellation and incomplete verification; prevented overlapping same-domain changes.
+- Improved browser outcome messages, saved-result links, return navigation, keyboard tabs and draft retention; fixed log-record mutation and incomplete console/aggregate statistics.
+- Isolated tests from operator data/credentials and blocked unmocked external network calls; hardened case-insensitive environment-file/SQLite-sidecar exclusions and ZIP path handling.
 - Completed a deep-debug pass with fail-first regressions and a [plain-language review](docs/DEEP_DEBUG_REVIEW.md) distinguishing fixed faults, measured coverage and launch limitations.
 - Added bounded public-only scanner connections, HTTPS certificate checks, stricter policy parsing and explicit incomplete-scan handling throughout storage, React and reports.
 - Made DNS prerequisites fail closed on failed/ambiguous reads and preserved conflicting infrastructure; removed guessed SPF/provider and DKIM automation.

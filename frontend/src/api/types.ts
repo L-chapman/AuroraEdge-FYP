@@ -104,6 +104,19 @@ export interface ScanResponse {
   persistence_skipped?: boolean
 }
 
+export interface RemediationResponse {
+  domain: string
+  status: string
+  applied?: Array<{ type: string; message?: string }>
+  failed?: Array<{ type: string; message?: string }>
+  manual_actions?: Array<{ type: string; description?: string; recommended?: string; steps?: string }>
+  verification?: string
+  verification_status?: string
+  score?: number | null
+  pre_fix_score?: number | null
+  history_saved?: boolean
+}
+
 export interface DomainDetailResponse {
   domain: string
   result: Record<string, unknown>

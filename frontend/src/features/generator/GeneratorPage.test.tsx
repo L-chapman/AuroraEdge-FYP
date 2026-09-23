@@ -69,6 +69,31 @@ describe('GeneratorPage', () => {
     expect(policy).toHaveTextContent('mx: mx2.example.com')
   })
 
+  it('allows clearing and correcting MTA-STS max age without an invalid React value', async () => {
+    const user = userEvent.setup()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      render(<GeneratorPage />)
+      const section = namedSection('MTA-STS policy')
+      const maxAge = within(section).getByLabelText('Max age in seconds')
+      await user.clear(maxAge)
+      expect(within(section).getByRole('alert')).toHaveTextContent('Max age must be a whole number')
+      expect(consoleError).not.toHaveBeenCalled()
+      await user.type(maxAge, '0')
+      expect(within(section).getByLabelText('MTA-STS policy file')).toHaveTextContent('max_age: 0')
+    } finally { consoleError.mockRestore() }
+  })
+
+  it('does not claim changed output has already been copied', async () => {
+    const user = userEvent.setup()
+    render(<GeneratorPage />)
+    const section = namedSection('TLS-RPT record')
+    await user.click(within(section).getByRole('button', { name: 'Copy dns txt record' }))
+    expect(within(section).getByRole('status')).toHaveTextContent('Copied to clipboard.')
+    await user.type(within(section).getByLabelText('Domain'), '.au')
+    expect(within(section).getByRole('status')).not.toHaveTextContent('Copied to clipboard.')
+  })
+
   it('copies an output using a native keyboard-operable button and announces success', async () => {
     const user = userEvent.setup()
     const writeText = vi.spyOn(navigator.clipboard, 'writeText')

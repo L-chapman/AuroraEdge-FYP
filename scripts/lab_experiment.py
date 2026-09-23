@@ -3,17 +3,19 @@
 NorthFlux Security Lab Experiment Protocol
 ==================================
 
+Legacy live-mutation experiments are disabled. Use --dry-run for read-only
+detection; no accuracy or restoration guarantee is made by this historical tool.
+
 This script implements the recommended lab evaluation protocol from the
 verification report. It measures detection time, fix time, and accuracy
 for controlled email security misconfigurations.
 
 Usage:
-    python scripts/lab_experiment.py --domain test.example.com --iterations 5
+    python scripts/lab_experiment.py --domain test.example.com --dry-run
 
 Requirements:
-    - Cloudflare API credentials (CF_API_TOKEN, CF_ZONE_ID)
-    - A test domain you control in Cloudflare
-    - Network access for DNS queries
+    - An authorised test domain
+    - Network access for read-only DNS/HTTPS checks (dry-run is not offline)
 
 Reference: docs/academic/archive/VERIFICATION_REPORT.md Section 5
 """
@@ -41,6 +43,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("lab_experiment")
+DISABLED_MESSAGE = (
+    "Legacy lab DNS mutation is disabled: its historical setup/restore sequence "
+    "does not safely preserve existing records. Use --dry-run for read-only "
+    "detection, or the validated dashboard operator workflow with an authorised "
+    "test zone and a recovery plan."
+)
 
 
 class LabExperiment:
@@ -121,6 +129,8 @@ class LabExperiment:
         Returns:
             Fix result dictionary
         """
+        raise RuntimeError(DISABLED_MESSAGE)
+
         logger.info(f"Applying fix: {fix_type}")
         
         start_time = time.perf_counter()
@@ -175,6 +185,8 @@ class LabExperiment:
         Returns:
             Complete experiment results
         """
+        raise RuntimeError(DISABLED_MESSAGE)
+
         experiment_start = datetime.utcnow().isoformat()
         all_results = {
             "experiment_start": experiment_start,
@@ -330,15 +342,15 @@ class LabExperiment:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="NorthFlux Security Lab Experiment Protocol",
+        description="NorthFlux read-only lab detection; legacy mutation experiments are disabled",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Example:
-    python scripts/lab_experiment.py --domain test.example.com --iterations 5
+    python scripts/lab_experiment.py --domain test.example.com --dry-run
     
 Requirements:
-    Set CF_API_TOKEN and CF_ZONE_ID environment variables for Cloudflare access.
-    Use a TEST domain you control - this script will modify DNS records!
+    Use an authorised TEST domain. --dry-run performs real read-only DNS/HTTPS
+    checks but never loads provider credentials. It is not an offline simulation.
         """
     )
     
@@ -346,12 +358,15 @@ Requirements:
     parser.add_argument("--iterations", type=int, default=5, help="Number of test iterations (default: 5)")
     parser.add_argument("--dns-wait", type=int, default=10, help="Seconds to wait for DNS propagation (default: 10)")
     parser.add_argument("--output", default="reports/lab_experiment.md", help="Output report path")
-    parser.add_argument("--dry-run", action="store_true", help="Detection only, no DNS changes")
+    parser.add_argument("--dry-run", action="store_true", help="Required: real read-only DNS/HTTPS checks, no provider credentials or DNS changes")
     
     args = parser.parse_args()
+
+    if not args.dry_run:
+        parser.error(DISABLED_MESSAGE)
     
     # Check Cloudflare credentials
-    cf = get_cloudflare_client()
+    cf = None  # Read-only detection must never load provider credentials.
     if not cf and not args.dry_run:
         print("&#10060; Cloudflare API not configured.")
         print("   Set CF_API_TOKEN and CF_ZONE_ID environment variables.")
@@ -376,8 +391,11 @@ Requirements:
         print("Running detection test (dry run)...")
         scan_result = scan_domain(args.domain)
         evaluation = evaluate(scan_result)
-        print(f"\nScore: {evaluation.get('score')}")
-        print(f"Grade: {evaluation.get('grade')}")
+        if scan_result.get("scan_incomplete"):
+            print("Incomplete scan: no grade or score assigned. " + str(scan_result.get("notes") or "Retry the scan."))
+        else:
+            print(f"\nScore: {evaluation.get('score')}")
+            print(f"Grade: {evaluation.get('grade')}")
         print(f"Violations: {evaluation.get('violations')}")
     else:
         # Full experiment

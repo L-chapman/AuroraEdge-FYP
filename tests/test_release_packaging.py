@@ -51,7 +51,8 @@ def package(root, *arguments):
 def test_package_preserves_unicode_names_and_excludes_runtime_files(package_project):
     root = package_project
     (root / "café & review.md").write_text("Preserve this source document.", encoding="utf-8")
-    for name in (".env", "operator.sqlite3", "backup.db", "backup.db-wal", "session.log"):
+    for name in (".env", ".ENV.LOCAL", "operator.sqlite3", "backup.db", "backup.db-wal",
+                 "backup.sqlite-wal", "backup.sqlite-shm", "backup.sqlite3-wal", "backup.sqlite3-shm", "session.log"):
         (root / name).write_text("private test placeholder", encoding="utf-8")
     (root / ".venv-backup").mkdir()
     (root / ".venv-backup/local.txt").write_text("local environment", encoding="utf-8")
@@ -123,3 +124,14 @@ def test_directory_checksum_target_cannot_replace_last_good_archive(package_proj
     assert result.returncode != 0
     assert "regular file" in result.stderr
     assert archive.read_bytes() == b"previous release"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Backslashes are path separators on Windows")
+def test_linux_backslash_filename_cannot_become_zip_traversal(package_project):
+    root = package_project
+    (root / r"..\..\outside.txt").write_text("Must never escape the package root", encoding="utf-8")
+    commit(root)
+    result = package(root)
+    assert result.returncode != 0
+    assert "unsafe on Windows" in result.stderr
+    assert not (root / "dist/NorthFlux_Security.zip").exists()

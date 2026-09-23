@@ -266,7 +266,7 @@ export function generateDmarc(input: DmarcInput): GenerationResult<TxtRecord> {
     warnings.push({ field: 'policy', message: 'A none policy monitors mail but does not enforce protection.' })
   }
   if (input.percentage < 100) {
-    warnings.push({ field: 'percentage', message: 'This policy will apply to only part of the message stream.' })
+    warnings.push({ field: 'percentage', message: 'The legacy pct tag does not guarantee sampled enforcement. Modern receivers may ignore it; confirm your rollout plan before publishing.' })
   }
   if (errors.length) return failure(errors, warnings)
 
@@ -349,7 +349,9 @@ function normaliseHttpsUrl(value: string): string | null {
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return null
-    return url.href
+    // A URI is nested inside BIMI's semicolon-delimited tag syntax. Preserve
+    // URL data rather than allowing it to create another tag or URI entry.
+    return url.href.replaceAll(';', '%3B').replaceAll(',', '%2C')
   } catch {
     return null
   }

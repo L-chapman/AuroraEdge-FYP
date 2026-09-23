@@ -129,18 +129,18 @@ def main() -> int:
         print(f"  [FAIL] Import error: {exc}")
         return 1
 
-    print("\n[2/6] Testing Tool Comparison Data...")
+    print("\n[2/6] Inspecting Legacy Tool Comparison Data...")
     tools = list(TOOL_COMPARISON.keys())
-    print(f"  [OK] {len(tools)} tools in comparison: {', '.join(tools)}")
+    print(f"  [INFO] {len(tools)} historical comparison entries loaded, not independently verified: {', '.join(tools)}")
 
     print("\n[3/6] Testing Domain Security Scan...")
     test_domain, result, scan_mode, scan_note = choose_scan_result(
         scan_domain, args.domain, args.offline
     )
-    print(f"  [OK] Scan source: {scan_mode}")
+    print(f"  [INFO] Scan source: {scan_mode} (fallback means sample data, not live DNS validation)")
     if scan_note:
-        print(f"  [OK] Scan note: {scan_note}")
-    print(f"  [OK] Scanned: {test_domain}")
+        print(f"  [INFO] Scan note: {scan_note}")
+    print(f"  [INFO] Domain represented by the result: {test_domain}")
     print(f"    SPF: {result['spf_present']}")
     print(f"    DKIM: {result['dkim_present']}")
     print(f"    MTA-STS: {result['mta_sts_mode']}")
@@ -168,15 +168,15 @@ def main() -> int:
 
     print(
         """
-Capability verification:
+Smoke-test scope:
 ------------------------
-[OK] Check and validate DNS records (SPF, DKIM, DMARC, MTA-STS, TLS-RPT)
+[INFO] DNS result fields inspected; offline/fallback data does not validate live DNS
 [OK] Show a security score and suggestions
 [INFO] Cloudflare remediation module imported (no live DNS write performed)
 [INFO] HTTPS is expected at the deployment reverse proxy (not tested here)
-[OK] Authentication tokens (DASH_TOKEN env var)
+[INFO] Authentication token support imported; sign-in and token checks not tested here
 [OK] Basic logging (logging_config.py)
-[OK] Compare to similar tools (OnDMARC, EasyDMARC, etc.)
+[INFO] Legacy comparison data loaded; current competing products not verified here
 """
     )
     return 0

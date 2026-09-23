@@ -6,7 +6,7 @@ A passing test run is evidence for a particular version and environment—not a 
 
 The historical React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is evidence for that version only. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for tested revisions.
 
-For the deep-debug release, use the [review and verification record](DEEP_DEBUG_REVIEW.md) for final test counts, the revision tested, actual completed runs and unresolved limits. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
+For the latest review, use the [function audit and verification record](FUNCTION_AUDIT.md). The [previous deep-debug record](DEEP_DEBUG_REVIEW.md) remains evidence for its earlier revision. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
 
 | Layer | Environment and checks |
 |---|---|
@@ -54,6 +54,10 @@ python -m pytest -q
 ```
 
 Tests cover scanning, rule evaluation, remediation advice, persistence, legacy and `/api/v1` contracts, authentication, session expiry and rotation behaviour, CSRF protection, Cloudflare ownership enforcement, secret-source handling and migration, TXT-record safety, input validation, XSS payloads, SQL injection probes, path traversal, React asset serving, SPA route boundaries, security headers, stress cases, and safe production defaults.
+
+Before test modules import the application, the suite selects disposable state/report/log directories and clears inherited provider credentials. Each test receives a separate default database. Unmocked external HTTP, DNS resolver calls and external sockets are blocked; loopback remains available for local infrastructure. Tests must supply explicit fake provider/scanner responses. This prevents an omitted mock from reading the operator's account or changing real DNS.
+
+The second audit adds SMTP fragmentation, SPF evaluation branches, null MX, DKIM/TLS-RPT syntax, newer unsupported DMARC semantics, provider-name/Worker collisions, cancelled and overlapping changes, search/storage failures, retired demo writes, and report/logging/package regressions. Browser journeys now include partial/manual DNS outcomes and keyboard tab navigation. These tests do not establish full RFC conformance, real-message authentication or live Cloudflare compatibility.
 
 Deep-debug regressions also exercise incomplete scans and ungraded storage, public-only scan connections, bounded network reads, malformed and oversized requests, failed Cloudflare prerequisite reads, saved-report rendering, installation drift, and source-package exclusions. Network and provider responses are controlled in these tests; they are checks of NorthFlux's handling, not a live provider certification.
 
@@ -167,7 +171,7 @@ Automated tests do not replace checking a real deployment. For a release candida
 3. Scan a known public domain without Cloudflare credentials.
 4. Restart and confirm scan history remains present.
 5. Add an authorised managed domain and confirm onboarding does not change DNS.
-6. Confirm monitoring and automatic remediation are independently disabled by default.
+6. Confirm monitoring and the retained automatic-remediation compatibility setting are disabled by default, and that generated recommendations remain manual-review only.
 7. Verify `/health` and `/ready` return success.
 8. Confirm the production CSP does not contain `unsafe-inline` and that browser assets load only from the application origin.
 9. Generate CSV, Markdown, and PDF output and inspect it for unescaped input.

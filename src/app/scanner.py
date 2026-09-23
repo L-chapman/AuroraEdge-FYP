@@ -7,7 +7,10 @@ import http.client
 import ipaddress
 import threading
 import time
+import base64
+import binascii
 from contextvars import ContextVar
+from urllib.parse import urlsplit
 
 # Configure module logger
 logger = logging.getLogger("northflux.scanner")
@@ -169,6 +172,36 @@ def _socket_deadline(connection, seconds: float):
     return timer
 
 
+def _smtp_reply(connection) -> Tuple[int, List[str]]:
+    """Read one bounded SMTP reply, including fragmented/multiline replies."""
+    pending = b""
+    lines = []
+    code = None
+    received = 0
+    while True:
+        if b"\r\n" not in pending:
+            chunk = connection.recv(4096)
+            if not chunk:
+                raise ValueError("SMTP connection closed before a complete reply")
+            pending += chunk
+            received += len(chunk)
+            if received > 16_384:
+                raise ValueError("SMTP reply exceeds the scan limit")
+            continue
+        line, pending = pending.split(b"\r\n", 1)
+        if not re.fullmatch(rb"[2-5][0-9]{2}(?:[ -][^\r\n]*)?", line):
+            raise ValueError("Malformed SMTP reply")
+        current = int(line[:3])
+        if code is not None and current != code:
+            raise ValueError("Inconsistent SMTP multiline reply codes")
+        code = current
+        lines.append(line[4:].decode("ascii", errors="replace"))
+        if len(line) == 3 or line[3:4] == b" ":
+            if pending:
+                raise ValueError("Unexpected data after SMTP reply")
+            return code, lines
+
+
 def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
     """
     Attempt STARTTLS handshake with MX server and grade the connection.
@@ -183,23 +216,23 @@ def _starttls_check(mx_host: str, port: int = 25) -> Tuple[str, str, str]:
             sock.settimeout(_remaining_timeout(SMTP_TIMEOUT))
 
             # Read banner
-            banner = sock.recv(1024).decode("utf-8", errors="ignore")
-            if not banner.startswith("220"):
+            banner_code, _ = _smtp_reply(sock)
+            if banner_code != 220:
                 return ("F", "", "No valid SMTP banner")
 
             # Send EHLO
             sock.sendall(b"EHLO northflux.local\r\n")
-            ehlo_resp = sock.recv(4096).decode("utf-8", errors="ignore")
+            ehlo_code, ehlo_lines = _smtp_reply(sock)
 
             # Check for STARTTLS support
-            if "STARTTLS" not in ehlo_resp.upper():
+            if ehlo_code != 250 or not any(line.upper() == "STARTTLS" for line in ehlo_lines):
                 return ("F", "", "STARTTLS not advertised")
 
             # Send STARTTLS command
             sock.sendall(b"STARTTLS\r\n")
-            starttls_resp = sock.recv(1024).decode("utf-8", errors="ignore")
+            starttls_code, _ = _smtp_reply(sock)
 
-            if not starttls_resp.startswith("220"):
+            if starttls_code != 220:
                 return ("F", "", "STARTTLS rejected")
 
             # Create SSL context and wrap socket
@@ -308,7 +341,11 @@ def _mx(name: str) -> List[str]:
         return []
     try:
         ans = _fresh_resolver().resolve(name, "MX")
-        return [str(r.exchange).rstrip(".") for r in ans]
+        records = sorted(ans, key=lambda record: getattr(record, "preference", 0))
+        hosts = [str(record.exchange).rstrip(".") or "." for record in records]
+        if "." in hosts and (len(hosts) != 1 or getattr(records[0], "preference", 0) != 0):
+            _scan_error("Null MX must be the sole MX record with preference zero; review mail routing")
+        return hosts
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
         return []
     except Exception:
@@ -324,55 +361,75 @@ def _spf_fetch(domain: str) -> Optional[str]:
 
 
 def _spf_count(domain: str) -> Tuple[int, str]:
-    visited: Set[str] = set()
-    fetches = 0
+    """Estimate evaluated lookup terms; not a sender-specific SPF verifier.
 
-    def count_for_spf(spf: str, depth: int) -> int:
-        nonlocal fetches
-        if depth > MAX_SPF_RECURSION:
-            return 0
-        total = 0
-        tokens = spf.split()
-        for tok in tokens:
-            t = tok.lower().lstrip("+-~?")
-            if t.startswith("include:"):
-                total += 1
-                target = t.split(":", 1)[1]
-                if target and target not in visited and fetches < MAX_SPF_FETCHES:
-                    visited.add(target)
-                    fetches += 1
-                    child = _spf_fetch(target)
-                    if child:
-                        total += count_for_spf(child, depth + 1)
-            elif t == "a" or t.startswith("a:") or t.startswith("a/"):
-                total += 1
-            elif t == "mx" or t.startswith("mx:") or t.startswith("mx/"):
-                total += 1
-            elif t.startswith("ptr"):
-                total += 1
-            elif t.startswith("exists:"):
-                total += 1
-            elif t.startswith("redirect="):
-                total += 1
-                target = t.split("=", 1)[1]
-                if target and target not in visited and fetches < MAX_SPF_FETCHES:
-                    visited.add(target)
-                    fetches += 1
-                    child = _spf_fetch(target)
-                    if child:
-                        total += count_for_spf(child, depth + 1)
-            elif t.startswith("exp="):
-                pass  # exp= modifier does NOT count per RFC 7208 Section 4.6.4
-        return total
-
+    Cache DNS reads, but count each include evaluation separately. A path-local
+    cycle guard avoids treating a repeated (non-cyclic) branch as free.
+    """
     root = _spf_fetch(domain)
     if not root:
         return 0, ""
-    visited.add(domain)
-    fetches += 1
-    count = count_for_spf(root, depth=1)
-    note = "spf_fetch_cap_hit" if fetches >= MAX_SPF_FETCHES else ""
-    return count, note
+    cache = {domain.lower(): root}
+    evaluations = 0
+    cap_hit = False
+
+    def count_record(target: str, path: Set[str]) -> int:
+        nonlocal evaluations, cap_hit
+        target = target.lower().rstrip(".")
+        if target in path:
+            _scan_error("SPF include/redirect cycle detected; lookup estimate is incomplete")
+            return 0
+        if len(path) >= MAX_SPF_RECURSION or evaluations >= MAX_SPF_FETCHES:
+            cap_hit = True
+            _scan_error("SPF analysis limit reached; lookup estimate is incomplete")
+            return 0
+        if not target or "%" in target:
+            _scan_error("SPF macro target requires sender-specific evaluation; estimate is incomplete")
+            return 0
+        evaluations += 1
+        if target not in cache:
+            cache[target] = _spf_fetch(target)
+        record = cache[target]
+        if not record:
+            _scan_error("SPF include/redirect target has no usable SPF record; review it manually")
+            return 0
+        tokens = [token.lower().lstrip("+-~?") for token in record.split()[1:]]
+        has_all = "all" in tokens
+        total = 0
+        redirects = []
+        for token in tokens:
+            if token == "all":
+                break
+            if token.startswith("include:"):
+                total += 1 + count_record(token.split(":", 1)[1], path | {target})
+            elif re.match(r"^(?:a|mx)(?::|/|$)", token) or re.match(r"^ptr(?::|$)", token) or token.startswith("exists:"):
+                total += 1
+            elif token.startswith("redirect="):
+                redirects.append(token.split("=", 1)[1])
+            # exp= is explicitly outside the ten-lookup limit (RFC 7208).
+        if not has_all:
+            if len(redirects) > 1:
+                _scan_error("Multiple SPF redirect modifiers are invalid; review the record")
+            elif redirects:
+                total += 1 + count_record(redirects[0], path | {target})
+        return total
+
+    count = count_record(domain, set())
+    return count, "spf_fetch_cap_hit" if cap_hit else ""
+
+
+def _parse_tags(record: str) -> Optional[Dict[str, str]]:
+    """Parse a semicolon tag list without silently accepting duplicate fields."""
+    tags = {}
+    for field in record.split(";"):
+        if not field.strip():
+            continue
+        key, separator, value = field.partition("=")
+        key = key.strip().lower()
+        if not separator or not re.fullmatch(r"[a-z][a-z0-9_-]*", key) or key in tags:
+            return None
+        tags[key] = value.strip()
+    return tags
 
 
 def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
@@ -381,27 +438,33 @@ def _dkim_discover(domain: str) -> Tuple[List[str], List[str], List[str]]:
     notes: List[str] = []
     for sel in SELECTOR_CANDIDATES:
         name = f"{sel}._domainkey.{domain}"
-        for t in _txt(name):
-            tl = t.lower()
-            if tl.startswith("v=dkim1") or " v=dkim1" in tl:
-                tags = {}
-                for part in t.split(";"):
-                    key, separator, value = part.strip().partition("=")
-                    if separator:
-                        tags.setdefault(key.lower(), value.strip())
-                # An empty p= revokes the key; presence alone is not usable DKIM.
-                if not tags.get("p"):
-                    notes.append(f"{sel}:empty-or-revoked-key")
-                    continue
-                found.append(sel)
-                for part in t.split(";"):
-                    part = part.strip()
-                    if part.lower().startswith("k="):
-                        algos.add(part.split("=", 1)[1].strip().lower())
-                    if part.lower().startswith("t="):
-                        val = part.split("=", 1)[1].strip().lower()
-                        if "y" in val:
-                            notes.append(f"{sel}:test")
+        records = _txt(name)
+        candidates = [t for t in records if re.search(r"(?:^|;)\s*(?:v|p)\s*=", t, re.IGNORECASE)]
+        if len(candidates) > 1:
+            notes.append(f"{sel}:ambiguous-key-records")
+            _scan_error(f"DKIM selector {sel} has multiple key records; review it manually")
+            continue
+        for record in candidates:
+            tags = _parse_tags(record)
+            if (not tags or ("v" in tags and (tags["v"] != "DKIM1" or next(iter(tags)) != "v"))
+                    or tags.get("k", "rsa") not in {"rsa", "ed25519"}):
+                notes.append(f"{sel}:invalid-key-record")
+                _scan_error(f"DKIM selector {sel} has invalid key fields; review it manually")
+                continue
+            if not tags.get("p"):
+                notes.append(f"{sel}:empty-or-revoked-key")
+                continue
+            try:
+                base64.b64decode(re.sub(r"[ \t\r\n]", "", tags["p"]), validate=True)
+            except (ValueError, binascii.Error):
+                notes.append(f"{sel}:invalid-key-encoding")
+                _scan_error(f"DKIM selector {sel} has invalid public-key encoding; review it manually")
+                continue
+            # Discovery checks syntax only, not key strength or message signatures.
+            found.append(sel)
+            algos.add(tags.get("k", "rsa"))
+            if "y" in [flag.strip() for flag in tags.get("t", "").split(":")]:
+                notes.append(f"{sel}:test")
     return sorted(set(found)), sorted(algos), notes
 
 
@@ -446,7 +509,7 @@ def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
     # Step 1: Check DNS TXT record at _mta-sts.{domain}
     txt_name = f"_mta-sts.{domain}"
     txt_records = _txt(txt_name)
-    candidates = [record for record in txt_records if record.startswith("v=STSv1;")]
+    candidates = [record for record in txt_records if re.match(r"^v=STSv1[ \t]*;", record)]
     if len(candidates) != 1:
         if candidates:
             _scan_error("Multiple MTA-STS records require manual review")
@@ -494,20 +557,36 @@ def _mta_sts(domain: str) -> Tuple[bool, str, int, str]:
         return (False, "", 0, "")
 
 
+def is_valid_tls_report_uri(uri: str) -> bool:
+    """Validate supported reporting URI syntax; never visit its destination."""
+    if not isinstance(uri, str) or re.search(r"[\s;,\x00-\x1f\x7f]", uri):
+        return False
+    try:
+        parsed = urlsplit(uri)
+        if parsed.scheme == "mailto":
+            return bool(re.fullmatch(r"[^@/?#]+@[^@/?#]+", parsed.path)) and not parsed.netloc and not parsed.fragment
+        if parsed.scheme == "https":
+            return bool(parsed.hostname and not parsed.username and not parsed.password and not parsed.fragment
+                        and (parsed.port is None or 1 <= parsed.port <= 65535))
+    except ValueError:
+        pass
+    return False
+
+
 def _tls_rpt(domain: str) -> Tuple[bool, str]:
     """Return (present, rua_csv)."""
     name = f"_smtp._tls.{domain}"
-    ruas = []
-    for t in _txt(name):
-        tl = t.lower()
-        if tl.startswith("v=tlsrptv1") or " v=tlsrptv1" in tl:
-            # parse rua=mailto:... (, separated)
-            parts = [p.strip() for p in t.split(";")]
-            for p in parts:
-                if p.lower().startswith("rua="):
-                    val = p.split("=", 1)[1].strip()
-                    ruas.append(val)
-    return (len(ruas) > 0, ",".join(sorted(set(ruas))))
+    records = [record for record in _txt(name) if re.match(r"^v=TLSRPTv1[ \t]*;", record)]
+    if len(records) != 1:
+        if records:
+            _scan_error("Multiple TLS-RPT records require manual review")
+        return False, ""
+    tags = _parse_tags(records[0])
+    destinations = [uri.strip() for uri in (tags or {}).get("rua", "").split(",")]
+    if not tags or not all(is_valid_tls_report_uri(uri) for uri in destinations):
+        _scan_error("TLS-RPT reporting destinations are invalid; review the record manually")
+        return False, ""
+    return True, ",".join(destinations)
 
 
 # &#9472;&#9472; BIMI (Brand Indicators for Message Identification) &#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;
@@ -613,7 +692,7 @@ def _empty_result(notes: str = "") -> Dict[str, object]:
     return {
         "spf_present": False, "spf_record": "", "spf_lookups": 0,
         "spf_includes": "", "spf_all": "",
-        "mx_present": False, "mx_count": 0, "mx_hosts": "",
+        "mx_present": False, "mx_count": 0, "mx_hosts": "", "null_mx": False,
         "dmarc_present": False, "dmarc_policy": "", "dmarc_strength": "",
         "dmarc_sp": "", "dmarc_aspf": "r", "dmarc_adkim": "r",
         "dmarc_pct": 100, "dmarc_rua": "", "dmarc_ruf": "",
@@ -635,29 +714,28 @@ def _domain_exists(domain: str) -> bool:
         return True
     if _txt(domain):
         return True
-    try:
-        _fresh_resolver().resolve(domain, "NS")
-        return True
-    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
-        return False
-    except Exception:
-        _scan_error(f"DNS existence check could not be completed for {domain}")
-        return False
+    for kind in ("NS", "A", "AAAA"):
+        try:
+            if _fresh_resolver().resolve(domain, kind):
+                return True
+        except dns.resolver.NXDOMAIN:
+            return False
+        except dns.resolver.NoAnswer:
+            continue
+        except Exception:
+            _scan_error(f"DNS existence check could not be completed for {domain}")
+            return False
+    return False
 
 
 def _usable_dmarc(records: List[str]) -> bool:
     """Reject ambiguity and malformed policy fields rather than awarding credit."""
     if len(records) != 1:
         return False
-    tags = {}
-    for field in records[0].split(";"):
-        if not field.strip():
-            continue
-        key, separator, value = field.strip().partition("=")
-        key = key.lower()
-        if not separator or key in tags:
-            return False
-        tags[key] = value.strip().lower()
+    parsed = _parse_tags(records[0])
+    if not parsed or parsed.get("v", "").lower() != "dmarc1" or next(iter(parsed)) != "v":
+        return False
+    tags = {key: value.lower() for key, value in parsed.items()}
     if tags.get("p") not in {"none", "quarantine", "reject"}:
         return False
     if "sp" in tags and tags["sp"] not in {"none", "quarantine", "reject"}:
@@ -710,22 +788,29 @@ def _scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]
         notes.append(spf_note)
     # MX
     mx = _mx(d)
+    null_mx = mx == ["."]
+    if "." in mx:
+        if not null_mx:
+            _scan_error("Null MX is mixed with other mail servers; review mail routing")
+        mx = [host for host in mx if host != "."]
+    if null_mx:
+        notes.append("Null MX: this domain explicitly does not accept incoming email")
     mx_present = len(mx) > 0
     # DMARC
     dmarc_txts = _txt(f"_dmarc.{d}")
-    dmarc_recs = [t for t in dmarc_txts if re.match(r"^v=dmarc1(?:;|$)", t, re.IGNORECASE)]
+    dmarc_recs = [t for t in dmarc_txts if re.match(r"^v[ \t]*=[ \t]*dmarc1[ \t]*(?:;|$)", t, re.IGNORECASE)]
     dmarc_present = _usable_dmarc(dmarc_recs)
+    dmarc_tags = _parse_tags(dmarc_recs[0]) if dmarc_present else {}
+    if any(tag in dmarc_tags for tag in ("t", "np", "psd")):
+        _scan_error("DMARC RFC 9989 t/np/psd semantics are not evaluated by this direct-record scanner; review manually")
+    if "pct" in dmarc_tags:
+        notes.append("DMARC pct is a legacy RFC 7489 tag, removed by RFC 9989; receivers may ignore it")
     if dmarc_recs and not dmarc_present:
         _scan_error("DMARC has duplicate or invalid policy fields; review the DNS record manually")
     dmarc_policy = ""
     dmarc_strength = ""
     if dmarc_present:
-        rec = dmarc_recs[0]
-        for part in rec.split(";"):
-            part = part.strip()
-            if part.lower().startswith("p="):
-                dmarc_policy = part.split("=", 1)[1].strip().lower()
-                break
+        dmarc_policy = dmarc_tags["p"].lower()
         dmarc_strength = dmarc_policy if dmarc_policy in {"quarantine", "reject", "none"} else ""
     # DKIM
     dkim_selectors, dkim_algos, dkim_notes = _dkim_discover(d)
@@ -733,9 +818,9 @@ def _scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]
     if dkim_notes:
         notes.extend(dkim_notes)
     # MTA-STS
-    sts_present, sts_mode, sts_max_age, _ = _mta_sts(d)
+    sts_present, sts_mode, sts_max_age, _ = _mta_sts(d) if not null_mx else (False, "", 0, "")
     # TLS-RPT
-    tls_present, tls_rua = _tls_rpt(d)
+    tls_present, tls_rua = _tls_rpt(d) if not null_mx else (False, "")
     # BIMI
     bimi_present, bimi_logo, bimi_authority = _bimi(d)
     if bimi_present:
@@ -780,32 +865,19 @@ def _scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]
     dmarc_rua = ""  # aggregate report URI
     dmarc_ruf = ""  # forensic report URI
 
-    if dmarc_present and dmarc_recs:
-        rec = dmarc_recs[0]
-        for part in rec.split(";"):
-            part = part.strip()
-            pl = part.lower()
-            if pl.startswith("sp="):
-                dmarc_sp = part.split("=", 1)[1].strip().lower()
-            elif pl.startswith("aspf="):
-                dmarc_aspf = part.split("=", 1)[1].strip().lower()
-            elif pl.startswith("adkim="):
-                dmarc_adkim = part.split("=", 1)[1].strip().lower()
-            elif pl.startswith("pct="):
-                try:
-                    dmarc_pct = int(part.split("=", 1)[1].strip())
-                except ValueError:
-                    pass
-            elif pl.startswith("rua="):
-                dmarc_rua = part.split("=", 1)[1].strip()
-            elif pl.startswith("ruf="):
-                dmarc_ruf = part.split("=", 1)[1].strip()
+    if dmarc_present:
+        dmarc_sp = dmarc_tags.get("sp", "").lower()
+        dmarc_aspf = dmarc_tags.get("aspf", "r").lower()
+        dmarc_adkim = dmarc_tags.get("adkim", "r").lower()
+        dmarc_pct = int(dmarc_tags.get("pct", "100"))
+        dmarc_rua = dmarc_tags.get("rua", "")
+        dmarc_ruf = dmarc_tags.get("ruf", "")
 
     # Alignment warnings
     if dmarc_aspf == "s" or dmarc_adkim == "s":
         notes.append("Strict alignment enabled")
     if dmarc_pct < 100:
-        notes.append(f"DMARC pct={dmarc_pct} (not 100%)")
+        notes.append(f"Legacy DMARC pct={dmarc_pct}; not a guaranteed delivery percentage")
 
     return {
         "spf_present": spf_present,
@@ -816,6 +888,7 @@ def _scan_domain(domain: str, check_starttls: bool = False) -> Dict[str, object]
         "mx_present": mx_present,
         "mx_count": len(mx),
         "mx_hosts": ",".join(mx[:5]),  # First 5 MX hosts
+        "null_mx": null_mx,
         "dmarc_present": dmarc_present,
         "dmarc_policy": dmarc_policy,
         "dmarc_strength": dmarc_strength,
