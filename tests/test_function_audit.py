@@ -337,12 +337,15 @@ def test_legacy_remediation_flag_never_makes_generated_onboarding_advice_write(
         cf.generate_fixes.assert_not_called()
 
 
-def test_event_stream_stops_after_session_revocation(monkeypatch):
+@pytest.mark.parametrize("invalidation", ["revocation", "token_rotation", "expiry"])
+def test_event_stream_stops_after_session_invalidation(monkeypatch, invalidation):
     from starlette.requests import Request
+    from app.auth_state import AuthenticationState
 
     token = "synthetic-stream-operator-token"
     monkeypatch.setenv("DASH_TOKEN", token)
-    monkeypatch.setattr(dashboard, "_sessions", {})
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(dashboard.app.state, "authentication", AuthenticationState(wall_clock=lambda: clock[0]))
     session, _ = dashboard._create_session(token)
     request = Request({
         "type": "http", "method": "GET", "path": "/api/stream", "query_string": b"",
@@ -359,7 +362,12 @@ def test_event_stream_stops_after_session_revocation(monkeypatch):
         response = await dashboard.stream_updates(request)
         iterator = response.body_iterator
         assert "heartbeat" in await anext(iterator)
-        dashboard._sessions.pop(session)
+        if invalidation == "revocation":
+            dashboard.app.state.authentication.revoke_session(session)
+        elif invalidation == "token_rotation":
+            monkeypatch.setenv("DASH_TOKEN", "synthetic-replacement-token")
+        else:
+            clock[0] += 43200
         assert "session_expired" in await anext(iterator)
         with pytest.raises(StopAsyncIteration):
             await anext(iterator)

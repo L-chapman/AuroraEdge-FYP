@@ -23,8 +23,6 @@ def reset_auth_state(monkeypatch):
     monkeypatch.delenv("NORTHFLUX_ENV", raising=False)
     monkeypatch.delenv("NORTHFLUX_DEMO_MODE", raising=False)
     monkeypatch.delenv("DASH_TOKEN", raising=False)
-    dashboard._sessions.clear()
-    dashboard._login_rate.clear()
 
 
 def test_v1_open_session_and_bootstrap_are_typed_and_secret_free(

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import os
 
 import app.dashboard as dashboard
+from app.auth_state import AuthenticationState
 
 
 def test_dashboard_token_enforcement(tmp_path, monkeypatch):
@@ -34,7 +35,6 @@ def test_dashboard_token_enforcement(tmp_path, monkeypatch):
 def test_browser_session_requires_csrf_and_logout_revokes(monkeypatch):
     monkeypatch.delenv("NORTHFLUX_ENV", raising=False)
     monkeypatch.setenv("DASH_TOKEN", "browser-session-test-token")
-    dashboard._sessions.clear()
     client = TestClient(dashboard.app)
 
     login_response = client.post(
@@ -62,7 +62,6 @@ def test_browser_session_requires_csrf_and_logout_revokes(monkeypatch):
 def test_token_rotation_invalidates_browser_session(monkeypatch):
     monkeypatch.delenv("NORTHFLUX_ENV", raising=False)
     monkeypatch.setenv("DASH_TOKEN", "first-browser-session-token")
-    dashboard._sessions.clear()
     client = TestClient(dashboard.app)
     assert client.post(
         "/login",
@@ -80,7 +79,8 @@ def test_token_rotation_invalidates_browser_session(monkeypatch):
 def test_expired_browser_session_is_rejected(monkeypatch):
     monkeypatch.delenv("NORTHFLUX_ENV", raising=False)
     monkeypatch.setenv("DASH_TOKEN", "expiring-browser-session-token")
-    dashboard._sessions.clear()
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(dashboard.app.state, "authentication", AuthenticationState(wall_clock=lambda: clock[0]))
     client = TestClient(dashboard.app)
     assert client.post(
         "/login",
@@ -88,9 +88,7 @@ def test_expired_browser_session_is_rejected(monkeypatch):
         follow_redirects=False,
     ).status_code == 303
 
-    session_id = client.cookies.get("northflux_session")
-    with dashboard._session_lock:
-        dashboard._sessions[session_id]["expires_at"] = 0
+    clock[0] += 43200
 
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 303

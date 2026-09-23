@@ -19,8 +19,6 @@ def isolated_api(tmp_path, monkeypatch):
     monkeypatch.delenv("NORTHFLUX_ENV", raising=False)
     monkeypatch.delenv("NORTHFLUX_DEMO_MODE", raising=False)
     monkeypatch.setenv("DASH_TOKEN", "")
-    monkeypatch.setattr(dashboard, "_sessions", {})
-    monkeypatch.setattr(dashboard, "_login_rate", {})
     database = NorthFluxDatabase(tmp_path / "requests.db")
     monkeypatch.setattr(dashboard, "HAS_DB", True)
     monkeypatch.setattr(dashboard, "HAS_SCANNER", True)
@@ -40,14 +38,18 @@ def isolated_api(tmp_path, monkeypatch):
 @pytest.mark.parametrize("route", ["/api/v1/auth/login", "/login"])
 def test_non_ascii_wrong_token_is_rejected_not_server_error(route, monkeypatch):
     monkeypatch.setenv("DASH_TOKEN", "test-operator-token-with-32-characters")
-    monkeypatch.setattr(dashboard, "_login_rate", {})
     client = TestClient(dashboard.app, raise_server_exceptions=False)
     request = {"json": {"token": "not-valid-\u00e9\U0001f512"}} if route.startswith("/api") else {
         "data": {"token": "not-valid-\u00e9\U0001f512"}
     }
     response = client.post(route, **request)
     assert response.status_code == 401
-    assert len(dashboard._login_rate["testclient"]) == 1
+    # Exactly one failed attempt consumed the client's five-attempt budget.
+    authentication = dashboard.app.state.authentication
+    for _ in range(4):
+        assert authentication.login_allowed("testclient")
+        authentication.record_login_failure("testclient")
+    assert not authentication.login_allowed("testclient")
 
 
 def test_non_ascii_legacy_query_token_is_rejected(monkeypatch):
@@ -60,7 +62,6 @@ def test_non_ascii_legacy_query_token_is_rejected(monkeypatch):
 
 def test_login_rejects_excess_form_fields_without_crashing(monkeypatch):
     monkeypatch.setenv("DASH_TOKEN", "test-operator-token-with-32-characters")
-    monkeypatch.setattr(dashboard, "_login_rate", {})
     response = TestClient(dashboard.app, raise_server_exceptions=False).post(
         "/login", data={f"field{i}": "value" for i in range(11)}
     )

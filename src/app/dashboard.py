@@ -9,8 +9,6 @@ import asyncio
 import logging
 import math
 import concurrent.futures
-import hashlib
-import secrets
 import threading
 import tempfile
 import html as html_lib
@@ -24,6 +22,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
 from app.branding import DEMO_DOMAIN, PRODUCT_DESCRIPTION, PRODUCT_NAME, PRODUCT_VERSION
+from app.auth_state import AuthenticationState
 from app.request_security import RequestSizeLimitMiddleware, constant_time_equal, json_object
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Query, Response
@@ -185,45 +184,15 @@ def _escape_record(record: Dict) -> Dict:
 _SESSION_COOKIE = "northflux_session"
 _CSRF_COOKIE = "northflux_csrf"
 _SESSION_TTL_SECONDS = 60 * 60 * 12
-_sessions: Dict[str, Dict] = {}
-_session_lock = threading.Lock()
-
-
-def _token_fingerprint(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _create_session(configured_token: str) -> tuple[str, str]:
-    """Create a unique, expiring browser session bound to the current token."""
-    now = _time.time()
-    session_id = secrets.token_urlsafe(32)
-    csrf_token = secrets.token_urlsafe(32)
-    with _session_lock:
-        expired = [sid for sid, item in _sessions.items() if item["expires_at"] <= now]
-        for sid in expired:
-            _sessions.pop(sid, None)
-        _sessions[session_id] = {
-            "csrf_token": csrf_token,
-            "expires_at": now + _SESSION_TTL_SECONDS,
-            "token_fingerprint": _token_fingerprint(configured_token),
-        }
-    return session_id, csrf_token
+    """Keep the HTTP adapter bound to the application's single state owner."""
+    return app.state.authentication.create_session(configured_token)
 
 
 def _get_session(session_id: str, configured_token: str) -> Optional[Dict]:
-    if not session_id:
-        return None
-    now = _time.time()
-    with _session_lock:
-        session = _sessions.get(session_id)
-        if not session:
-            return None
-        if session["expires_at"] <= now or not constant_time_equal(
-            session["token_fingerprint"], _token_fingerprint(configured_token)
-        ):
-            _sessions.pop(session_id, None)
-            return None
-        return dict(session)
+    return app.state.authentication.get_session(session_id, configured_token)
 
 
 def _expected_origin(request: Request) -> str:
@@ -347,6 +316,9 @@ app = FastAPI(
     redoc_url=None if _is_production() else "/redoc",
     openapi_url=None if _is_production() else "/openapi.json",
 )
+# One owner per application, including tests. The state module has no singleton
+# and adapters do not keep aliases to its dictionaries or locks.
+app.state.authentication = AuthenticationState(session_ttl_seconds=_SESSION_TTL_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -398,10 +370,6 @@ app.add_middleware(SecurityHeadersMiddleware)
 _scan_rate: dict = {}          # ip -> [timestamp, timestamp, ...]
 _SCAN_RATE_WINDOW = 60         # seconds
 _SCAN_RATE_MAX = 10            # max scans per window
-_login_rate: dict = {}         # ip -> failed-login timestamps
-_login_rate_lock = threading.Lock()
-_LOGIN_RATE_WINDOW = 300       # seconds
-_LOGIN_RATE_MAX = 5            # failed attempts per window
 
 
 def _rate_check(request: Request):
@@ -426,27 +394,17 @@ def _rate_check(request: Request):
 def _login_rate_check(request: Request) -> str:
     """Return the client key or raise when failed logins exceed the limit."""
     client_key = request.client.host if request.client else "unknown"
-    now = _time.monotonic()
-    with _login_rate_lock:
-        hits = [
-            timestamp
-            for timestamp in _login_rate.get(client_key, [])
-            if now - timestamp < _LOGIN_RATE_WINDOW
-        ]
-        _login_rate[client_key] = hits
-        if len(hits) >= _LOGIN_RATE_MAX:
-            raise HTTPException(status_code=429, detail="Too many failed sign-in attempts")
+    if not app.state.authentication.login_allowed(client_key):
+        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts")
     return client_key
 
 
 def _record_login_failure(client_key: str) -> None:
-    with _login_rate_lock:
-        _login_rate.setdefault(client_key, []).append(_time.monotonic())
+    app.state.authentication.record_login_failure(client_key)
 
 
 def _clear_login_failures(client_key: str) -> None:
-    with _login_rate_lock:
-        _login_rate.pop(client_key, None)
+    app.state.authentication.clear_login_failures(client_key)
 
 
 # ---------------------------------------------------------------------------
@@ -679,8 +637,7 @@ async def login(request: Request):
 def logout(request: Request):
     session_id = request.cookies.get(_SESSION_COOKIE, "")
     if session_id:
-        with _session_lock:
-            _sessions.pop(session_id, None)
+        app.state.authentication.revoke_session(session_id)
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(_SESSION_COOKIE)
     response.delete_cookie(_CSRF_COOKIE)
@@ -824,8 +781,7 @@ def api_v1_auth_logout(request: Request, response: Response):
 
     session_id = request.cookies.get(_SESSION_COOKIE, "")
     if session_id:
-        with _session_lock:
-            _sessions.pop(session_id, None)
+        app.state.authentication.revoke_session(session_id)
     response.delete_cookie(_SESSION_COOKIE)
     response.delete_cookie(_CSRF_COOKIE)
     return AuthState(
