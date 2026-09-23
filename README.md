@@ -52,6 +52,8 @@ Then choose your system:
 
 You can also double-click `START.bat` in the project folder.
 
+Normal local startup does not require administrator rights. If Windows blocks a file, see [Windows security warnings](docs/DEPLOYMENT.md#windows-security-warnings) before trying again; do not use elevation or disable protection as a workaround.
+
 **Linux — terminal**
 
 ```sh

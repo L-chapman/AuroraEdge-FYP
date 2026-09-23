@@ -32,6 +32,21 @@ The local application is reached at `http://127.0.0.1:8080`; it is not available
 
 For a fictional presentation instead of live domain checks, use the [isolated browser showcase](screenshots/README.md). It is a local development harness, not a production deployment or a service to expose publicly. The retired DNS-reset scripts are no longer included.
 
+### Windows security warnings
+
+Run `START.bat` as a normal user from a writable project folder. NorthFlux is distributed as source files, not a signed Windows installer; normal local startup does not require administrator rights.
+
+Smart App Control uses reputation and signing information to decide whether to trust a file. A block can mean Windows lacks enough information, but it is not evidence that the file is harmless. Microsoft provides no per-app Smart App Control bypass. See [Microsoft's Smart App Control FAQ](https://support.microsoft.com/en-us/windows/security/threat-malware-protection/smart-app-control-frequently-asked-questions).
+
+**Do not treat “Run as administrator” as a fix.** It gives setup tools and the server greater access to your computer without establishing why Windows blocked the file. Keep protection enabled and identify the warning first:
+
+- Record its exact title and blocked filename. Smart App Control, SmartScreen, antivirus alerts and organisation policies need different investigation.
+- Confirm the source is the [official repository](https://github.com/L-chapman/Northflux-security). If the download includes a published checksum, compare it; a matching checksum confirms the download matches that artifact, not that it is malware-free.
+- Send the maintainer a screenshot with personal details hidden, your Windows version and project revision. Do not include tokens or private configuration. On a managed computer, ask your IT administrator.
+- For Smart App Control, Event Viewer may identify the file under **Applications and Services Logs → Microsoft → Windows → CodeIntegrity → Operational**. Event **3077** records an enforced block; **3076** is an audit event. Follow Microsoft's [event-log guidance](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/test-your-app-with-smart-app-control#checking-event-logs), not its separate policy-changing test procedures.
+
+The recorded Windows CI checks do not demonstrate compatibility with Smart App Control enabled. The reported local warning has not yet been traced to a specific blocked file; no protection bypass or signing fix is claimed.
+
 ## Production prerequisites
 
 - Docker Engine with Compose v2
