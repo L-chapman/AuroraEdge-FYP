@@ -65,34 +65,45 @@ def get_grade_color(grade: str) -> str:
 
 def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> int:
     """
-    Apply DNS fixes via Cloudflare API for domains with issues.
+    Run the retained Cloudflare compatibility workflow for domains with issues.
+
+    Current generated recommendations are manual-only and do not change DNS.
+    This path does not display their manual steps; --remediation displays scan
+    advice in the Rich console. Separately supplied auto_fix callbacks are still
+    executed for compatibility and must be reviewed by their integration owner.
+    The connection check reads zone details; it does not verify write access.
 
     Args:
         rows: List of (domain, scan_result, evaluation) tuples
         quiet: Suppress output
 
     Returns:
-        Number of fixes applied
+        Number of supplied callbacks reporting a successfully applied fix
     """
+    if not quiet:
+        print("\nCloudflare DNS compatibility workflow (--apply-fix)")
+        print("   Current generated recommendations are manual-only; they do not change DNS.")
+        print("   Use --remediation without --quiet to display scan recommendations (requires Rich).")
+
     cf = get_cloudflare_client()
     if not cf:
         if not quiet:
             print(
-                "\n&#9888;&#65039;  Cloudflare API not configured. Set CF_API_TOKEN and CF_ZONE_ID environment variables."
+                "\n[WARNING] Cloudflare API not configured. Set CF_API_TOKEN and CF_ZONE_ID environment variables."
             )
             print("   See docs/INTEGRATIONS.md for setup instructions.")
         return 0
 
-    # Validate connection
+    # Read zone details; success does not establish DNS or Worker write access.
     success, message = cf.validate_connection()
     if not success:
         if not quiet:
-            print(f"\n&#10060; Cloudflare connection failed: {message}")
+            print(f"\n[ERROR] Read-only Cloudflare connection check failed: {message}")
         return 0
 
     if not quiet:
-        print("\n&#128295; Cloudflare DNS Auto-Fix")
-        print(f"   {message}")
+        print(f"   Read-only Cloudflare connection check: {message}")
+        print("   This check does not verify DNS or Worker write permissions.")
         print()
 
     fixes_applied = 0
@@ -109,7 +120,7 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
             continue
 
         if not quiet:
-            print(f"   &#128205; {domain}:")
+            print(f"   {domain}:")
 
         for fix in fixes:
             fix_type = fix.get("type", "Unknown")
@@ -122,13 +133,13 @@ def apply_dns_fixes(rows: List[Tuple[str, Dict, Dict]], quiet: bool = False) -> 
                     if ok:
                         fixes_applied += 1
                         if not quiet:
-                            print(f"      &#9989; {fix_type}: {msg}")
+                            print(f"      [APPLIED] {fix_type}: {msg}")
                     else:
                         if not quiet:
-                            print(f"      &#10060; {fix_type}: {msg}")
+                            print(f"      [ERROR] {fix_type}: {msg}")
             except Exception as e:
                 if not quiet:
-                    print(f"      &#10060; {fix_type}: Error - {e}")
+                    print(f"      [ERROR] {fix_type}: Error - {e}")
 
     if not quiet:
         print(f"\n   Applied {fixes_applied} fix(es)")
@@ -500,9 +511,10 @@ def print_summary(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
 
 
 def print_remediation(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
-    """Print remediation recommendations for domains with issues."""
+    """Print manual-review advice without changing DNS or contacting Cloudflare."""
     console.print()
-    console.print("[bold cyan]Remediation Recommendations[/]")
+    console.print("[bold cyan]Manual-review recommendations[/]")
+    console.print("These recommendations do not change DNS. Review them with the domain owner before making changes.")
     console.print()
 
     for domain, res, ev in rows:
@@ -531,7 +543,7 @@ def print_remediation(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="NorthFlux Security - self-hosted email security assessment and remediation",
+        description="NorthFlux Security - self-hosted email security assessment and manual-review guidance",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -563,12 +575,16 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
         "--no-db", action="store_true", help="Don't save results to database"
     )
     parser.add_argument(
-        "--remediation", action="store_true", help="Show remediation recommendations"
+        "--remediation", action="store_true",
+        help="Show manual-review recommendations without changing DNS (requires Rich; omit --quiet)",
     )
     parser.add_argument(
         "--apply-fix",
         action="store_true",
-        help="Automatically apply DNS fixes via Cloudflare (requires CF_API_TOKEN and CF_ZONE_ID)",
+        help=(
+            "Retained Cloudflare compatibility workflow; current generated recommendations are manual-only "
+            "(requires CF_API_TOKEN and CF_ZONE_ID). Use --remediation to display scan advice."
+        ),
     )
     parser.add_argument("--quiet", "-q", action="store_true", help="Minimal output")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
@@ -660,7 +676,7 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
                 f"  {domain}: Grade={ev.get('grade', 'F')} Score={ev.get('score', 0)} Severity={ev.get('severity', 'OK')}"
             )
 
-    # Apply DNS fixes if requested (Gap G1 - Auto-fix workflow integration)
+    # Retained compatibility path; current generated recommendations have no write callbacks.
     if args.apply_fix:
         apply_dns_fixes(rows, quiet=args.quiet)
 
