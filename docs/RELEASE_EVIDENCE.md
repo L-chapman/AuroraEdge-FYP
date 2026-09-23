@@ -253,3 +253,81 @@ unchanged full browser matrix; these are repeated executions, not 20 new
 scenarios. Repeat-test results and the final hosted run are recorded in
 [PR #8](https://github.com/L-chapman/AuroraEdge-FYP/pull/8), not inferred from
 the earlier local successes above.
+
+## Latest verified master: 5254da9
+
+Source: [`5254da9f14734b580fbc9d5235bbe3ed8db3ba5c`](https://github.com/L-chapman/Northflux-security/tree/5254da9f14734b580fbc9d5235bbe3ed8db3ba5c).
+Date: 23 September 2026. Git tree: `2b1b2ab1e0757d193e5e1de14d21db74aeb8dd24`.
+After separate owner approval, [PR #8](https://github.com/L-chapman/Northflux-security/pull/8)
+merged the bounded authentication-state extraction and browser-test correction;
+[PR #9](https://github.com/L-chapman/Northflux-security/pull/9) then merged the
+command-line capability clarification. This section appends their combined
+master evidence; all earlier results, including the failed WebKit run, remain
+historical records for their own revisions.
+
+[Matching completed master workflow](https://github.com/L-chapman/Northflux-security/actions/runs/35835428993):
+**all 15 jobs passed**, with no failed or skipped jobs. The intermediate
+PR #8-only master run at `2678981a2b19ab805e4cfc74164f86eecc232918` was
+automatically superseded by this combined run; it is not a completed pass.
+The [workflow pinned to this master](https://github.com/L-chapman/Northflux-security/blob/5254da9f14734b580fbc9d5235bbe3ed8db3ba5c/.github/workflows/ci.yml)
+records the exact checks, including the additional zero-retry WebKit repetitions.
+
+| Combined hosted check | Recorded result |
+|---|---|
+| Linux backend, Python 3.10 and 3.12 | 789 passed on each; offline verification passed |
+| Windows backend, Python 3.10 and 3.12 | 787 passed, 2 platform-specific skips on each; offline verification passed |
+| Frontend | 146 tests passed across 20 files; types, lint, dependency audit and production build passed |
+| Clean startup | All four Windows/Linux combinations with Python 3.12 and Node 22.12.0 / 24 passed |
+| Full Linux browser/mobile matrix | 68 executions passed: 17 scenarios across Chromium, Firefox, WebKit and mobile Chromium |
+| Additional Linux WebKit stability | 20 consecutive executions of one presentation scenario passed, with retries disabled |
+| Windows Chromium | 17 executions of the same scenarios passed |
+| Container | 776 backend tests passed, 13 environment-dependent skips; 146 frontend tests passed; hardened production startup, health and readiness passed |
+| Quality, full-history secret scan and source packaging | Passed, including archive exclusions and SHA-256 verification |
+
+These are per-environment results, not a sum of unique tests. The additional
+20 browser executions repeat one scenario; mobile emulation is not physical
+device or macOS validation. Individual test skips are distinct from skipped
+workflow jobs. Backend runs retain the existing Starlette/AnyIO deprecation
+warning. Hosted quiet-mode logs report aggregate skip counts, not each reason.
+
+### Local combined-source and downloaded-package checks
+
+The combined Windows checkout's backend suite passed **784 tests, with five
+expected filesystem/platform skips and one existing deprecation warning**,
+using Python 3.12.10 and disposable state. This local result is separate from
+hosted Windows, which permits the symlink cases unavailable on the local host.
+It was run with `pytest -q -ra --cov=app --cov-report=term-missing`.
+
+The `northflux-security-source` artifact from the matching successful workflow
+supplied `NorthFlux_Security.zip`. Its own SHA-256 was
+`0e023850f820f7b00055c2605f1c6b0a5ae09659cb3110caea1c33ca46314f8c`;
+this is not the GitHub artifact wrapper's digest. Archive paths and all 198
+expanded source files were checked against the merged Git tree, respecting
+the repository's declared line-ending normalisation.
+
+That downloaded ZIP was also extracted into a fresh Windows folder. With
+Python 3.12.10 and Node 24.15.0, `START.bat --smoke-test --port 18085` created
+a project-local environment, installed dependencies, built React and passed
+health/readiness plus HTML, JavaScript and stylesheet checks. Package-download
+caches were allowed. The check used temporary state and cleared provider
+credentials, then stopped its own test server. It did not run a live scan.
+
+The approved master-folder source copy was synced to this revision, with the
+previous snapshot and launch files retained and hash-verified for recovery.
+The already-running working-checkout server and its data were not restarted,
+copied or migrated. File-copy verification is not evidence of Google Drive's
+remote upload status or a database backup/restore exercise.
+
+### Scope and remaining work
+
+Authentication remains process-local. Concurrent sign-in admission and
+recording failures are still separate, and monitor cancellation is not yet
+an awaited cleanup. Both are explicit, separate follow-up work; this evidence
+does not claim those behaviours were changed. Broader backend extraction and
+the other deferred work are tracked in [Implementation plan](IMPLEMENTATION_PLAN.md).
+
+No live provider write, real outbound notification, homelab/public deployment,
+database migration, GitHub release/tag, macOS or ARM validation is claimed.
+These results belong to `5254da9`, not automatically to subsequent documentation
+commits; each later PR records its own checks. Passing checks do not establish
+whole-product completeness or complete security.

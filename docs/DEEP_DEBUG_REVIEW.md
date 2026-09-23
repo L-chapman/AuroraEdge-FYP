@@ -106,7 +106,7 @@ Evidence: [launcher tests](../tests/test_start.py), [packaging tests](../tests/t
 
 ## Validation record
 
-Local validation uses Windows, Python 3.12.10 and Node.js 24. The final evidence belongs to the exact reviewed revision, not automatically to future edits. The [GitHub workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records the separate Windows/Linux release gates; only a completed successful run is a pass.
+Local validation uses Windows, Python 3.12.10 and Node.js 24. The final evidence belongs to the exact reviewed revision, not automatically to future edits. The [GitHub workflow history](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml) records the separate Windows/Linux release gates; only a completed successful run is a pass.
 
 | Check | Local review evidence |
 |---|---|
