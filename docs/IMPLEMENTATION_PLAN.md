@@ -35,8 +35,8 @@ isolation. Larger design improvements below are proposals, not all defects.
 | Ticket | Scope | Status / gate |
 |---|---|---|
 | NF-00 | Reconfirm source, guidance, clean state and test evidence | Baseline recorded; current-change tests recorded separately |
-| NF-01 | Truthful controls and labels; preserve compatibility settings | First review branch in progress |
-| NF-02 | Fictional-data demonstration, screenshots and readable evidence | First review branch in progress |
+| NF-01 | Truthful controls and labels; preserve compatibility settings | Implemented and verified in PR #7; awaiting owner review/merge approval |
+| NF-02 | Fictional-data demonstration, screenshots and readable evidence | Implemented and verified in PR #7; awaiting owner review/merge approval |
 | NF-03 | Extract backend responsibilities behind characterisation tests | Next: map dependencies and agree the first small extraction before changing architecture |
 | NF-04 | Validate important API responses and keep contracts aligned | Planned after agreed boundaries; preserve existing paths and error semantics |
 | NF-05 | Bounded scan jobs, real progress, cooperative cancellation | Separate design/review; preserve deletion and persistence safeguards |
@@ -77,6 +77,16 @@ inherited account credentials. No paid services, public demo exposure or
 changes to unrelated infrastructure are part of this work.
 
 ## Review handoff
+
+[Pull request #7](https://github.com/L-chapman/AuroraEdge-FYP/pull/7) contains the
+first increment. Implementation revision `2e8b3c0ce204ffc821b5aae631fa30196e229355`
+passed [all 15 hosted checks](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35813436909),
+alongside the local checks and seven-image visual review recorded in
+[Release evidence](RELEASE_EVIDENCE.md). Subsequent evidence-only commits do not
+change that implementation, but their final pull-request checks must also pass.
+The stable master checkout, master-folder installation and live data are unchanged.
+No release or deployment was performed. NF-03 through NF-14 are not completed by
+this increment.
 
 ### Proposed first NF-03 boundary (not implemented)
 
