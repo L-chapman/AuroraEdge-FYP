@@ -133,7 +133,7 @@ function SettingsEditor({ settings, production, unavailable, onRetry }: {
             </Field>
             <div className="toggle-stack">
               <label className="toggle"><input type="checkbox" {...form.register('monitoring_enabled')} /><span><strong>Continuous monitoring</strong><small>Periodically rescan managed domains.</small></span></label>
-              <label className="toggle toggle--danger"><input type="checkbox" {...form.register('automatic_remediation')} /><span><strong>Automatic remediation</strong><small>High risk: may change authorised Cloudflare DNS records after drift.</small></span></label>
+              <label className="toggle toggle--danger"><input type="checkbox" {...form.register('automatic_remediation')} /><span><strong>Automatic remediation</strong><small>High risk: may change authorised Cloudflare DNS records after drift. Policy and reporting changes still require manual review; this does not automatically enforce email protection.</small></span></label>
             </div>
           </div>
         </Card>

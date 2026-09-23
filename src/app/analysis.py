@@ -77,6 +77,8 @@ def _scores(rows: List[Dict]) -> List[float]:
     """Ignore missing/non-finite values without losing genuine zero scores."""
     scores = []
     for row in rows:
+        if _present(row.get("scan_incomplete")):
+            continue
         try:
             value = float(row.get("score"))
         except (TypeError, ValueError):
@@ -110,18 +112,21 @@ def calculate_statistics(rows: List[Dict]) -> Dict:
     if not rows:
         return {}
 
+    complete_rows = [row for row in rows if not _present(row.get("scan_incomplete"))]
+    complete_count = len(complete_rows)
+
     # Score statistics
     scores = _scores(rows)
 
     # Grade distribution
-    grade_counts = Counter(r.get("grade", "F") for r in rows)
+    grade_counts = Counter(r["grade"] for r in complete_rows if r.get("grade") in {"A+", "A", "B", "C", "D", "F"})
 
     # Severity distribution
     severity_counts = Counter(r.get("severity", "OK") for r in rows)
 
     # Violation summary
     all_violations = []
-    for r in rows:
+    for r in complete_rows:
         violations = r.get("violations", "")
         if violations:
             all_violations.extend(v.strip() for v in violations.split(",") if v.strip())
@@ -129,31 +134,34 @@ def calculate_statistics(rows: List[Dict]) -> Dict:
 
     # Check presence rates
     checks = {
-        "spf": sum(1 for r in rows if _present(r.get("spf_present"))),
-        "dmarc": sum(1 for r in rows if _present(r.get("dmarc_present"))),
-        "dkim": sum(1 for r in rows if _present(r.get("dkim_present"))),
-        "mta_sts": sum(1 for r in rows if _present(r.get("mta_sts_present"))),
-        "tls_rpt": sum(1 for r in rows if _present(r.get("tls_rpt_present"))),
+        "spf": sum(1 for r in complete_rows if _present(r.get("spf_present"))),
+        "dmarc": sum(1 for r in complete_rows if _present(r.get("dmarc_present"))),
+        "dkim": sum(1 for r in complete_rows if _present(r.get("dkim_present"))),
+        "mta_sts": sum(1 for r in complete_rows if _present(r.get("mta_sts_present"))),
+        "tls_rpt": sum(1 for r in complete_rows if _present(r.get("tls_rpt_present"))),
     }
 
     # DMARC policy distribution
     dmarc_policies = Counter()
-    for r in rows:
+    for r in complete_rows:
         if _present(r.get("dmarc_present")):
             pol = str(r.get("dmarc_policy") or "unknown").strip().lower()
             dmarc_policies[pol] += 1
 
     return {
         "total_domains": len(rows),
-        "score_avg": sum(scores) / len(scores) if scores else 0,
-        "score_min": min(scores) if scores else 0,
-        "score_max": max(scores) if scores else 0,
-        "score_median": _median(scores),
+        "complete_domains": complete_count,
+        "incomplete_domains": len(rows) - complete_count,
+        "scored_domains": len(scores),
+        "score_avg": sum(scores) / len(scores) if scores else None,
+        "score_min": min(scores) if scores else None,
+        "score_max": max(scores) if scores else None,
+        "score_median": _median(scores) if scores else None,
         "grade_distribution": dict(grade_counts),
         "severity_distribution": dict(severity_counts),
         "violation_frequency": dict(violation_counts.most_common(15)),
         "check_presence": checks,
-        "check_presence_pct": {k: (v / len(rows) * 100) for k, v in checks.items()},
+        "check_presence_pct": {k: (v / complete_count * 100) if complete_count else 0 for k, v in checks.items()},
         "dmarc_policies": dict(dmarc_policies),
     }
 
@@ -210,7 +218,7 @@ def generate_check_presence_chart(
     stats: Dict, output_path: Optional[Path] = None
 ) -> Optional[Path]:
     """Generate a bar chart showing percentage of domains with each security check."""
-    if not HAS_MATPLOTLIB:
+    if not HAS_MATPLOTLIB or stats.get("complete_domains") == 0:
         return None
 
     output_path = _chart_output(output_path, "check_presence.png")
@@ -440,6 +448,7 @@ def generate_all_charts(rows: Optional[List[Dict]] = None) -> List[Path]:
         return []
 
     stats = calculate_statistics(rows)
+
     charts = []
 
     chart = generate_grade_chart(stats)
@@ -476,6 +485,10 @@ def generate_summary_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     stats = calculate_statistics(rows)
 
+    def score_label(key: str, digits: int = 1) -> str:
+        value = stats.get(key)
+        return f"{value:.{digits}f}" if value is not None else "Not available"
+
     lines = [
         "# NorthFlux Security Scan Analysis Report",
         "",
@@ -488,12 +501,14 @@ def generate_summary_report(
         "",
         "### Key Findings",
         "",
-        f"- **Average Security Score:** {stats.get('score_avg', 0):.1f}/100",
-        f"- **Score Range:** {stats.get('score_min', 0):.0f} to {stats.get('score_max', 0):.0f}",
+        f"- **Average Security Score:** {score_label('score_avg')}" + ("/100" if stats.get("score_avg") is not None else ""),
+        f"- **Score Range:** {score_label('score_min', 0)} to {score_label('score_max', 0)}",
+        f"- **Incomplete scans:** {stats.get('incomplete_domains', 0)}",
+        "- Incomplete scans are excluded from scores, grade percentages and policy summaries.",
         "",
         "### Security Check Adoption",
         "",
-        "| Check | Adoption Rate |",
+        "| Check | Record presence among complete scans |",
         "|-------|--------------|",
     ]
 
@@ -505,7 +520,8 @@ def generate_summary_report(
         ("MTA-STS", "mta_sts"),
         ("TLS-RPT", "tls_rpt"),
     ]:
-        lines.append(f"| {check} | {pcts.get(key, 0):.1f}% |")
+        value = f"{pcts.get(key, 0):.1f}%" if stats.get("complete_domains", 0) else "Not available"
+        lines.append(f"| {check} | {value} |")
 
     lines.extend(
         [
@@ -598,7 +614,7 @@ def main():
 
     # Generate statistics
     stats = calculate_statistics(rows)
-    logger.info("Average Score: %.1f", stats.get('score_avg', 0))
+    logger.info("Average Score: %s", stats.get("score_avg") if stats.get("score_avg") is not None else "Not available")
     logger.info("Grade Distribution: %s", stats.get('grade_distribution', {}))
 
     # Generate charts

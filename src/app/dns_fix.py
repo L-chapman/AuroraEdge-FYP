@@ -4,13 +4,14 @@ import os
 import json
 import logging
 import re
+import hashlib
 from urllib.parse import urlencode
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from logging.handlers import RotatingFileHandler
 
 from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
-from app.scanner import is_valid_domain
+from app.scanner import _parse_tags, is_valid_domain, is_valid_tls_report_uri
 
 # Optional requests import for Cloudflare API calls
 try:
@@ -48,7 +49,7 @@ class DNSReadError(RuntimeError):
 
 
 class CloudflareDNS:
-    """Small Cloudflare client used by the auto-fix workflow."""
+    """Cloudflare read/review client with explicit, guarded low-level writers."""
 
     def __init__(self, api_token: str = None, zone_id: str = None):
         """Initialise the Cloudflare client."""
@@ -191,7 +192,7 @@ class CloudflareDNS:
 
         return False, (
             f"Domain '{domain}' does not belong to the configured Cloudflare "
-            f"zone '{zone}'. You can only auto-fix domains you control. "
+            f"zone '{zone}'. You can only modify domains you control. "
             f"Please add Cloudflare credentials for '{domain}' in Settings, "
             f"or scan a domain within '{zone}'."
         )
@@ -214,13 +215,21 @@ class CloudflareDNS:
         """Get one TXT record, optionally selecting by protocol prefix."""
         records = self.get_txt_records(name)
         if content_prefix:
-            prefix = content_prefix.lower()
             records = [
                 record
                 for record in records
-                if str(record.get("content", "")).strip().lower().startswith(prefix)
+                if self._matches_txt_protocol(str(record.get("content", "")), content_prefix)
             ]
+        if len(records) > 1:
+            raise DNSReadError(f"Multiple matching TXT records for {name}; review manually before changing DNS.")
         return records[0] if records else None
+
+    @staticmethod
+    def _matches_txt_protocol(content: str, prefix: str) -> bool:
+        """Match the version token, not prefixes such as v=spf10 or DMARC10."""
+        compact = re.sub(r"[ \t]*=[ \t]*", "=", content.strip(), count=1)
+        boundary = r"(?:\s|$)" if prefix.lower() == "v=spf1" else r"(?:[ \t]*;|$)"
+        return bool(re.match(re.escape(prefix) + boundary, compact, re.IGNORECASE))
 
     def create_or_update_txt(
         self, name: str, content: str, comment: str = ""
@@ -240,7 +249,10 @@ class CloudflareDNS:
         if not ok:
             return False, ownership_message
 
-        protocol_prefix = content.split(";", 1)[0].split(" ", 1)[0].strip().lower()
+        protocol_prefix = next((prefix for prefix in ("v=spf1", "v=dmarc1", "v=tlsrptv1", "v=stsv1", "v=bimi1", "v=dkim1")
+                                if self._matches_txt_protocol(content, prefix)), None)
+        if protocol_prefix is None:
+            return False, "A supported, explicit TXT protocol version is required; unrelated TXT records were not changed."
         try:
             records = self.get_txt_records(name)
         except DNSReadError as exc:
@@ -248,7 +260,7 @@ class CloudflareDNS:
         matching = [
             record
             for record in records
-            if str(record.get("content", "")).strip().lower().startswith(protocol_prefix)
+            if self._matches_txt_protocol(str(record.get("content", "")), protocol_prefix)
         ]
         if len(matching) > 1:
             return False, (
@@ -326,7 +338,7 @@ class CloudflareDNS:
         spf_content = " ".join(spf_parts)
 
         return self.create_or_update_txt(
-            domain, spf_content, "SPF record - NorthFlux Security auto-fix"
+            domain, spf_content, "SPF record - NorthFlux Security reviewed change"
         )
 
     def fix_dmarc(
@@ -360,29 +372,34 @@ class CloudflareDNS:
             return False, msg
 
         dmarc_name = f"_dmarc.{domain}"
+        if policy not in {"none", "quarantine", "reject"} or (sp is not None and sp not in {"none", "quarantine", "reject"}):
+            return False, "DMARC policy must be none, quarantine or reject."
+        if type(pct) is not int or not 0 <= pct <= 100:
+            return False, "Legacy DMARC pct must be an integer between 0 and 100."
+        for address in (rua, ruf):
+            if address and any(not is_valid_tls_report_uri(part.strip() if ":" in part else "mailto:" + part.strip())
+                               or (":" in part and not part.strip().startswith("mailto:")) for part in address.split(",")):
+                return False, "DMARC reports need valid mailto: destinations confirmed by the domain owner."
         try:
             existing = self.get_txt_record(dmarc_name, "v=dmarc1")
         except DNSReadError as exc:
             return False, str(exc)
         preserved = {}
         if existing:
-            for part in str(existing.get("content", "")).split(";"):
-                key, separator, value = part.strip().partition("=")
-                if separator and key:
-                    preserved[key.lower()] = value.strip()
+            preserved = _parse_tags(str(existing.get("content", "")))
+            if preserved is None:
+                return False, "Existing DMARC fields are ambiguous; review the record manually before changing it."
 
         # Update requested fields while retaining alignment and reporting tags.
         preserved["v"] = "DMARC1"
         preserved["p"] = policy
 
         if rua:
-            if not rua.startswith("mailto:"):
-                rua = f"mailto:{rua}"
+            rua = ",".join(part.strip() if part.strip().startswith("mailto:") else "mailto:" + part.strip() for part in rua.split(","))
             preserved["rua"] = rua
 
         if ruf:
-            if not ruf.startswith("mailto:"):
-                ruf = f"mailto:{ruf}"
+            ruf = ",".join(part.strip() if part.strip().startswith("mailto:") else "mailto:" + part.strip() for part in ruf.split(","))
             preserved["ruf"] = ruf
 
         if pct < 100 or "pct" in preserved:
@@ -397,7 +414,7 @@ class CloudflareDNS:
         dmarc_content = "; ".join(f"{key}={preserved[key]}" for key in ordered_keys)
 
         return self.create_or_update_txt(
-            dmarc_name, dmarc_content, "DMARC record - NorthFlux Security auto-fix"
+            dmarc_name, dmarc_content, "DMARC record - NorthFlux Security reviewed change"
         )
 
     def fix_tls_rpt(self, domain: str, rua: str) -> Tuple[bool, str]:
@@ -415,14 +432,17 @@ class CloudflareDNS:
         if not ok:
             return False, msg
 
-        if not rua.startswith("mailto:"):
-            rua = f"mailto:{rua}"
+        destinations = [part.strip() for part in rua.split(",")]
+        destinations = [part if ":" in part else f"mailto:{part}" for part in destinations]
+        if not all(is_valid_tls_report_uri(part) for part in destinations):
+            return False, "Use valid mailto: or https:// TLS reporting destinations."
+        rua = ",".join(destinations)
 
         tlsrpt_content = f"v=TLSRPTv1; rua={rua}"
         tlsrpt_name = f"_smtp._tls.{domain}"
 
         return self.create_or_update_txt(
-            tlsrpt_name, tlsrpt_content, "TLS-RPT record - NorthFlux Security auto-fix"
+            tlsrpt_name, tlsrpt_content, "TLS-RPT record - NorthFlux Security reviewed change"
         )
 
     def fix_mta_sts_dns(self, domain: str, policy_id: str = None) -> Tuple[bool, str]:
@@ -449,7 +469,7 @@ class CloudflareDNS:
         mtasts_name = f"_mta-sts.{domain}"
 
         return self.create_or_update_txt(
-            mtasts_name, mtasts_content, "MTA-STS DNS record - NorthFlux Security auto-fix"
+            mtasts_name, mtasts_content, "MTA-STS DNS record - NorthFlux Security reviewed change"
         )
 
     # -----------------------------------------------------------------
@@ -471,7 +491,7 @@ class CloudflareDNS:
                 "googlemail.com",
                 "google.com",
             ],
-            "dkim_type": "CNAME",
+            "dkim_type": "TXT",
             "selectors": ["google"],
         },
         "zoho": {
@@ -510,18 +530,18 @@ class CloudflareDNS:
 
         Returns:
             Dict with provider key, name, dkim_type, selectors, and any
-            extra metadata needed for auto-fix.
+            explanatory metadata for manual provider setup.
         """
         if not mx_hosts_str:
             return {"provider": "unknown", "name": "Unknown", "dkim_type": "TXT", "selectors": []}
 
         mx_lower = mx_hosts_str.lower()
-        mx_list = [h.strip() for h in mx_lower.split(",") if h.strip()]
+        mx_list = [h.strip().rstrip(".") for h in mx_lower.split(",") if h.strip()]
 
         for provider_key, info in CloudflareDNS.EMAIL_PROVIDERS.items():
             for pattern in info["mx_patterns"]:
                 for mx in mx_list:
-                    if pattern in mx:
+                    if mx == pattern or mx.endswith("." + pattern):
                         result = {
                             "provider": provider_key,
                             "name": info["name"],
@@ -534,10 +554,6 @@ class CloudflareDNS:
                             # Extract domain GUID for CNAME targets
                             parts = mx.split(".mail.protection.outlook.com")[0]
                             result["domain_guid"] = parts
-                        # Extract Google-specific metadata
-                        elif provider_key == "google":
-                            # Google DKIM CNAME target
-                            result["cname_suffix"] = "dkim.googlehosted.com"
                         elif provider_key == "protonmail":
                             result["cname_suffix"] = "protonmail.domainkey.protonmail.ch"
                         return result
@@ -697,7 +713,7 @@ class CloudflareDNS:
             self._request("DELETE", url)
 
     # -----------------------------------------------------------------
-    # DKIM Auto-Fix
+    # DKIM provider guidance (does not write guessed keys)
     # -----------------------------------------------------------------
 
     def fix_dkim(self, domain: str, scan_result: Dict) -> Tuple[bool, str]:
@@ -757,9 +773,37 @@ class CloudflareDNS:
             return result.get("result", {}).get("account", {}).get("id")
         return None
 
+    @staticmethod
+    def _mta_worker_name(domain: str) -> str:
+        """A short, deterministic name that preserves full-domain identity."""
+        digest = hashlib.sha256(domain.lower().encode("ascii")).hexdigest()[:16]
+        label = domain.lower().replace(".", "-")[:28].rstrip("-")
+        return f"northflux-mta-sts-{label}-{digest}"
+
+    @staticmethod
+    def _complete_inventory(result: Dict) -> bool:
+        """Reject partial/malformed optional pagination on provider inventories."""
+        if not isinstance(result, dict) or not isinstance(result.get("result"), list):
+            return False
+        metadata = result.get("result_info", {})
+        if not isinstance(metadata, dict):
+            return False
+        count = len(result["result"])
+        try:
+            return (int(metadata.get("page", 1)) == 1
+                    and 0 <= int(metadata.get("total_pages", 1)) <= 1
+                    and int(metadata.get("count", count)) == count
+                    and int(metadata.get("total_count", count)) == count)
+        except (TypeError, ValueError, OverflowError):
+            return False
+
     def deploy_mta_sts_worker(self, domain: str, mx_hosts_str: str) -> Tuple[bool, str]:
         """
-        Fully automate MTA-STS HTTPS policy hosting using Cloudflare Workers.
+        Explicit low-level MTA-STS Worker deployment after operator review.
+
+        Generated recommendations never invoke this helper. It publishes an
+        enforcing policy, so the operator must verify all MX TLS certificates,
+        delivery compatibility, and existing hosting before calling it.
 
         This replaces the manual step of setting up a web server at
         mta-sts.<domain> by:
@@ -798,14 +842,26 @@ class CloudflareDNS:
         if existing_a and (existing_a.get("content") != "192.0.2.1" or not existing_a.get("proxied")):
             return False, "An existing mta-sts host record needs manual review; it was not overwritten."
 
-        worker_name = f"northflux-mta-sts-{domain.replace('.', '-')}"
+        worker_name = self._mta_worker_name(domain)
         route_pattern = f"mta-sts.{domain}/*"
         routes_ok, route_result = self._request("GET", f"{CF_API_BASE}/zones/{self.zone_id}/workers/routes")
-        if not routes_ok or not isinstance(route_result.get("result"), list):
+        if (not routes_ok or not self._complete_inventory(route_result)
+                or any(not isinstance(route, dict) or not isinstance(route.get("pattern"), str)
+                       or not route["pattern"] for route in route_result["result"])):
             return False, "Could not verify existing Worker routes; no deployment changes made."
         if any(route.get("pattern") == route_pattern and route.get("script") != worker_name
                for route in route_result["result"]):
             return False, "The MTA-STS route belongs to another Worker; review it manually before deploying."
+        scripts_ok, scripts_result = self._request("GET", f"{CF_API_BASE}/accounts/{account_id}/workers/scripts")
+        if (not scripts_ok or not self._complete_inventory(scripts_result)
+                or any(not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                       or not item["id"].strip() for item in scripts_result["result"])):
+            return False, "Could not verify existing Worker scripts; no deployment changes made."
+        scripts = scripts_result["result"]
+        # Do not overwrite account-level scripts: even an existing same-name
+        # route cannot prove its current script is still ours. Updates are manual.
+        if any(script.get("id") == worker_name for script in scripts):
+            return False, "An existing Worker uses this name; review and update it manually. No script was overwritten."
 
         # Build the MTA-STS policy content from actual MX records
         mx_lines = "\n".join(f"mx: {mx}" for mx in mx_hosts)
@@ -815,7 +871,7 @@ class CloudflareDNS:
         # Uses Service Worker (classic) syntax for application/javascript upload
         worker_script = f"""
 // NorthFlux Security MTA-STS Policy Worker for {domain}
-// Auto-deployed by NorthFlux Security DNS Auto-Fix
+// Deployed through the NorthFlux Security operator-reviewed helper
 // Serves /.well-known/mta-sts.txt for MTA-STS compliance
 
 addEventListener('fetch', function(event) {{
@@ -839,9 +895,6 @@ async function handleRequest(request) {{
 }}
 """.strip()
 
-        # Sanitise the worker name (only lowercase alphanumeric and hyphens)
-        worker_name = f"northflux-mta-sts-{domain.replace('.', '-')}"
-
         steps_done = []
         steps_failed = []
 
@@ -851,7 +904,7 @@ async function handleRequest(request) {{
         a_name = f"mta-sts.{domain}"
         ok, msg = self.create_or_update_a(
             a_name, "192.0.2.1", proxied=True,
-            comment="MTA-STS Worker endpoint - NorthFlux Security auto-fix"
+            comment="MTA-STS Worker endpoint - NorthFlux Security reviewed change"
         )
         if ok:
             steps_done.append(f"DNS A record: {a_name} (proxied)")
@@ -1009,13 +1062,17 @@ async function handleRequest(request) {{
 
     def generate_fixes(self, scan_result: Dict) -> List[Dict]:
         """
-        Generate list of recommended fixes based on scan results.
+        Generate review-first recommendations based on scan observations.
+
+        A DNS snapshot cannot confirm sender inventory, report destinations, or
+        TLS certificate readiness. These recommendations are manual; low-level
+        writers are available only for separately reviewed, explicit operations.
 
         Args:
             scan_result: Result from scanner.scan_domain()
 
         Returns:
-            List of fix recommendations with apply functions
+            List of recommendations with manual steps (auto_fix is None)
         """
         domain = scan_result.get("domain", "")
         fixes = []
@@ -1044,33 +1101,34 @@ async function handleRequest(request) {{
         else:
             # Harden SPF: upgrade ~all (softfail) to -all (hardfail)
             spf_raw = scan_result.get("spf_record", "") or ""
-            if "~all" in spf_raw and "-all" not in spf_raw:
-                hardened = spf_raw.replace("~all", "-all")
+            if "~all" in spf_raw.lower().split() and "-all" not in spf_raw.lower().split():
+                hardened = " ".join("-all" if token.lower() == "~all" else token for token in spf_raw.split())
                 fixes.append(
                     {
                         "type": "SPF",
                         "priority": "WARN",
-                        "description": "Harden SPF: upgrade ~all (softfail) to -all (hardfail)",
+                        "description": "Review authorised senders before hardening SPF from ~all to -all",
                         "current": spf_raw,
                         "recommended": hardened,
-                        "auto_fix": lambda h=hardened: self.create_or_update_txt(
-                            domain, h, "SPF hardened to -all - NorthFlux Security auto-fix"
-                        ),
+                        "auto_fix": None,
+                        "manual": True,
+                        "steps": "Confirm every legitimate sending service is covered, then test and apply the reviewed record through your DNS provider.",
                     }
                 )
 
-        # DMARC fix &#8212; always target p=reject (strongest policy)
+        # A DNS snapshot cannot establish whether legitimate mail is ready for
+        # DMARC enforcement, or whether a reporting destination exists.
         if not scan_result.get("dmarc_present"):
             fixes.append(
                 {
                     "type": "DMARC",
                     "priority": "HIGH",
-                    "description": "Add DMARC record with reject policy for full protection",
+                    "description": "Plan DMARC monitoring before enforcing a rejection policy",
                     "current": "Not configured",
-                    "recommended": f"v=DMARC1; p=reject; rua=mailto:dmarc@{domain}",
-                    "auto_fix": lambda: self.fix_dmarc(
-                        domain, "reject", f"dmarc@{domain}"
-                    ),
+                    "recommended": "Start with p=none and a confirmed aggregate-report destination",
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "Configure SPF and DKIM for all senders. Choose a working report service or mailbox, review real mail results, then stage quarantine/reject when legitimate mail passes.",
                 }
             )
         elif scan_result.get("dmarc_policy") == "none":
@@ -1078,12 +1136,12 @@ async function handleRequest(request) {{
                 {
                     "type": "DMARC",
                     "priority": "HIGH",
-                    "description": "Upgrade DMARC policy from 'none' to 'reject'",
+                    "description": "Review DMARC reports before moving beyond monitoring",
                     "current": "p=none",
-                    "recommended": "p=reject",
-                    "auto_fix": lambda: self.fix_dmarc(
-                        domain, "reject", scan_result.get("dmarc_rua") or f"dmarc@{domain}"
-                    ),
+                    "recommended": "Consider quarantine after reviewing mail; reject is not appropriate for every domain",
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "Verify every authorised service passes aligned SPF or DKIM. Review aggregate reports with the domain owner before changing policy.",
                 }
             )
         elif scan_result.get("dmarc_policy") == "quarantine":
@@ -1091,42 +1149,45 @@ async function handleRequest(request) {{
                 {
                     "type": "DMARC",
                     "priority": "WARN",
-                    "description": "Upgrade DMARC policy from 'quarantine' to 'reject' for maximum protection",
+                    "description": "Quarantine is valid enforcement; review domain use before any policy change",
                     "current": "p=quarantine",
-                    "recommended": "p=reject",
-                    "auto_fix": lambda: self.fix_dmarc(
-                        domain, "reject", scan_result.get("dmarc_rua") or f"dmarc@{domain}"
-                    ),
+                    "recommended": "Retain quarantine unless a reviewed domain-specific requirement justifies reject",
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "RFC 9989 advises against reject for general-purpose domains. Review aggregate reports, forwarding and mailing-list cases; any policy change needs the owner's approval and a rollback plan.",
                 }
             )
 
         # TLS-RPT fix
-        if not scan_result.get("tls_rpt_present"):
+        if not scan_result.get("tls_rpt_present") and not scan_result.get("null_mx"):
             fixes.append(
                 {
                     "type": "TLS-RPT",
                     "priority": "WARN",
-                    "description": "Add TLS-RPT for TLS failure reporting",
+                    "description": "Choose a working destination for TLS failure reports",
                     "current": "Not configured",
-                    "recommended": f"v=TLSRPTv1; rua=mailto:tlsrpt@{domain}",
-                    "auto_fix": lambda: self.fix_tls_rpt(domain, f"tlsrpt@{domain}"),
+                    "recommended": "v=TLSRPTv1; rua=<confirmed mailto: or https:// report destination>",
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "Confirm your reporting mailbox or HTTPS service is configured to receive TLS reports, then publish its exact URI.",
                 }
             )
 
         # MTA-STS fix &#8212; DNS record + Cloudflare Worker for HTTPS hosting
-        if not scan_result.get("mta_sts_present"):
-            mx_hosts = scan_result.get("mx_hosts", "")
+        if not scan_result.get("mta_sts_present") and not scan_result.get("null_mx"):
             fixes.append(
                 {
                     "type": "MTA-STS",
                     "priority": "WARN",
-                    "description": "Add MTA-STS DNS record for enforced TLS",
+                    "description": "Review mail-server TLS readiness before publishing MTA-STS",
                     "current": "Not configured",
                     "recommended": "v=STSv1; id=<timestamp>",
-                    "auto_fix": lambda: self.fix_mta_sts_dns(domain),
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "Verify every MX hostname and certificate, host a valid HTTPS policy, and test delivery in testing mode before choosing enforcement. Publish a matching DNS policy ID only after review.",
                 }
             )
-            # MTA-STS HTTPS hosting &#8212; automated via Cloudflare Worker
+            # MTA-STS HTTPS hosting guidance; deployment needs separate review.
             fixes.append(
                 {
                     "type": "MTA-STS-HTTPS",
@@ -1134,16 +1195,18 @@ async function handleRequest(request) {{
                     "description": f"Deploy Cloudflare Worker to serve MTA-STS policy at https://mta-sts.{domain}",
                     "current": "Not configured",
                     "recommended": "Cloudflare Worker serving /.well-known/mta-sts.txt",
-                    "auto_fix": lambda mxh=mx_hosts: self.deploy_mta_sts_worker(domain, mxh),
+                    "auto_fix": None,
+                    "manual": True,
+                    "steps": "Confirm all mail servers support trusted TLS for their MX names. Review existing DNS/Worker routes and host a testing policy before enforcement; the optional low-level Worker helper publishes enforce and must not be used before that review.",
                 }
             )
 
-        # DKIM &#8212; auto-detect email provider and create DNS records
+        # DKIM provider hints; obtain exact records from the provider manually.
         if not scan_result.get("dkim_present"):
             provider = self.detect_email_provider(scan_result.get("mx_hosts", ""))
             provider_name = provider.get("name", "Unknown")
             if provider.get("provider") != "unknown":
-                # Known provider &#8212; fully automated DKIM fix
+                # Known provider: guidance only, never guessed tenant values.
                 fixes.append(
                     {
                         "type": "DKIM",
@@ -1158,7 +1221,7 @@ async function handleRequest(request) {{
                     }
                 )
             else:
-                # Unknown provider &#8212; provide guidance but still try generic fix
+                # Unknown provider: provide manual setup guidance only.
                 fixes.append(
                     {
                         "type": "DKIM",
@@ -1193,71 +1256,36 @@ def get_cloudflare_client() -> Optional[CloudflareDNS]:
     return CloudflareDNS()
 
 
-# Legacy feature snapshot retained for compatibility with existing reports.
-# Vendor capabilities and commercial terms change frequently, so callers must
-# present this data with the disclaimer below and verify it before procurement.
+# Legacy comparison keys remain for compatibility, not competitive claims.
+# External products have not been assessed here; unknown is not unsupported.
 COMPARISON_DISCLAIMER = (
-    "Legacy illustrative snapshot only. Vendor capabilities, support, and pricing "
-    "change; verify current details with each vendor before making a purchasing "
-    "or security decision."
+    "NorthFlux observations describe this codebase, not full protocol validation. "
+    "External products are not assessed: blank capability data does not mean a "
+    "feature is absent. Verify vendor capabilities, support, and pricing directly "
+    "before any purchasing or security decision."
 )
 
 TOOL_COMPARISON = {
     "NorthFlux Security": {
         "type": "Self-hosted beta",
         "checks": ["SPF", "DKIM", "DMARC", "MTA-STS", "TLS-RPT", "STARTTLS", "BIMI", "Blacklist/RBL"],
-        "auto_fix": True,
+        "auto_fix": False,
         "api": True,
         "reporting": ["CSV", "Markdown", "JSON", "Database", "PDF"],
         "cost": "Software licence not yet selected; infrastructure costs apply",
         "deployment": "Self-hosted",
-        "unique": "Cloudflare remediation, DNS record generator, and score timeline",
+        "unique": "Manual DNS review guidance, record generator, and checklist-score timeline",
     },
-    "OnDMARC": {
-        "type": "Commercial SaaS",
-        "checks": ["SPF", "DKIM", "DMARC"],
-        "auto_fix": False,
-        "api": True,
-        "reporting": ["Dashboard", "PDF"],
-        "cost": "Verify with vendor",
-        "deployment": "Cloud",
-        "unique": "Managed service, enterprise support",
-    },
-    "EasyDMARC": {
-        "type": "Commercial SaaS",
-        "checks": ["SPF", "DKIM", "DMARC", "BIMI"],
-        "auto_fix": False,
-        "api": True,
-        "reporting": ["Dashboard", "PDF", "Email"],
-        "cost": "Verify with vendor",
-        "deployment": "Cloud",
-        "unique": "BIMI support, threat intelligence",
-    },
-    "dmarcian": {
-        "type": "Commercial SaaS",
-        "checks": ["SPF", "DKIM", "DMARC"],
-        "auto_fix": False,
-        "api": True,
-        "reporting": ["Dashboard", "XML"],
-        "cost": "Verify with vendor",
-        "deployment": "Cloud",
-        "unique": "DMARC-focused, detailed analytics",
-    },
-    "MXToolbox": {
-        "type": "Freemium Online Tool",
-        "checks": ["SPF", "DKIM", "DMARC", "Blacklist", "MX"],
-        "auto_fix": False,
-        "api": True,
-        "reporting": ["Web", "Email Alerts"],
-        "cost": "Verify with vendor",
-        "deployment": "Cloud",
-        "unique": "Blacklist monitoring, diagnostics",
-    },
+    **{name: {
+        "assessment": "Not assessed", "type": "Not assessed", "checks": [],
+        "auto_fix": None, "api": None, "reporting": [],
+        "cost": "Verify with vendor", "deployment": "Not assessed", "unique": "Not assessed",
+    } for name in ("OnDMARC", "EasyDMARC", "dmarcian", "MXToolbox")},
 }
 
 
 def generate_comparison_report() -> str:
-    """Generate a labelled legacy feature-snapshot report."""
+    """Describe local capabilities without asserting unverified vendor features."""
     lines = [
         "# Email Security Tool Comparison",
         "",
@@ -1281,7 +1309,7 @@ def generate_comparison_report() -> str:
         ("TLS-RPT Check", lambda t: "&#10003;" if "TLS-RPT" in t["checks"] else "&#10007;"),
         ("BIMI Check", lambda t: "&#10003;" if "BIMI" in t["checks"] else "&#10007;"),
         ("Blacklist/RBL", lambda t: "&#10003;" if "Blacklist/RBL" in t.get("checks", []) or "Blacklist" in t.get("checks", []) else "&#10007;"),
-        ("Auto-Fix DNS", lambda t: "&#10003;" if t["auto_fix"] else "&#10007;"),
+        ("Auto-Fix DNS", lambda t: "Enabled" if t["auto_fix"] else "Manual review"),
         ("PDF Reports", lambda t: "&#10003;" if "PDF" in t.get("reporting", []) else "&#10007;"),
         ("API Access", lambda t: "&#10003;" if t["api"] else "&#10007;"),
         ("Cost", "cost"),
@@ -1294,7 +1322,9 @@ def generate_comparison_report() -> str:
         row = [feature_name]
         for tool in tools:
             t = TOOL_COMPARISON[tool]
-            if callable(key):
+            if t.get("assessment") == "Not assessed":
+                val = "Not assessed"
+            elif callable(key):
                 val = key(t)
             else:
                 val = t.get(key, "N/A")
@@ -1304,19 +1334,19 @@ def generate_comparison_report() -> str:
     lines.extend(
         [
             "",
-            "## Key Differentiators",
+            "## Scope and Limitations",
             "",
             "### NorthFlux Security Characteristics",
-            "- **Supported DNS Remediation**: Cloudflare API integration with ownership and scope guards",
+            "- **DNS Review**: All generated recommendations are manual; explicit low-level Cloudflare helpers retain ownership and scope guards",
             "- **Self-Hosted**: Operator-controlled deployment and local application storage",
-            "- **Operator Control**: Monitoring and remediation remain independently opt-in",
-            "- **Protocol Coverage**: Includes SPF, DKIM, DMARC, MTA-STS, TLS-RPT, BIMI, and blacklist checks",
+            "- **Operator Control**: Monitoring is opt-in; DNS changes require separate operator review and do not run from generated recommendations",
+            "- **Observed Checks**: SPF lookup estimates, common DKIM selector discovery, direct DMARC records, MTA-STS/TLS-RPT, BIMI presence and sampled inbound-MX DNSBL checks",
+            "- **Limits**: Not a message-authentication engine, full RFC 9989 implementation, SMTP certificate audit, BIMI certificate validator, or delivery guarantee",
             "- **Source Availability**: Repository visibility does not grant reuse rights; review the selected licence before reuse",
             "",
-            "### Typical Managed-Service Characteristics",
-            "- **Managed Operations**: The vendor may operate the service infrastructure",
-            "- **Support Options**: Commercial support and service commitments may be available",
-            "- **Hosted Analytics**: Capabilities vary by vendor and plan and must be verified",
+            "### External Product Research",
+            "- No comparative capability or superiority claim is made in this report",
+            "- Check each vendor's current documentation, plan terms, support and deployment requirements directly",
             "",
         ]
     )

@@ -12,7 +12,7 @@ import app.cli as cli
 
 def test_cli_writes_outputs(tmp_path, monkeypatch):
     # Prepare args: --domain example.com --outdir <tmp_path>
-    monkeypatch.setattr(sys, "argv", ["cli.py", "--domain", "example.com", "--outdir", str(tmp_path)])
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--domain", "example.com", "--outdir", str(tmp_path), "--no-db"])
 
     # Monkeypatch scan_domain and evaluate to predictable values
     def fake_scan(d, check_starttls=False):
@@ -222,3 +222,42 @@ def test_incomplete_markdown_has_no_grade_and_does_not_affect_statistics(tmp_pat
     assert "DNS &lt;script&gt; failed\\|lookup<br>Retry later" in report
     assert "\\[Review\\]\\(https://example.invalid\\) before changes" in report
     assert "<script>" not in report
+
+
+def test_console_summary_does_not_show_incomplete_grade_or_average():
+    import io
+    from rich.console import Console
+
+    stream = io.StringIO()
+    console = Console(file=stream, width=180, color_system=None)
+    rows = [("partial.example.com", {"scan_incomplete": True, "notes": "DNS timed out"},
+             {"score": 95, "grade": "A+", "severity": "ERROR"}),
+            ("complete.example.com", {}, {"score": 0, "grade": "F", "severity": "HIGH"})]
+    cli.print_summary(rows, console)
+    output = stream.getvalue()
+    assert "Incomplete" in output
+    assert "DNS timed out" in output
+    assert "A+" not in output and "95" not in output
+    assert "Average score: 0.0" in output
+
+
+def test_invalid_single_domain_stops_before_scan_or_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--domain", "not a domain", "--outdir", str(tmp_path / "unused"), "--no-db"])
+    scanner = Mock(side_effect=AssertionError("Do not scan invalid input"))
+    monkeypatch.setattr(cli, "scan_domain", scanner)
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code != 0
+    scanner.assert_not_called()
+    assert not (tmp_path / "unused").exists()
+
+
+def test_plain_console_does_not_show_incomplete_grade(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--domain", "example.com", "--outdir", str(tmp_path), "--no-db"])
+    monkeypatch.setattr(cli, "HAS_RICH", False)
+    monkeypatch.setattr(cli, "scan_domain", lambda *args, **kwargs: {"scan_incomplete": True, "notes": "DNS timed out"})
+    monkeypatch.setattr(cli, "evaluate", lambda _: {"score": 95, "grade": "A+", "severity": "ERROR"})
+    cli.main()
+    output = capsys.readouterr().out
+    assert "Incomplete scan" in output and "DNS timed out" in output
+    assert "Grade=A+" not in output and "Score=95" not in output

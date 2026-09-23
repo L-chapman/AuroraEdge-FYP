@@ -2,6 +2,9 @@
 """
 demo_prep.py &#8212; Prepare auroraedge.co.uk for a controlled authorised Auto-Fix demonstration.
 
+SAFETY NOTICE: Legacy mutation modes are disabled. Only --dry-run is supported;
+it prints an offline educational preview and does not contact Cloudflare.
+
 This script talks directly to the Cloudflare API and puts the demo domain
 into a known weak state so that the NorthFlux auto-fixer has something real
 to repair during a live demo.
@@ -20,11 +23,11 @@ on the scan results page to let NorthFlux repair everything automatically.
 
 Usage
 -----
-    python scripts/demo_prep.py            # reset to the demo state
-    python scripts/demo_prep.py --restore  # return to the normal strong state
+    python scripts/demo_prep.py --dry-run            # offline historical preview
+    python scripts/demo_prep.py --restore --dry-run  # offline restore-plan preview
 
-Credentials are read from the NorthFlux Security SQLite database.
-so they stay consistent with the running server.
+No credentials are read by the supported preview. The old write implementation
+below is quarantined and cannot be invoked through its public helpers.
 """
 
 from __future__ import annotations
@@ -46,6 +49,12 @@ except ImportError:
 # ---------------------------------------------------------------------------
 DOMAIN = "auroraedge.co.uk"
 CF_API_BASE = "https://api.cloudflare.com/client/v4"
+DISABLED_MESSAGE = (
+    "Legacy demo DNS writes are disabled: this script cannot safely preserve "
+    "unrelated records or restore an operator's original configuration. "
+    "Use --dry-run for an offline preview, or the validated dashboard operator "
+    "workflow with an authorised test zone and a recovery plan."
+)
 
 # Records used to reset the demo domain to the known weak state
 RECORDS_TO_WEAKEN = [
@@ -125,6 +134,7 @@ def _find_records(token: str, zone_id: str, record_type: str, name: str):
 
 
 def _delete_record(token: str, zone_id: str, record_id: str, name: str) -> bool:
+    raise RuntimeError(DISABLED_MESSAGE)
     url = f"{CF_API_BASE}/zones/{zone_id}/dns_records/{record_id}"
     resp = requests.delete(url, headers=_cf_headers(token), timeout=15)
     data = resp.json()
@@ -137,6 +147,7 @@ def _delete_record(token: str, zone_id: str, record_id: str, name: str) -> bool:
 
 
 def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
+    raise RuntimeError(DISABLED_MESSAGE)
     url = f"{CF_API_BASE}/zones/{zone_id}/dns_records"
     payload = {"type": "TXT", "name": name, "content": content, "ttl": 3600}
     resp = requests.post(url, headers=_cf_headers(token), json=payload, timeout=15)
@@ -154,7 +165,8 @@ def _create_record(token: str, zone_id: str, name: str, content: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def break_records():
-    """Reset SPF/DMARC and remove MTA-STS for the controlled demo state."""
+    """Disabled historical mutation entry point; never read credentials."""
+    raise RuntimeError(DISABLED_MESSAGE)
     print(f"\n&#128295; DEMO RESET &#8212; Setting DNS records to the controlled demo state for {DOMAIN}")
     print("=" * 55)
 
@@ -191,7 +203,8 @@ def break_records():
 
 
 def restore_records():
-    """Return the demo domain to its normal strong state."""
+    """Disabled historical restoration entry point; never read credentials."""
+    raise RuntimeError(DISABLED_MESSAGE)
     print(f"\n&#128260; RESTORE &#8212; Strengthening DNS records for {DOMAIN}")
     print("=" * 55)
 
@@ -227,19 +240,26 @@ def restore_records():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prepare auroraedge.co.uk DNS for the controlled NorthFlux auto-fix demo"
+        description="Offline historical DNS demonstration preview; legacy writes are disabled"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print the historical plan without credentials or network access",
     )
     parser.add_argument(
         "--restore",
         action="store_true",
-        help="Return the demo domain to the normal strong state",
+        help="Show the historical restore plan (requires --dry-run; changes nothing)",
     )
     args = parser.parse_args()
 
-    if args.restore:
-        restore_records()
-    else:
-        break_records()
+    if not args.dry_run:
+        parser.error(DISABLED_MESSAGE)
+    key = "strong_value" if args.restore else "weak_value"
+    print(f"Historical example only for {DOMAIN}; not a recommended configuration.")
+    for record in RECORDS_TO_WEAKEN:
+        print(f"{record['label']}: {record['name']} -> {record[key]}")
+    print("MTA-STS: " + ("historical example would restore TXT" if args.restore else "historical example would remove TXT"))
+    print("No DNS records were changed; this preview made no network requests.")
 
 
 if __name__ == "__main__":

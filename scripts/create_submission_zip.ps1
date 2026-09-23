@@ -97,6 +97,10 @@ $ExcludedExtensions = @(
     ".db-shm",
     ".sqlite",
     ".sqlite3",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".sqlite3-wal",
+    ".sqlite3-shm",
     ".log"
 )
 
@@ -148,8 +152,8 @@ function Test-ExcludedPath {
 
     if (
         $leaf -eq ".env" -or
-        ($leaf.StartsWith(".env.") -and $leaf -ne ".env.example") -or
-        $leaf.EndsWith(".local.cmd") -or
+        ($leaf.StartsWith(".env.", [System.StringComparison]::OrdinalIgnoreCase) -and $leaf -ne ".env.example") -or
+        $leaf.EndsWith(".local.cmd", [System.StringComparison]::OrdinalIgnoreCase) -or
         ($leaf.StartsWith("service-account", [System.StringComparison]::OrdinalIgnoreCase) -and
             [System.IO.Path]::GetExtension($leaf) -eq ".json")
     ) {
@@ -236,6 +240,11 @@ if ($AllowDirty) {
 $eligiblePaths = @((Get-GitOutput -Arguments $gitArguments) -split "`0" | Where-Object { $_ -ne "" })
 if (-not $eligiblePaths) {
     throw "Git did not return any eligible release files."
+}
+if (-not $IsWindows -and ($eligiblePaths | Where-Object { $_.Contains("\") })) {
+    # Backslashes can be ordinary Linux filename characters but become path
+    # separators on Windows. Never turn '..\..\name' into a ZIP traversal.
+    throw "Release contains a Linux filename that is unsafe on Windows (backslash in a filename)."
 }
 
 $files = @(

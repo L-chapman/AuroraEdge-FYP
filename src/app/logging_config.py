@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import logging
+import copy
 from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -13,7 +14,6 @@ from app.runtime_paths import LOGS_DIR, PROJECT_ROOT
 # Paths
 ROOT = PROJECT_ROOT
 LOG_DIR = LOGS_DIR
-LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Log files
 MAIN_LOG = LOG_DIR / "northflux.log"
@@ -42,6 +42,8 @@ class ColoredFormatter(logging.Formatter):
     RESET = "\033[0m"
 
     def format(self, record):
+        # A LogRecord is shared by every handler. Colour only a local copy.
+        record = copy.copy(record)
         color = self.COLORS.get(record.levelname, self.RESET)
         record.levelname = f"{color}{record.levelname}{self.RESET}"
         record.name = f"\033[34m{record.name}{self.RESET}"  # Blue
@@ -92,6 +94,7 @@ def create_rotating_handler(
     Returns:
         Configured RotatingFileHandler
     """
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(
         log_file,
         maxBytes=max_bytes,
@@ -99,7 +102,16 @@ def create_rotating_handler(
         encoding="utf-8",
     )
     handler.setFormatter(formatter)
+    handler._northflux_owned = True
     return handler
+
+
+def _remove_owned_handlers(logger: logging.Logger) -> None:
+    """Replace our own handlers without disrupting Uvicorn/test integrations."""
+    for handler in list(logger.handlers):
+        if getattr(handler, "_northflux_owned", False):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 def setup_logging(level: str = None, json_format: bool = False) -> None:
@@ -114,8 +126,10 @@ def setup_logging(level: str = None, json_format: bool = False) -> None:
         from app.logging_config import setup_logging
         setup_logging(level="DEBUG")
     """
-    level = level or LOG_LEVEL
+    level = (level or LOG_LEVEL).upper()
     numeric_level = getattr(logging, level, logging.INFO)
+    if not isinstance(numeric_level, int):
+        numeric_level = logging.INFO
 
     # Standard formatter for files
     file_formatter = logging.Formatter(
@@ -136,11 +150,11 @@ def setup_logging(level: str = None, json_format: bool = False) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(numeric_level)
 
-    # Clear any existing handlers
-    root_logger.handlers.clear()
+    _remove_owned_handlers(root_logger)
 
     # Console handler
     console_handler = logging.StreamHandler(sys.stderr)
+    console_handler._northflux_owned = True
     console_handler.setLevel(numeric_level)
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
@@ -168,18 +182,24 @@ def configure_module_loggers(formatter: logging.Formatter, level: int) -> None:
 
     # Scanner logger
     scanner_logger = logging.getLogger("northflux.scanner")
+    _remove_owned_handlers(scanner_logger)
+    scanner_logger.setLevel(level)
     scanner_handler = create_rotating_handler(SCANNER_LOG, formatter)
     scanner_handler.setLevel(level)
     scanner_logger.addHandler(scanner_handler)
 
     # Dashboard logger
     dashboard_logger = logging.getLogger("northflux.dashboard")
+    _remove_owned_handlers(dashboard_logger)
+    dashboard_logger.setLevel(level)
     dashboard_handler = create_rotating_handler(DASHBOARD_LOG, formatter)
     dashboard_handler.setLevel(level)
     dashboard_logger.addHandler(dashboard_handler)
 
     # Audit logger (always INFO level for important events)
     audit_logger = logging.getLogger("northflux.audit")
+    _remove_owned_handlers(audit_logger)
+    audit_logger.setLevel(logging.INFO)
     audit_handler = create_rotating_handler(AUDIT_LOG, formatter)
     audit_handler.setLevel(logging.INFO)
     audit_logger.addHandler(audit_handler)

@@ -34,7 +34,19 @@ function errorDetail(payload: unknown, fallback: string): string {
   if (typeof payload === 'object' && payload !== null && 'detail' in payload) {
     const detail = (payload as { detail?: unknown }).detail
     if (typeof detail === 'string') return detail
-    if (Array.isArray(detail)) return detail.map(String).join(', ')
+    if (Array.isArray(detail)) {
+      const messages = detail.flatMap((issue) => {
+        if (typeof issue === 'string') return [issue]
+        if (!issue || typeof issue !== 'object' || typeof issue.msg !== 'string') return []
+        // FastAPI validation issues can contain the original input, including
+        // credentials. Only render the field location and readable message.
+        const location = Array.isArray(issue.loc)
+          ? issue.loc.filter((part: unknown) => (typeof part === 'string' || typeof part === 'number') && !['body', 'query', 'path'].includes(String(part))).join('.')
+          : ''
+        return [location ? `${location}: ${issue.msg}` : issue.msg]
+      })
+      return messages.join(', ') || fallback
+    }
   }
   return fallback
 }
@@ -83,7 +95,10 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     if (response.status === 401) unauthorizedHandler?.()
     throw new ApiError(response.status, errorDetail(payload, response.statusText || 'Request failed'))
   }
-  if (unreadable) throw new ApiError(502, 'NorthFlux received an unreadable response from the service. Please try again.')
+  // Our API routes return JSON objects. A proxy login page or JSON null must
+  // not become a successful response that crashes a page or implies success.
+  const unexpectedApiResponse = path.startsWith('/api/') && (!contentType.includes('application/json') || payload === null || typeof payload !== 'object')
+  if (unreadable || unexpectedApiResponse) throw new ApiError(502, 'NorthFlux received an unreadable response from the service. Please try again.')
 
   return payload as T
 }

@@ -85,6 +85,7 @@ describe('DMARC generation', () => {
       expect(result.value.value).toContain('pct=0')
       expect(result.value.value).toContain('rua=mailto:reports@example.com')
     }
+    expect(result.warnings.some((warning) => warning.field === 'percentage' && /legacy/i.test(warning.message) && /not.*guarantee/i.test(warning.message))).toBe(true)
   })
 
   it('validates percentage and report addresses', () => {
@@ -196,6 +197,13 @@ describe('Generated DNS owner length', () => {
 })
 
 describe('BIMI generation', () => {
+  it('does not let URL semicolons create extra BIMI record tags', () => {
+    const result = generateBimi({ domain: 'example.com', selector: 'default', logoUrl: 'https://assets.example.com/logo;a=unexpected.svg', certificateUrl: 'https://assets.example.com/cert;v=other,extra.pem' })
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value.value).toBe('v=BIMI1; l=https://assets.example.com/logo%3Ba=unexpected.svg; a=https://assets.example.com/cert%3Bv=other%2Cextra.pem')
+    }
+  })
   it('builds a BIMI record without inventing an RFC claim', () => {
     const result = generateBimi({
       domain: 'example.com',

@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 SEVERITY_ORDER = {"OK": 0, "INFO": 1, "WARN": 2, "HIGH": 3, "CRITICAL": 4, "ERROR": 5}
 SCORE_BASE = 100
 
-# Weighted scoring - based on RFC compliance and security impact
+# Project-specific checklist weighting, not an RFC or commercial risk score.
 # References: RFC 7208 (SPF), RFC 6376 (DKIM), RFC 7489 (DMARC), RFC 8461 (MTA-STS)
 SCORE_WEIGHTS = {
     "CRITICAL": 40,  # Fundamental failures
@@ -15,6 +15,13 @@ SCORE_WEIGHTS = {
 
 # Severity explanations for user education
 SEVERITY_EXPLANATIONS = {
+    "ERROR": {
+        "title": "Incomplete scan",
+        "description": "Some checks could not be completed or returned ambiguous evidence.",
+        "impact": "This scan cannot establish a reliable overall grade or authorise automatic changes.",
+        "urgency": "Review the scan notes and retry before changing DNS.",
+        "color": "#64748b",
+    },
     "CRITICAL": {
         "title": "Critical Security Issue",
         "description": "This represents a fundamental security failure that leaves your domain completely vulnerable to email attacks.",
@@ -55,7 +62,7 @@ SEVERITY_EXPLANATIONS = {
 # Rule explanations with why and how to fix
 RULE_EXPLANATIONS = {
     "R1_MX_MISSING": {
-        "why": "MX (Mail Exchange) records tell other mail servers where to deliver email for your domain. Without MX records, your domain cannot receive any email.",
+        "why": "MX records identify incoming mail servers. Without MX, SMTP may fall back to the domain's A/AAAA addresses; that fallback is not tested here. A null MX explicitly declines incoming mail.",
         "fix": "Add MX records pointing to your email provider's mail servers (e.g., Google Workspace, Microsoft 365, or your own mail server).",
         "example": "example.com. IN MX 10 mail.example.com.",
         "rfc": "RFC 5321",
@@ -73,7 +80,7 @@ RULE_EXPLANATIONS = {
         "rfc": "RFC 7208 Section 4.6.4",
     },
     "R3B_SPF_PERMISSIVE": {
-        "why": "Using +all or ?all in SPF means any server can send email as your domain. This completely negates SPF protection.",
+        "why": "SPF +all returns Pass for any sender. SPF ?all returns Neutral, making no positive or negative assertion about other senders. Neither restricts them through SPF.",
         "fix": "Change to ~all (softfail) or preferably -all (hardfail) to restrict unauthorised senders.",
         "example": "v=spf1 include:_spf.google.com -all",
         "rfc": "RFC 7208",
@@ -92,19 +99,19 @@ RULE_EXPLANATIONS = {
     },
     "R5_DMARC_NONE": {
         "why": "DMARC p=none means authentication failures are reported but not blocked. Attackers can still spoof your domain - you're just monitoring them.",
-        "fix": "After monitoring for 2-4 weeks with p=none, upgrade to p=quarantine or p=reject to enforce blocking.",
+        "fix": "Review actual mail reports and indirect-mail cases before choosing enforcement. Quarantine is a valid option; reject is not suitable for every domain.",
         "example": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
         "rfc": "RFC 7489",
     },
     "R5B_DMARC_QUARANTINE": {
-        "why": "DMARC p=quarantine sends suspicious emails to spam. This is good, but p=reject provides the strongest protection.",
-        "fix": "Consider upgrading to p=reject once you're confident all legitimate mail passes DMARC.",
-        "example": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
-        "rfc": "RFC 7489",
+        "why": "DMARC p=quarantine requests enforcement for failing mail. Receivers retain local discretion; this policy does not guarantee inbox or spam-folder delivery.",
+        "fix": "Quarantine is a valid enforcement choice. RFC 9989 advises against reject for general-purpose domains; review intended use and indirect-mail compatibility with the domain owner.",
+        "example": "v=DMARC1; p=quarantine; rua=mailto:reports@example.com",
+        "rfc": "RFC 9989 Section 7.4 (legacy checklist weighting retained)",
     },
     "R5C_DMARC_PCT": {
-        "why": "DMARC pct= controls what percentage of failing messages the policy applies to. A value below 100 means some spoofed emails bypass your DMARC policy entirely.",
-        "fix": "Set pct=100 (or remove the pct tag, which defaults to 100) so the policy applies to all messages.",
+        "why": "Legacy DMARC pct requested partial enforcement under RFC 7489. RFC 9989 removes this tag, and receivers may ignore it; it is not a reliable delivery percentage.",
+        "fix": "Review the current DMARC standard and actual mail reports before changing enforcement. Do not rely on pct for a safe rollout.",
         "example": "v=DMARC1; p=reject; pct=100; rua=mailto:dmarc@example.com",
         "rfc": "RFC 7489",
     },
@@ -151,16 +158,16 @@ RULE_EXPLANATIONS = {
         "rfc": "RFC 8996",
     },
     "R12_NO_STRICT_POLICY": {
-        "why": "Neither your SPF nor DMARC policies enforce strict rejection. This means spoofed emails may still be delivered.",
-        "fix": "Set SPF to -all (hardfail) and/or DMARC to p=reject for maximum protection.",
+        "why": "This legacy checklist notes when SPF -all and DMARC reject are both absent. It is not proof of unsafe delivery; quarantine is valid enforcement and SPF outcomes are not receiver disposition commands.",
+        "fix": "Review policy choices against actual senders and domain use. Do not change to reject just to improve a checklist grade.",
         "example": "SPF: -all | DMARC: p=reject",
         "rfc": "RFC 7208 / RFC 7489",
     },
     "R13_BIMI_MISSING": {
-        "why": "BIMI (Brand Indicators for Message Identification) displays your brand logo next to emails in supporting clients (Gmail, Apple Mail, Yahoo). It boosts brand trust and proves domain legitimacy.",
+        "why": "BIMI can display a brand logo in supporting mail clients. An enforcing DMARC policy at 100% is a prerequisite, not a guarantee of logo display or proof that a message is safe.",
         "fix": "Create a BIMI DNS record at default._bimi.yourdomain.com pointing to an SVG Tiny PS logo. For full support, obtain a Verified Mark Certificate (VMC).",
         "example": 'default._bimi.example.com. IN TXT "v=BIMI1; l=https://example.com/logo.svg; a="',
-        "rfc": "RFC 9495 (BIMI)",
+        "rfc": "BIMI Group implementation guide: https://bimigroup.org/implementation-guide/",
     },
     "R14_RBL_LISTED": {
         "why": "One or more IP addresses behind your MX servers are listed on email blacklists (DNSBLs). This can cause your outbound emails to be rejected or sent to spam by receiving servers.",
@@ -197,8 +204,10 @@ def get_rule_explanation(rule_id: str) -> Dict:
 
 def rule_mx_missing(r: Dict) -> Tuple[str, str, str]:
     """R1: MX records are fundamental for receiving email (RFC 5321)."""
+    if r.get("null_mx"):
+        return ("", "OK", "")  # Intentional no-mail configuration, not a defect.
     return (
-        ("R1_MX_MISSING", "HIGH", "No MX records found - domain cannot receive email")
+        ("R1_MX_MISSING", "HIGH", "No explicit MX records found - review incoming mail routing")
         if not r.get("mx_present", False)
         else ("", "OK", "")
     )
@@ -232,7 +241,8 @@ def rule_spf_all_permissive(r: Dict) -> Tuple[str, str, str]:
     """R3b: SPF +all or ?all is too permissive."""
     spf_all = (r.get("spf_all", "") or "").lower()
     if r.get("spf_present", False) and spf_all in ("+all", "?all"):
-        return ("R3B_SPF_PERMISSIVE", "HIGH", f"SPF uses {spf_all} - allows any sender")
+        outcome = "passes any sender" if spf_all == "+all" else "returns Neutral for other senders"
+        return ("R3B_SPF_PERMISSIVE", "HIGH", f"SPF uses {spf_all} - {outcome}")
     return ("", "OK", "")
 
 
@@ -274,25 +284,28 @@ def rule_dmarc_none(r: Dict) -> Tuple[str, str, str]:
 
 
 def rule_dmarc_quarantine(r: Dict) -> Tuple[str, str, str]:
-    """R5b: DMARC p=quarantine is good but p=reject is stronger."""
+    """R5b: Retained legacy checklist notice; quarantine is valid enforcement."""
     pol = (r.get("dmarc_policy", "") or "").lower()
     if r.get("dmarc_present", False) and pol == "quarantine":
         return (
             "R5B_DMARC_QUARANTINE",
             "INFO",
-            "DMARC p=quarantine - consider upgrading to p=reject",
+            "DMARC p=quarantine is an enforcement policy - retain or change only after a domain-use review",
         )
     return ("", "OK", "")
 
 
 def rule_dmarc_pct(r: Dict) -> Tuple[str, str, str]:
     """R5c: DMARC pct<100 means policy doesn't apply to all messages."""
-    pct = r.get("dmarc_pct", 100)
+    try:
+        pct = int(r.get("dmarc_pct", 100))
+    except (ValueError, TypeError):
+        return ("", "OK", "")
     if r.get("dmarc_present", False) and pct < 100:
         return (
             "R5C_DMARC_PCT",
             "WARN",
-            f"DMARC pct={pct}% - policy only applies to {pct}% of messages",
+            f"Legacy DMARC pct={pct} - receiver behaviour varies; RFC 9989 removes this tag",
         )
     return ("", "OK", "")
 
@@ -339,6 +352,8 @@ def rule_dkim_test(r: Dict) -> Tuple[str, str, str]:
 
 def rule_mta_sts_missing(r: Dict) -> Tuple[str, str, str]:
     """R8: MTA-STS enforces TLS for mail delivery (RFC 8461)."""
+    if r.get("null_mx"):
+        return ("", "OK", "")
     return (
         (
             "R8_MTA_STS_MISSING",
@@ -364,6 +379,8 @@ def rule_mta_sts_mode(r: Dict) -> Tuple[str, str, str]:
 
 def rule_tls_rpt_missing(r: Dict) -> Tuple[str, str, str]:
     """R10: TLS-RPT enables TLS failure reporting (RFC 8460)."""
+    if r.get("null_mx"):
+        return ("", "OK", "")
     return (
         (
             "R10_TLS_RPT_MISSING",
@@ -400,19 +417,20 @@ def rule_no_reject_policy(r: Dict) -> Tuple[str, str, str]:
             return (
                 "R12_NO_STRICT_POLICY",
                 "INFO",
-                "Neither SPF nor DMARC have strict enforcement",
+                "Legacy policy checklist: review domain needs; quarantine is valid and reject is not universally appropriate",
             )
     return ("", "OK", "")
 
 def rule_bimi_missing(r: Dict) -> Tuple[str, str, str]:
-    """R13: BIMI enables brand logo display in supporting email clients (RFC 9495)."""
-    # Only flag if domain has DMARC p=reject/quarantine (BIMI requires it)
+    """R13: Suggest optional branding only when basic DMARC prerequisites hold."""
     dmarc_pol = (r.get("dmarc_policy", "") or "").lower()
-    if dmarc_pol in ("reject", "quarantine") and not r.get("bimi_present", False):
+    subpolicy = (r.get("dmarc_sp") or dmarc_pol).lower()
+    if (dmarc_pol in ("reject", "quarantine") and subpolicy in ("reject", "quarantine")
+            and str(r.get("dmarc_pct", 100)) == "100" and not r.get("bimi_present", False)):
         return (
             "R13_BIMI_MISSING",
             "INFO",
-            "BIMI record not found &#8212; domain qualifies but no brand logo configured",
+            "BIMI record not found - optional branding; check logo, certificate and mailbox-provider requirements",
         )
     return ("", "OK", "")
 
@@ -546,7 +564,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
     remediations = []
 
     # MX missing
-    if not result.get("mx_present", False):
+    if not result.get("mx_present", False) and not result.get("null_mx"):
         remediations.append(
             {
                 "rule": "R1_MX_MISSING",
@@ -626,7 +644,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R5_DMARC_NONE",
                     "priority": "WARN",
-                    "description": "Upgrade DMARC policy from p=none to p=quarantine or p=reject",
+                    "description": "Review sender reports before choosing an enforcement policy; quarantine may be appropriate",
                     "example": f'_dmarc.{domain}. IN TXT "v=DMARC1; p=reject; rua=mailto:dmarc@{domain}"',
                     "reference": "NCSC recommends p=reject for full protection",
                 }
@@ -636,9 +654,9 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R5B_DMARC_QUARANTINE",
                     "priority": "INFO",
-                    "description": "Upgrade DMARC policy from p=quarantine to p=reject",
-                    "example": f'_dmarc.{domain}. IN TXT "v=DMARC1; p=reject; rua=mailto:dmarc@{domain}"',
-                    "reference": "RFC 7489",
+                    "description": "Quarantine is valid enforcement; review domain use before any policy change",
+                    "example": "General-purpose domains should not switch to reject solely for a higher score",
+                    "reference": "RFC 9989 Section 7.4",
                 }
             )
 
@@ -648,9 +666,9 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R5C_DMARC_PCT",
                     "priority": "WARN",
-                    "description": f"DMARC pct={pct}% &#8212; increase to 100% for full coverage",
-                    "example": "Remove pct= tag or set pct=100",
-                    "reference": "RFC 7489",
+                    "description": f"Legacy DMARC pct={pct}; receivers may ignore this retired tag",
+                    "example": "Review RFC 9989 and actual reports before changing enforcement",
+                    "reference": "RFC 9989 Appendix A.6",
                 }
             )
 
@@ -667,7 +685,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
             )
 
     # MTA-STS missing
-    if not result.get("mta_sts_present", False):
+    if not result.get("mta_sts_present", False) and not result.get("null_mx"):
         remediations.append(
             {
                 "rule": "R8_MTA_STS_MISSING",
@@ -691,7 +709,7 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
             )
 
     # TLS-RPT missing
-    if not result.get("tls_rpt_present", False):
+    if not result.get("tls_rpt_present", False) and not result.get("null_mx"):
         remediations.append(
             {
                 "rule": "R10_TLS_RPT_MISSING",
@@ -748,21 +766,21 @@ def generate_remediation(result: Dict) -> List[Dict[str, str]]:
                 {
                     "rule": "R12_NO_STRICT_POLICY",
                     "priority": "INFO",
-                    "description": "Neither SPF nor DMARC enforce strict rejection",
-                    "example": "Set SPF to -all and/or DMARC to p=reject",
-                    "reference": "RFC 7208 / RFC 7489",
+                    "description": "Review policy choices using sender evidence, not a checklist score",
+                    "example": "Quarantine is valid enforcement; reject is context-dependent",
+                    "reference": "RFC 7208 / RFC 9989 Section 7.4",
                 }
             )
 
     # BIMI missing (only suggest if DMARC is quarantine or reject)
-    if dmarc_pol in ("reject", "quarantine") and not result.get("bimi_present", False):
+    if rule_bimi_missing(result)[1] != "OK":
         remediations.append(
             {
                 "rule": "R13_BIMI_MISSING",
                 "priority": "INFO",
                 "description": "Add BIMI record to display your brand logo in email clients",
                 "example": f'default._bimi.{domain}. IN TXT "v=BIMI1; l=https://{domain}/logo.svg; a="',
-                "reference": "RFC 9495 - BIMI",
+                "reference": "https://bimigroup.org/implementation-guide/",
             }
         )
 

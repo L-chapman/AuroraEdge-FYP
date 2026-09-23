@@ -95,10 +95,10 @@ export function DomainsPage() {
         <div className="section-heading"><div><p className="eyebrow">Start with a domain</p><h2>Add a business domain</h2></div></div>
         <form className="inline-form" onSubmit={submit} noValidate>
           <Field label="Domain" htmlFor="managed-domain" error={error || undefined}>
-            <input id="managed-domain" value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="example.com" />
+            <input id="managed-domain" value={domain} disabled={addMutation.isPending} onChange={(event) => setDomain(event.target.value)} placeholder="example.com" />
           </Field>
           <Field label="Notes (optional)" htmlFor="managed-notes">
-            <input id="managed-notes" value={notes} maxLength={500} onChange={(event) => setNotes(event.target.value)} placeholder="Primary customer mail domain" />
+            <input id="managed-notes" value={notes} maxLength={500} disabled={addMutation.isPending} onChange={(event) => setNotes(event.target.value)} placeholder="Primary customer mail domain" />
           </Field>
           <Button type="submit" disabled={addMutation.isPending}>{addMutation.isPending ? 'Adding and scanning…' : 'Add domain'}</Button>
         </form>

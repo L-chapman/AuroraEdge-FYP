@@ -306,12 +306,15 @@ class NorthFluxDatabase:
         # Merge result and evaluation
         combined = {**result, **evaluation, "domain": domain}
 
-        try:
-            with self._lock:
+        with self._lock:
+            try:
                 self._save_result_inner(scan_id, domain, result, evaluation, combined, now)
-        except sqlite3.Error as e:
-            logger.error("Failed to save result for %s: %s", domain, e)
-            raise
+            except Exception:
+                # The result row and domain summary are one operation. A later
+                # unrelated commit must never persist half a failed save.
+                self.conn.rollback()
+                logger.exception("Failed to save result for %s", domain)
+                raise
 
     def _save_result_inner(
         self, scan_id: str, domain: str, result: Dict, evaluation: Dict,
@@ -910,6 +913,9 @@ class NorthFluxDatabase:
         with self._lock:
             try:
                 cursor = self.conn.cursor()
+                affected_scans = [row[0] for row in cursor.execute(
+                    "SELECT DISTINCT scan_id FROM results WHERE domain = ?", (d,)
+                )]
                 cursor.execute("DELETE FROM results WHERE domain = ?", (d,))
                 deleted = cursor.rowcount
                 cursor.execute("DELETE FROM domains WHERE domain = ?", (d,))
@@ -921,12 +927,19 @@ class NorthFluxDatabase:
                        WHERE domain = ?""",
                     (d,),
                 )
-                cursor.execute(
-                    """DELETE FROM scans
-                       WHERE NOT EXISTS (
-                           SELECT 1 FROM results WHERE results.scan_id = scans.scan_id
-                       )"""
-                )
+                # Only prune completed sessions affected by this deletion;
+                # unrelated (or still running CLI) sessions must survive.
+                for scan_id in affected_scans:
+                    cursor.execute(
+                        """UPDATE scans SET domain_count =
+                           (SELECT COUNT(*) FROM results WHERE scan_id = ?)
+                           WHERE scan_id = ?""", (scan_id, scan_id)
+                    )
+                    cursor.execute(
+                        """DELETE FROM scans WHERE scan_id = ?
+                           AND completed_at IS NOT NULL AND domain_count = 0""",
+                        (scan_id,),
+                    )
                 self.conn.commit()
                 # Treat domain-history deletion like the global clear for
                 # concurrency purposes.  Otherwise an earlier in-flight scan

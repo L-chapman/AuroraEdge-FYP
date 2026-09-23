@@ -2,7 +2,7 @@
 
 ## Cloudflare
 
-Cloudflare is optional and is used only for supported DNS remediation and MTA-STS Worker deployment. Read-only scanning works without it.
+Cloudflare is optional. Read-only scanning works without it. The current generated recommendations are all manual: SPF, DMARC, DKIM, TLS-RPT and MTA-STS need sender, destination or certificate-readiness checks that a DNS snapshot cannot supply. The retained automatic-remediation setting is a compatibility setting, not a promise that these findings will trigger writes. Guarded low-level DNS and Worker methods remain available for separately reviewed explicit integrations.
 
 The settings connection test makes read-only probes. A successful result confirms only what those reads establish; it does **not** prove that the token can edit DNS or deploy a Worker. Confirm permissions in Cloudflare and perform any live validation separately on an authorised test zone. The [deep-debug review](DEEP_DEBUG_REVIEW.md) does not claim a live Cloudflare write or deployment test.
 
@@ -23,6 +23,10 @@ Before any write, NorthFlux verifies that the target is the configured zone or o
 Incomplete scans produce manual review advice, with no automatic fix. When SPF is missing, first identify every authorised sender and obtain each provider's instructions; NorthFlux does not invent a default sending provider. DKIM is not generated automatically. MX records can suggest a provider but cannot safely reveal tenant-specific public keys or selector targets; obtain the exact values from the mail provider's administration console.
 
 MTA-STS Worker deployment checks observed MX names and existing host/route records before changing anything. Conflicting records or routes require manual review; the fallback does not delete an existing DNS record to force a binding. This is a multi-step provider operation, not an atomic transaction. A failed deployment can still need operator inspection of changes already accepted by Cloudflare. Keep the original configuration and a rollback plan, and verify both the served HTTPS policy and DNS after an authorised deployment.
+
+Worker names now include a hash of the full domain to avoid dot/hyphen collisions. An existing same-name script is not overwritten automatically. Older Worker deployments need manual migration and policy review. The application prevents overlapping same-domain remediation orchestration within its one process; direct low-level calls and external administrators are not coordinated by that lock.
+
+Legacy live-DNS demo reset/restore scripts are retired. Their offline preview remains available, but they must not be used to weaken a public zone or as a rollback mechanism. See the [function audit](FUNCTION_AUDIT.md) for the safety rationale and current standards limitations.
 
 ## Reverse proxy
 

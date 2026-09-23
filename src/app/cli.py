@@ -435,7 +435,8 @@ def print_summary(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
     table.add_column("Violations", justify="right")
 
     for domain, res, ev in rows:
-        grade = ev.get("grade", "F")
+        incomplete = _incomplete_result(res, ev)
+        grade = "Incomplete" if incomplete else ev.get("grade", "F")
         severity = ev.get("severity", "OK")
 
         # Format checkmarks/crosses with colours
@@ -465,7 +466,7 @@ def print_summary(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
         table.add_row(
             domain,
             f"[{get_grade_color(grade)}]{grade}[/]",
-            str(ev.get("score", 0)),
+            "Not available" if incomplete else str(ev.get("score", 0)),
             f"[{get_severity_color(severity)}]{severity}[/]",
             spf,
             dmarc,
@@ -476,18 +477,22 @@ def print_summary(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
 
     console.print()
     console.print(table)
+    for domain, res, ev in rows:
+        notes = _report_notes(res, ev)
+        if notes:
+            console.print(f"{domain}: {notes}", markup=False)
 
     # Print summary stats
-    scores = [ev.get("score", 0) for _, _, ev in rows]
-    avg_score = sum(scores) / len(scores) if scores else 0
+    scores = [ev.get("score", 0) for _, res, ev in rows if not _incomplete_result(res, ev)]
+    avg_score = f"{sum(scores) / len(scores):.1f}" if scores else "Not available"
 
     console.print()
     console.print(
         Panel(
             f"[bold]Domains scanned:[/] {len(rows)}  |  "
-            f"[bold]Average score:[/] {avg_score:.1f}  |  "
-            f"[bold]Min:[/] {min(scores) if scores else 0}  |  "
-            f"[bold]Max:[/] {max(scores) if scores else 0}",
+            f"[bold]Average score:[/] {avg_score}  |  "
+            f"[bold]Min:[/] {min(scores) if scores else 'Not available'}  |  "
+            f"[bold]Max:[/] {max(scores) if scores else 'Not available'}",
             title="Summary",
             border_style="cyan",
         )
@@ -501,6 +506,9 @@ def print_remediation(rows: List[Tuple[str, Dict, Dict]], console: "Console"):
     console.print()
 
     for domain, res, ev in rows:
+        if _incomplete_result(res, ev):
+            console.print(f"{domain}: {_report_notes(res, ev)}", markup=False)
+            continue
         if ev.get("severity") in ("WARN", "HIGH", "CRITICAL"):
             res_with_domain = {**res, "domain": domain}
             remediations = generate_remediation(res_with_domain)
@@ -573,13 +581,16 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
     # Collect target domains
     targets = []
     if args.domain:
-        targets.append(args.domain.strip())
+        domain = args.domain.strip().lower()
+        if not is_valid_domain(domain):
+            parser.error("--domain must be a valid domain name, for example example.com")
+        targets.append(domain)
     if args.domains:
         p = Path(args.domains)
         if p.exists():
             raw_lines = [
                 line.strip()
-                for line in p.read_text(encoding="utf-8").splitlines()
+                for line in p.read_text(encoding="utf-8-sig").splitlines()
                 if line.strip() and not line.strip().startswith("#")
             ]
             for line in raw_lines:
@@ -642,6 +653,9 @@ Checks: SPF (RFC 7208), DKIM (RFC 6376), DMARC (RFC 7489),
     elif not args.quiet:
         print("\nResults:")
         for domain, res, ev in rows:
+            if _incomplete_result(res, ev):
+                print(f"  {domain}: {_report_notes(res, ev)}")
+                continue
             print(
                 f"  {domain}: Grade={ev.get('grade', 'F')} Score={ev.get('score', 0)} Severity={ev.get('severity', 'OK')}"
             )

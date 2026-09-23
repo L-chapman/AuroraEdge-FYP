@@ -36,7 +36,7 @@ The local application is reached at `http://127.0.0.1:8080`; it is not available
 - A private host or VM with persistent storage
 - An HTTPS reverse proxy for access beyond the same computer (a trusted front-end service that handles encrypted browser connections)
 - A long random dashboard token
-- Optional least-privilege Cloudflare credentials for authorised remediation
+- Optional least-privilege Cloudflare credentials for provider reads or separately reviewed integrations
 
 The Docker build prepares the React interface in a separate build stage. Node.js is not required on the deployment host and is not present in the final image. Docker must be configured to run Linux containers, including on Windows. A source-based deployment without Docker additionally requires Node.js 22.12 or newer to create `frontend/dist`.
 
@@ -62,7 +62,7 @@ NORTHFLUX_LOG_LEVEL=INFO
 
 Generate a token with a password manager or a cryptographically secure tool. Do not commit `.env`.
 
-If remediation is required, supply a scoped Cloudflare API token and zone ID through the host's protected service environment or secret manager. Compose variable support is provided for a small private deployment, but environment variables may be visible to host administrators and container-inspection commands.
+If a Cloudflare connection is required, supply a scoped API token and zone ID through the host's protected service environment or secret manager. Current generated recommendations require manual review and do not trigger writes, even when the retained automatic-remediation setting is enabled. Compose variable support is provided for a small private deployment, but environment variables may be visible to host administrators and container-inspection commands.
 
 ## Start
 
@@ -145,18 +145,18 @@ The deprecated server-rendered interface remains available only when development
 
 ## Safe remediation rollout
 
-Monitoring and automatic remediation are separate settings and are disabled by default. Recommended rollout:
+Monitoring is disabled by default. Current generated DNS recommendations are manual-review only; the retained automatic-remediation setting is a compatibility control, not an unattended deployment feature. Recommended rollout:
 
 1. Add one domain you own or are explicitly authorised to manage.
 2. Run read-only scans and review the proposed records.
 3. Confirm the configured Cloudflare zone and the token's permissions in Cloudflare. NorthFlux's connection test reads data; it does not prove DNS write permission.
-4. Test a manual fix on a controlled record.
-5. Enable monitoring.
-6. Enable automatic remediation only after the audit log and recovery path have been verified.
+4. Confirm provider-specific values, sender coverage and mail-server readiness before testing a manual fix on a controlled record.
+5. Verify both provider state and actual mail behaviour, and keep a tested recovery path.
+6. Enable read-only monitoring if required. Leave the compatibility remediation setting disabled; it does not make current recommendations automatic.
 
 An incomplete scan never authorises an automatic fix. Failed or ambiguous prerequisite DNS reads also stop a proposed change. New SPF records require an operator-confirmed list of sending services; NorthFlux does not assume a mail provider. DKIM remains manual because provider-specific selector targets and public keys cannot be inferred safely from MX records alone.
 
-The automated suite does not perform live DNS writes or deploy MTA-STS Workers. Use a controlled zone and an approved rollback plan for those checks, and inspect both the provider state and the audit log afterwards. See [Integrations](INTEGRATIONS.md) for credential scope and deployment limits.
+The automated suite does not perform live DNS writes or deploy MTA-STS Workers. The guarded low-level methods are retained for separately reviewed integrations, not the generated-recommendation workflow. Use a controlled zone and an approved rollback plan for any such checks, and inspect both the provider state and the audit log afterwards. See [Integrations](INTEGRATIONS.md) for credential scope and deployment limits.
 
 ## Configuration reference
 

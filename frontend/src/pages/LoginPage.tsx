@@ -9,7 +9,7 @@ import { Icon } from '../components/Icon'
 import { Button, Field, InlineNotice, LoadingState } from '../components/ui'
 
 interface LocationState {
-  from?: { pathname?: string }
+  from?: { pathname?: string; search?: string; hash?: string }
   reason?: string
 }
 
@@ -23,7 +23,7 @@ export function LoginPage() {
 
   if (loading) return <LoadingState label="Preparing secure sign in" fullPage />
   if (session && (!session.required || session.authenticated)) {
-    return <Navigate to={state.from?.pathname ?? '/'} replace />
+    return <Navigate to={{ pathname: state.from?.pathname ?? '/', search: state.from?.search ?? '', hash: state.from?.hash ?? '' }} replace />
   }
 
   const submit = async (event: FormEvent) => {

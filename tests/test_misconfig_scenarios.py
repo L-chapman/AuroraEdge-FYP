@@ -221,7 +221,8 @@ class TestSingleRuleMisconfig:
     def test_r5b_remediation(self):
         rems = generate_remediation(_perfect(dmarc_policy="quarantine"))
         fix = next(r for r in rems if r["rule"] == "R5B_DMARC_QUARANTINE")
-        assert "p=reject" in fix["example"]
+        assert "valid enforcement" in fix["description"]
+        assert "should not switch" in fix["example"]
 
     # -- R5C: DMARC pct < 100 --------------------------------------------
     def test_r5c_dmarc_pct_50(self):
@@ -351,7 +352,8 @@ class TestSingleRuleMisconfig:
     def test_r12_remediation(self):
         rems = generate_remediation(_perfect(spf_all="~all", dmarc_policy="quarantine"))
         fix = next(r for r in rems if r["rule"] == "R12_NO_STRICT_POLICY")
-        assert "strict" in fix["description"].lower()
+        assert "sender evidence" in fix["description"].lower()
+        assert "context-dependent" in fix["example"]
 
     # -- R13: BIMI missing (only when DMARC is reject/quarantine) --------
     def test_r13_bimi_missing_with_reject(self):
@@ -750,6 +752,7 @@ class TestScannerMisconfigs:
 
     def test_scan_no_spf_no_mx(self, monkeypatch):
         """Domain with no SPF and no MX records."""
+        monkeypatch.setattr(scanner, "_domain_exists", lambda d: True)
         monkeypatch.setattr(scanner, "_spf_fetch", lambda d: None)
         monkeypatch.setattr(scanner, "_spf_count", lambda d: (0, ""))
         monkeypatch.setattr(scanner, "_mx", lambda d: [])

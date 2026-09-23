@@ -36,15 +36,15 @@ class TestToolComparison:
             for feature in required_features:
                 assert feature in data, f"{tool} missing feature: {feature}"
 
-    def test_northflux_has_all_features(self):
-        """Verify NorthFlux Security implements all checked features."""
+    def test_northflux_reports_observed_checks_and_manual_remediation(self):
+        """Presence checks must not advertise unattended DNS remediation."""
         northflux = TOOL_COMPARISON.get("NorthFlux Security", {})
         checks = northflux.get("checks", [])
         assert "SPF" in checks
         assert "DKIM" in checks
         assert "DMARC" in checks
         assert "MTA-STS" in checks
-        assert northflux.get("auto_fix") is True
+        assert northflux.get("auto_fix") is False
         assert northflux.get("api") is True
 
     def test_comparison_report_generation(self):
@@ -56,6 +56,17 @@ class TestToolComparison:
         assert "NorthFlux Security" in report
         assert "Open Source / Academic" not in report
         assert len(report) > 500  # Should be substantial
+
+    def test_unverified_vendor_features_are_not_negative_claims(self):
+        for name, data in TOOL_COMPARISON.items():
+            if name != "NorthFlux Security":
+                assert data["auto_fix"] is None
+                assert data["api"] is None
+                assert data["assessment"] == "Not assessed"
+        report = generate_comparison_report()
+        row = next(line for line in report.splitlines() if line.startswith("| Auto-Fix DNS |"))
+        assert "Manual review" in row
+        assert row.count("Not assessed") == 4
 
 
 class TestScoringSystem:

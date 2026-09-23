@@ -23,11 +23,11 @@ React single-page application         |
                                    v
                         reports, alerts, settings
 
-Optional authorised write path:
+Separately reviewed low-level integration path (not generated recommendations):
 NorthFlux -> Cloudflare API -> verified DNS zone
 ```
 
-The application assesses public security signals for valid domains. HTTPS and SMTP scan connections require checked public destinations. DNS writes require configured credentials, confirmation that the requested domain belongs to the configured zone, and successful prerequisite reads. The connection test is read-only and cannot establish write permission.
+The application assesses public security signals for valid domains. HTTPS and SMTP scan connections require checked public destinations. Current generated DNS recommendations all require manual review and have no automatic write callback. Retained low-level write methods require configured credentials, confirmation that the requested domain belongs to the configured zone, and successful prerequisite reads. The connection test is read-only and cannot establish write permission.
 
 ## Components
 
@@ -39,7 +39,7 @@ Scan DNS queries use bounded public resolvers. HTTPS/SMTP destinations are resol
 
 ### `rules.py`
 
-Turns scanner observations into findings, severity, score, grade, explanations, and remediation recommendations. This separation allows the rules engine to be tested with deterministic inputs. Evaluation of incomplete observations is provisional: consumers must respect `scan_incomplete`, not treat a calculated value as a confirmed grade. Persistence, the React UI and saved PDF reports suppress the grade for these results, and remediation generation returns manual review with no automatic callback.
+Turns scanner observations into findings, severity, score, grade, explanations, and remediation recommendations. This separation allows the rules engine to be tested with deterministic inputs. Evaluation of incomplete observations is provisional: consumers must respect `scan_incomplete`, not treat a calculated value as a confirmed grade. Persistence, the React UI and saved PDF reports suppress the grade for these results. All current generated DNS recommendations, including those from complete scans, require manual review and have no automatic callback.
 
 ### `frontend/`
 
@@ -69,11 +69,11 @@ Additive schema updates retain existing rows. Incomplete scans are recorded with
 
 ### `dns_fix.py`
 
-Integrates with Cloudflare for authorised changes. The write layer checks zone ownership, selects TXT records by protocol prefix, refuses failed or ambiguous prerequisite reads, retains existing DMARC tags when changing policy, and records actions in an audit log. Missing SPF needs confirmed sending sources rather than an assumed provider. DKIM changes require provider-supplied values and remain manual. MTA-STS deployment checks existing host/route conflicts; provider operations remain multi-step and can require manual recovery after partial failure.
+Produces manual-review recommendations and retains guarded Cloudflare methods for separately reviewed integrations. Generated advice does not invoke these writes: sender coverage, reporting destinations and mail-server readiness cannot be inferred safely from a scan alone. The write layer checks zone ownership, selects TXT records by protocol prefix, refuses failed or ambiguous prerequisite reads, retains existing DMARC tags when changing policy, and records actions in an audit log. Missing SPF needs confirmed sending sources rather than an assumed provider. DKIM changes require provider-supplied values. MTA-STS deployment checks existing host/route conflicts; provider operations remain multi-step and can require manual recovery after partial failure.
 
 ### `cli.py`
 
-Provides single and batch scanning, report output, and explicit remediation commands for terminal workflows.
+Provides single and batch scanning, report output, and a retained remediation command. Current generated recommendations are manual, so that command does not automatically publish their proposed records.
 
 ### `analysis.py`
 
@@ -100,10 +100,10 @@ scan public services -> evaluate rules -> optionally store result/report
     |
 JSON response -> query cache -> accessible UI state
     |
-optional, separately confirmed and authorised Cloudflare write
+manual review of recommendations; no generated automatic write
 ```
 
-Viewing domain details is read-only. A scan is performed only through an explicit scan, rescan, or managed-domain onboarding request. A scan and managed-domain enrolment are separate choices, and DNS management requires a separate per-request opt-in in addition to the global setting.
+Viewing domain details is read-only. A scan is performed only through an explicit scan, rescan, or managed-domain onboarding request. A scan and managed-domain enrolment are separate choices. The retained global remediation and per-request opt-in settings are compatibility controls; neither turns current manual recommendations into automatic changes.
 
 ## Runtime and persistence
 
@@ -136,9 +136,9 @@ The deprecated server-rendered interface remains available as a development fall
 - Startup preserves scan history by default.
 - Demo mode is an explicit environment setting and is unavailable in production.
 - Scheduled monitoring is disabled by default.
-- Automatic remediation is a separate explicit opt-in.
+- Generated DNS recommendations are manual-review only. The retained automatic-remediation setting is disabled by default and does not make those recommendations write-capable.
 - Incomplete scans remain ungraded and do not authorise automatic remediation.
-- Adding a managed domain performs a read-only scan; DNS management requires both the global setting and explicit opt-in on that request.
+- Adding a managed domain performs a read-only scan; enabling retained remediation controls does not publish the generated recommendations.
 - Cloudflare writes are limited to the verified zone.
 - Multiple same-protocol TXT records cause the write to stop for manual review.
 - Failed prerequisite provider reads stop changes rather than being treated as missing records.

@@ -39,10 +39,10 @@ describe('API client', () => {
 
   it('normalises JSON and validation errors into ApiError', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
-      JSON.stringify({ detail: [{ loc: ['body', 'token'], msg: 'Required' }] }),
+      JSON.stringify({ detail: [{ loc: ['body', 'token'], msg: 'Required', input: 'do-not-display-this-token' }] }),
       { status: 422, statusText: 'Unprocessable', headers: { 'content-type': 'application/json' } },
     ))
-    await expect(apiRequest('/api/example')).rejects.toMatchObject({ name: 'ApiError', status: 422 })
+    await expect(apiRequest('/api/example')).rejects.toMatchObject({ name: 'ApiError', status: 422, detail: 'token: Required' })
   })
 
   it('uses a useful detail from API failures and handles offline requests', async () => {
@@ -65,6 +65,14 @@ describe('API client', () => {
   it('rejects an unreadable JSON success instead of handing null to page callbacks', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{broken', { status: 200, headers: { 'content-type': 'application/json' } }))
     await expect(apiRequest('/api/scan')).rejects.toMatchObject({ name: 'ApiError', detail: expect.stringContaining('unreadable') })
+  })
+
+  it.each([
+    ['text/html', '<html>A proxy sign-in page</html>'],
+    ['application/json', 'null'],
+  ])('rejects an unexpected %s success for a JSON API route', async (contentType, body) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers: { 'content-type': contentType } }))
+    await expect(apiRequest('/api/v1/dashboard')).rejects.toMatchObject({ status: 502, detail: expect.stringContaining('unreadable response') })
   })
 
   it('does not apply an obsolete 401 from an already cancelled request to the current session', async () => {
