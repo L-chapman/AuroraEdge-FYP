@@ -40,7 +40,7 @@ These are the main files kept as final evidence for the dissertation and marking
 - `README.md`
 - `docs/academic/archive/TESTING_GUIDE.md`
 - `docs/ARCHITECTURE.md`
-- `docs/architecture_diagram.svg`
+- [Historical architecture diagram](architecture_diagram.svg)
 - `docs/academic/archive/VERIFICATION_REPORT.md`
 - `docs/academic/archive/STATUS.md`
 - `docs/academic/archive/COMPETITOR_ANALYSIS.md`

@@ -55,7 +55,7 @@ For the full component map, request flow, and storage design, continue to [Archi
 
 ## What the test evidence does—and does not—show
 
-The [testing guide](TESTING.md) explains how to repeat the checks. The [deep-debug review](DEEP_DEBUG_REVIEW.md) records the release's findings and completed verification; older baseline results are labelled historical. Automated checks include backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene. Reported frontend coverage percentages apply to selected logic modules, not every UI page or interaction.
+The [testing guide](TESTING.md) explains how to repeat the checks. The [function audit](FUNCTION_AUDIT.md) records the latest review and completed verification; the [deep-debug review](DEEP_DEBUG_REVIEW.md) preserves the preceding review's evidence. Automated checks include backend behaviour, frontend logic, real browser journeys, security boundaries, container startup, and source-package hygiene. Reported frontend coverage percentages apply to selected logic modules, not every UI page or interaction.
 
 Browser tests use controlled sample scans and disable Cloudflare writes. This makes failures repeatable and prevents a test run from changing a live domain. It does **not** verify every external DNS service, every network, or an operator's real Cloudflare permissions. The settings connection test only reads provider data; it cannot prove write permission. No live Cloudflare write or production deployment is claimed by the deep-debug release. Those need separate, authorised checks on the intended deployment.
 

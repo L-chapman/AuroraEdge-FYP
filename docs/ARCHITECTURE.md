@@ -176,4 +176,4 @@ The React migration has already separated presentation from server behaviour. Th
 - Automated browser tests use deterministic scans and intentionally disable Cloudflare. No live Cloudflare write, Worker deployment or production deployment is claimed by this deep-debug pass.
 - Frontend coverage percentages cover selected deterministic modules, not the entire interface; browser and component checks provide separate evidence.
 
-See [Testing](TESTING.md) for the repeatable checks and the [deep-debug review](DEEP_DEBUG_REVIEW.md) for release-specific findings and verification evidence.
+See [Testing](TESTING.md) for the repeatable checks and the [function audit](FUNCTION_AUDIT.md) for the latest findings and verification evidence. The [deep-debug review](DEEP_DEBUG_REVIEW.md) remains the record for the preceding review.

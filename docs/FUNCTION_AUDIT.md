@@ -2,6 +2,8 @@
 
 Review date: 23 September 2026. Starting revision: `099a0e2` (the previous deep-debug release).
 
+This document records the audited snapshot, not a fresh test run for every later revision. The retired academic demo scripts and their script-specific tests were removed during the subsequent product cleanup. Their references below link to the preserved [audited source snapshot](https://github.com/L-chapman/AuroraEdge-FYP/tree/c94064f4a91b1e19ec14771e91bdfd4626ae9b19); historical review counts and test results are unchanged.
+
 ## What this review means
 
 This is a second code review and debugging pass, not a repetition of yesterday's test run. It examines the application by feature and implementation function, checks failure paths, researches current primary sources, and adds regression tests for confirmed faults.
@@ -55,11 +57,11 @@ Evidence: [protocol regressions](../tests/test_protocol_standards.py), [scanner]
 - Manual and scheduled changes for the same domain cannot run concurrently within the supported single application process. A second attempt receives a conflict instead of queuing a stale change.
 - An incomplete post-onboarding verification does not receive a score, grade or “improved” claim.
 - Worker naming includes the full domain identity, avoiding dot/hyphen collisions. Existing infrastructure is not silently overwritten; malformed or incomplete provider inventories block deployment and legacy deployments require review.
-- Legacy scripts that deliberately weaken a live demo domain are quarantined. Their write entry points stop before provider access; the web reset endpoint is retired. Offline demonstrations and explicit read-only lab checks remain available.
+- At the audited snapshot, legacy scripts that deliberately weaken a live demo domain were quarantined. Their write entry points stopped before provider access; the web reset endpoint was retired. Offline demonstrations and explicit read-only lab checks were retained then; the standalone demo scripts have since been removed from the current product.
 
 These are cooperative checks, not transactional rollback. An already submitted provider request cannot be recalled. A multi-step change can still partially succeed, and another application or administrator is outside the in-process lock.
 
-Evidence: [API/storage regressions](../tests/test_function_audit.py), [legacy-script safeguards](../tests/test_legacy_script_safety.py), [provider implementation](../src/app/dns_fix.py).
+Evidence: [API/storage regressions](../tests/test_function_audit.py), [legacy-script safeguards at the audited snapshot](https://github.com/L-chapman/AuroraEdge-FYP/blob/c94064f4a91b1e19ec14771e91bdfd4626ae9b19/tests/test_legacy_script_safety.py), [provider implementation](../src/app/dns_fix.py).
 
 ### Storage, search and authentication
 
@@ -150,11 +152,11 @@ Names are listed from the reviewed source, grouped by module; nested callbacks a
 
 - [verify_system.py](../verify_system.py): `setup_stdout_logging`, `parse_args`, `build_fallback_result`, `redirect_logging_to_stdout`, `choose_scan_result`, `main`.
 
-- [scripts/demo_prep.py](../scripts/demo_prep.py): `_db_path`, `_get_cf_creds`, `_cf_headers`, `_find_records`, `_delete_record`, `_create_record`, `break_records`, `restore_records`, `main`.
+- [scripts/demo_prep.py (retired; audited snapshot)](https://github.com/L-chapman/AuroraEdge-FYP/blob/c94064f4a91b1e19ec14771e91bdfd4626ae9b19/scripts/demo_prep.py): `_db_path`, `_get_cf_creds`, `_cf_headers`, `_find_records`, `_delete_record`, `_create_record`, `break_records`, `restore_records`, `main`.
 
 - [scripts/e2e_server.py](../scripts/e2e_server.py): `_clean_runtime_root`, `_close_test_database`, `deterministic_scan`.
 
-- [scripts/lab_experiment.py](../scripts/lab_experiment.py): `LabExperiment.__init__`, `LabExperiment.run_detection_test`, `LabExperiment.run_fix_test`, `LabExperiment.wait_for_dns_propagation`, `LabExperiment.run_full_experiment`, `LabExperiment.generate_report`, `main`.
+- [scripts/lab_experiment.py (retired; audited snapshot)](https://github.com/L-chapman/AuroraEdge-FYP/blob/c94064f4a91b1e19ec14771e91bdfd4626ae9b19/scripts/lab_experiment.py): `LabExperiment.__init__`, `LabExperiment.run_detection_test`, `LabExperiment.run_fix_test`, `LabExperiment.wait_for_dns_propagation`, `LabExperiment.run_full_experiment`, `LabExperiment.generate_report`, `main`.
 
 </details>
 
