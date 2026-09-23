@@ -1,6 +1,6 @@
 # NorthFlux reviewer and interview guide
 
-NorthFlux started as Leon Chapman's independent home project, AuroraEdge, and later became his Belfast Metropolitan College final-year project. The repository keeps its original address so that the development history and existing links remain intact.
+NorthFlux started as Leon Chapman's independent home project, AuroraEdge, and later became his Belfast Metropolitan College final-year project. The current repository is [L-chapman/Northflux-security](https://github.com/L-chapman/Northflux-security); its AuroraEdge development history remains preserved.
 
 This is a suggested two-to-three-minute walkthrough and recording script, **not evidence that a recording or manual review has been completed**. Use the [release evidence](RELEASE_EVIDENCE.md) for checks actually performed against a named revision.
 

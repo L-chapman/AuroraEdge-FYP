@@ -172,7 +172,7 @@ The React suite passed **140 tests in 19 files**, type checking, linting and the
 
 Python syntax/undefined-name checks, high-severity static security checks, declared Python runtime/development dependency audits, the frontend dependency audit and isolated offline smoke check passed. These tools reported no known dependency vulnerabilities, not an absence of all possible security faults. Documentation-link and archive-safety regressions are included in the Python suite.
 
-The [GitHub workflow](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records cross-platform execution for each published revision: Windows/Linux Python 3.10/3.12, clean launchers with Node 22.12/24, Linux Chromium/Firefox/WebKit/mobile and Windows Chromium, container startup, full-history secret scanning and release packaging. Use the matching revision's completed checks, not the existence of a configured job or a previous green badge. The local figures above do not substitute for that CI evidence.
+The [GitHub workflow](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml) records cross-platform execution for each published revision: Windows/Linux Python 3.10/3.12, clean launchers with Node 22.12/24, Linux Chromium/Firefox/WebKit/mobile and Windows Chromium, container startup, full-history secret scanning and release packaging. Use the matching revision's completed checks, not the existence of a configured job or a previous green badge. The local figures above do not substitute for that CI evidence.
 
 ## What still needs work
 

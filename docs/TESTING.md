@@ -4,7 +4,7 @@
 
 A passing test run is evidence for a particular version and environment—not a promise that software can never fail. NorthFlux uses repeatable tests for its own behaviour and separate checks for packaging, browsers, and deployment.
 
-The historical React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is evidence for that version only. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) shows results for tested revisions.
+The historical React migration baseline at `30360f0` passed **439 Python tests, 57 frontend tests, and 36 browser tests**. The [completed GitHub Actions run](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35769606519) is evidence for that version only. Newer changes need their own completed run; the [workflow history](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml) shows results for tested revisions.
 
 Use [revision-specific release evidence](RELEASE_EVIDENCE.md) for completed runs and [the function audit](FUNCTION_AUDIT.md) for the earlier code review. The [previous deep-debug record](DEEP_DEBUG_REVIEW.md) remains evidence for its earlier revision. A defined CI job, collected test count or earlier green badge is not evidence that a newer revision passed.
 

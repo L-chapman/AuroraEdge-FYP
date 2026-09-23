@@ -2,7 +2,7 @@
 
 Understand your domain's email defences. Find the gaps. Make informed changes.
 
-[![Build and tests](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml)
+[![Build and tests](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml)
 
 NorthFlux Security is a self-hosted email security workspace. It checks the public settings that help prevent people impersonating your domain, turns the findings into understandable scores and recommendations, and keeps a history so you can see what changed.
 
@@ -38,7 +38,7 @@ NorthFlux checks published configuration, not actual message delivery or incomin
 You need Git, Python **3.10 or newer**, and Node.js **22.12 or newer** with npm. The first launch needs internet access to install dependencies. Use a writable local folder, such as Documents, rather than running inside a ZIP or a read-only drive.
 
 ```text
-git clone https://github.com/L-chapman/AuroraEdge-FYP.git NorthFlux-Security
+git clone https://github.com/L-chapman/Northflux-security.git NorthFlux-Security
 cd NorthFlux-Security
 ```
 
@@ -97,7 +97,7 @@ Start with the [guided project tour](docs/PROJECT_TOUR.md), then use the [two-to
 
 ## What is tested?
 
-The [revision-specific release evidence](docs/RELEASE_EVIDENCE.md) distinguishes completed checks from work not run. The [GitHub Actions history](https://github.com/L-chapman/AuroraEdge-FYP/actions/workflows/ci.yml) records results against exact revisions; the badge above follows the current default branch, not necessarily the checkout you are reviewing. The [function audit](docs/FUNCTION_AUDIT.md) and [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) preserve the preceding reviews and their evidence.
+The [revision-specific release evidence](docs/RELEASE_EVIDENCE.md) distinguishes completed checks from work not run. The [GitHub Actions history](https://github.com/L-chapman/Northflux-security/actions/workflows/ci.yml) records results against exact revisions; the badge above follows the current default branch, not necessarily the checkout you are reviewing. The [function audit](docs/FUNCTION_AUDIT.md) and [deep-debug review](docs/DEEP_DEBUG_REVIEW.md) preserve the preceding reviews and their evidence.
 
 | Area | Automated checks |
 |---|---|
@@ -125,7 +125,7 @@ Generated reports, saved scan data, logs, installed dependencies and build outpu
 
 ## Background, scope and contributing
 
-Created by **Leon Chapman**, NorthFlux began as the independent home project **AuroraEdge** and later became a Belfast Metropolitan College final-year project. The GitHub address keeps the original name so existing links continue to work. The [academic archive](docs/academic/README.md) preserves that history; current product instructions are in the [documentation index](docs/INDEX.md).
+Created by **Leon Chapman**, NorthFlux began as the independent home project **AuroraEdge** and later became a Belfast Metropolitan College final-year project. The current repository is [L-chapman/Northflux-security](https://github.com/L-chapman/Northflux-security); the rename does not replace its AuroraEdge development history. The [academic archive](docs/academic/README.md) preserves that history; current product instructions are in the [documentation index](docs/INDEX.md).
 
 This is a personal, AI-assisted, single-operator project—not a claim of commercial adoption or a security certification. AI coding assistance contributed to the modernisation, debugging, tests and documentation; the [reviewer guide](docs/INTERVIEW_GUIDE.md) explains how to discuss that work without claiming every line was manually authored. Only assess systems you are authorised to test, and review proposed DNS changes before applying them.
 
