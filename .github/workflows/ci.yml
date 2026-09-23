@@ -187,6 +187,12 @@ jobs:
       - name: Build production frontend for browser tests
         working-directory: frontend
         run: npm run build
+      - name: Check Linux WebKit sign-in presentation stability
+        if: runner.os == 'Linux'
+        working-directory: frontend
+        # Repetition detects navigation races; retries remain disabled so any
+        # single failure blocks the normal browser matrix and release archive.
+        run: npx playwright test e2e/presentation.spec.ts --project=webkit --grep "keeps every main page accessible" --repeat-each=20 --retries=0
       - name: Run Linux browser and mobile UI tests
         if: runner.os == 'Linux'
         working-directory: frontend

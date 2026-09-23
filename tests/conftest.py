@@ -37,6 +37,15 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def isolated_authentication_state(monkeypatch):
+    """Replace the one application-owned store, never aliases to its records."""
+    from app.auth_state import AuthenticationState
+    import app.dashboard as dashboard
+
+    monkeypatch.setattr(dashboard.app.state, "authentication", AuthenticationState())
+
+
+@pytest.fixture(autouse=True)
 def isolated_default_database(tmp_path, monkeypatch):
     """Unmocked API/CLI calls use a fresh disposable database per test."""
     import app.database as database

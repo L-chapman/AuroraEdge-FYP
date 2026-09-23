@@ -13,9 +13,11 @@ of earlier work, not current product requirements.
   The newer revision removes retired standalone demo tools, preserves their
   historical evidence and improves release cleanup. It does not implement the
   remaining feature backlog.
-- Work takes place in a separate checkout on
-  `codex/nf-01-02-capability-evidence`, leaving the running installation and
-  existing data unchanged.
+- The first increment was developed in a separate checkout on
+  `codex/nf-01-02-capability-evidence`. After owner approval it was merged as
+  `9e12eed5e98b1907548e648103743d9332bc4a14` on 23 September 2026.
+  The next bounded extraction uses `codex/nf-03-auth-state`; tests never use
+  the installed application's data.
 
 Confirmed defects: React exposed an active-looking automatic-remediation
 control and an editable reserved email field; other pages confused a saved
@@ -35,9 +37,9 @@ isolation. Larger design improvements below are proposals, not all defects.
 | Ticket | Scope | Status / gate |
 |---|---|---|
 | NF-00 | Reconfirm source, guidance, clean state and test evidence | Baseline recorded; current-change tests recorded separately |
-| NF-01 | Truthful controls and labels; preserve compatibility settings | Implemented and verified in PR #7; awaiting owner review/merge approval |
-| NF-02 | Fictional-data demonstration, screenshots and readable evidence | Implemented and verified in PR #7; awaiting owner review/merge approval |
-| NF-03 | Extract backend responsibilities behind characterisation tests | Next: map dependencies and agree the first small extraction before changing architecture |
+| NF-01 | Truthful controls and labels; preserve compatibility settings | Verified and merged with owner approval in PR #7 |
+| NF-02 | Fictional-data demonstration, screenshots and readable evidence | Verified and merged with owner approval in PR #7 |
+| NF-03 | Extract backend responsibilities behind characterisation tests | First authentication-state extraction implemented and locally verified; separate PR checks/review gate. Broader router/service extraction remains separate |
 | NF-04 | Validate important API responses and keep contracts aligned | Planned after agreed boundaries; preserve existing paths and error semantics |
 | NF-05 | Bounded scan jobs, real progress, cooperative cancellation | Separate design/review; preserve deletion and persistence safeguards |
 | NF-06 | Cross-platform Python locking and stronger test evidence | Separate dependency-only/reliability reviews; no global installs or lowered gates |
@@ -84,25 +86,41 @@ passed [all 15 hosted checks](https://github.com/L-chapman/AuroraEdge-FYP/action
 alongside the local checks and seven-image visual review recorded in
 [Release evidence](RELEASE_EVIDENCE.md). Subsequent evidence-only commits do not
 change that implementation, but their final pull-request checks must also pass.
-The stable master checkout, master-folder installation and live data are unchanged.
-No release or deployment was performed. NF-03 through NF-14 are not completed by
-this increment.
+The final evidence-only head `200d7f21301f6c88419ad57209fa84f29a64dc95` also
+passed [all 15 checks](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35813970959).
+PR #7 was then merged with owner approval; its merged source tree is identical
+to that tested final head. The owner also approved syncing the clean master
+copy and beginning the limited authentication-state extraction below. This is
+not approval for deployment, provider writes, broader architecture changes or
+merging an unreviewed later pull request. No GitHub release/tag was published.
+NF-03 through NF-14 are not completed by that first increment.
 
-### Proposed first NF-03 boundary (not implemented)
+### Approved first NF-03 boundary (implemented for review)
 
-Extract session/failed-login state into one explicitly owned authentication-state
-module first, keeping routes, cookies, request parsing and response semantics in
-the existing dashboard adapter. Keep dynamic token/origin reads so rotating the
-token still revokes sessions and open event streams without a restart. Update
-test fixtures to inject/reset that single owner rather than aliasing mutable
-dictionaries between modules.
+The first extraction places one `AuthenticationState` owner on
+`app.state.authentication`, with no singleton in the state module and no mutable
+dictionary aliases. Routes, cookies, request parsing and response semantics stay
+in the dashboard adapter. Dynamic token/origin reads still revoke sessions and
+open event streams as before. Test fixtures replace that single owner; injectable
+clocks exercise expiry and failed-login windows without mutating shared records.
 
 Do not move the scheduler, provider settings, legacy templates or all route
 groups in the same change. Preserve the existing single-process lifecycle and
 characterise login/logout, expiry, rotation, CSRF, body limits, stream revocation
 and one-monitor startup/shutdown before extraction. The current monitor receives
 cancellation at shutdown; a fully awaited graceful join is not yet established.
-Owner review of this boundary is the next architecture gate.
+This boundary was approved on 23 September 2026. Any broader extraction still
+needs a separately scoped review; this step does not make the application
+multi-process or add named-user authentication.
+
+The unchanged characterization set passed both before and after extraction;
+additional owner, concurrency and lifecycle tests passed afterwards. Exact local
+results are recorded in [Release evidence](RELEASE_EVIDENCE.md). Independent
+review found no introduced regression. It did identify the existing separation
+between login-rate checking and failure recording: concurrent requests can pass
+the check before failures are recorded. Atomic admission is separate hardening,
+not a property established by these state-integrity tests. The monitor's
+unawaited cleanup and broader dashboard decomposition also remain explicit limits.
 
 Each pull request records its exact source revision, rationale, compatibility,
 tests actually executed, screenshots where useful, remaining limits and a

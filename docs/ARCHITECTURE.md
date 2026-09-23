@@ -55,7 +55,15 @@ Settings drafts are initialised before their controls become interactive and are
 
 In production, or when `NORTHFLUX_SERVE_REACT=true`, FastAPI serves `frontend/dist/index.html`, fingerprinted files below `/assets`, and the SPA entry point for non-reserved deep links. API, download, health, readiness, and documentation paths are never swallowed by the SPA fallback. `NORTHFLUX_FRONTEND_DIST` can point to another compiled output directory.
 
-The dashboard module is still the main architecture debt. The frontend extraction creates a stable API boundary, but the remaining server routes and services should continue to move into smaller routers and service modules behind the existing tests.
+The dashboard module is still the main architecture debt. Authentication records now have their own application-owned state object, but HTTP authentication decisions and most routes/services remain here. The frontend extraction creates a stable API boundary; further backend extraction should continue in small, tested steps.
+
+### `auth_state.py`
+
+Owns browser sessions, failed-login records and their locks. There is exactly one `AuthenticationState` instance on `app.state.authentication`, not another module-level singleton or aliases to its internal dictionaries. It creates, reads and revokes sessions, prunes expired records and tracks failed sign-ins. Returned session records are defensive copies.
+
+The module does not read configuration or handle HTTP requests. The dashboard supplies the currently configured token on each lookup, keeping token rotation effective for existing sessions and open event streams. Cookie handling, origin/CSRF checks, parsing, route paths and HTTP errors stay in the dashboard adapter. Session expiry uses wall time; failed-login windows use monotonic time. Tests can replace the owner and inject clocks without altering shared dictionaries.
+
+This is organisation of existing behaviour, not a new authentication system. State is still process-local and lost on restart. The rate check and subsequent failure recording remain separate operations, so concurrent attempts can overshoot the nominal five-failure limit; locking individual records does not make request admission atomic.
 
 ### `request_security.py`
 
@@ -107,7 +115,7 @@ Viewing domain details is read-only. A scan is performed only through an explici
 
 ## Runtime and persistence
 
-The web application runs as one process with one worker. The background monitor lives inside that process, and SQLite is the shared persistence layer. Running multiple workers would create duplicate schedulers and independent in-process locks, so horizontal scaling is not supported by the current architecture.
+The web application runs as one process with one worker. The background monitor lives inside that process, and SQLite is the shared persistence layer. Running multiple workers would create duplicate schedulers and independent in-process locks, so horizontal scaling is not supported by the current architecture. Lifecycle characterization covers one monitor per sequential startup and cancellation on shutdown; it does not establish a fully awaited graceful shutdown or safe overlapping application lifespans.
 
 Persistent paths and their environment overrides are:
 
@@ -146,7 +154,7 @@ The deprecated server-rendered interface remains available as a development fall
 
 ## Refactor boundaries
 
-The dashboard will be separated along behaviour already visible in the routes:
+The first extraction is the application-owned authentication state above. The following larger layout remains a proposal, not a description of completed modules:
 
 ```text
 src/app/
@@ -163,7 +171,7 @@ src/app/
 │   └── reporting.py
 ```
 
-The React migration has already separated presentation from server behaviour. The next extraction should isolate authentication and configuration, followed by monitoring and remediation. Legacy templates can then be retired after an agreed rollback window.
+The React migration has already separated presentation from server behaviour. After reviewing the authentication-state step, later increments can move HTTP authentication/configuration boundaries and then monitoring/reporting services. Legacy templates can be retired only after an agreed rollback window. Do not move all routes or change scheduler behaviour as part of the state-only extraction.
 
 ## Known constraints
 
