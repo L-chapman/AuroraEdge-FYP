@@ -166,3 +166,68 @@ No live provider write, homelab deployment, public demo, real outbound
 notification, macOS or ARM validation is claimed. Screenshots use the isolated
 fixture server described in the [screenshot guide](screenshots/README.md).
 A recording script is a demonstration plan, not an already recorded video.
+
+### Approved merge of NF-01 / NF-02
+
+After owner approval, PR #7 was merged as
+[`9e12eed5e98b1907548e648103743d9332bc4a14`](https://github.com/L-chapman/AuroraEdge-FYP/tree/9e12eed5e98b1907548e648103743d9332bc4a14).
+The final reviewed head was `200d7f21301f6c88419ad57209fa84f29a64dc95`; its
+[15 checks passed](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35813970959),
+and the merged head's [15 post-merge checks also passed](https://github.com/L-chapman/AuroraEdge-FYP/actions/runs/35831341540).
+Both have Git tree `2930210863c90da4f0ae402283bd08eefc37589d`. The local master
+checkout and clean master-folder source copy were synced with that approved
+revision, retaining a verified recovery copy. No operational database was
+migrated or replaced, and no GitHub release/tag or public deployment was made.
+
+## First NF-03 extraction: local verification snapshot
+
+Implementation/test revision:
+[`e51d2d13a622dde27f5c580121db3bdd43db206a`](https://github.com/L-chapman/AuroraEdge-FYP/tree/e51d2d13a622dde27f5c580121db3bdd43db206a),
+based on merged `9e12eed5e98b1907548e648103743d9332bc4a14`. Documentation-only
+commits may follow it. This section records local execution, not a completed
+hosted result. The pull request for
+[`codex/nf-03-auth-state`](https://github.com/L-chapman/AuroraEdge-FYP/tree/codex/nf-03-auth-state)
+records the final head and completed hosted workflow; check that head's results
+before approval instead of treating earlier green runs as evidence for it.
+
+On 23 September 2026, a separate Windows 11 x64 checkout used Python 3.12.10,
+Node 24.15.0, the existing isolated development environment with unchanged
+Python requirements, and a fresh `npm ci` in this checkout. Tests selected this
+checkout's `src` and used temporary databases/network fixtures, not installed
+application data.
+
+| Local check | Actual result |
+|---|---|
+| Authentication characterization before extraction | 106 passed, 2 host-symlink skips across the new contract tests and existing authentication/API/request/stream suites |
+| Same characterization set after extraction | 106 passed, 2 skipped |
+| Expanded authentication and lifecycle set | 122 passed, 2 skipped |
+| Full backend rerun with statement/branch coverage | 771 passed, 5 platform/permission skips, 1 existing deprecation warning |
+| Frontend | 146 tests across 20 files; type check, lint and production build passed |
+| Browser journeys | 51 executions passed: 17 scenarios in Chromium, WebKit and mobile Chromium |
+| Offline verification, Ruff and high-severity Bandit gate | Passed |
+| Staged implementation secret scan | No findings |
+
+Commands used the same documented Python/frontend suites, including
+`pytest -q -ra --cov=app --cov-report=term-missing` and
+`npx playwright test --project=chromium --project=webkit --project=mobile-chromium`.
+The five skips again cover three unavailable Windows symlink cases and two
+platform-specific filename cases. No local Linux, Firefox, Docker or new
+manual UI/screenshot review is claimed for this state-only extraction. The UI
+and screenshot assets are unchanged; browser tests ran against the real compiled
+React interface using the disposable fixture server.
+
+Backend statement coverage was **75.19%** (3,497/4,651) and branch coverage
+**65.07%** (1,045/1,606). The new state module's measured 63 statements and eight
+branches were exercised, but that does not establish complete authentication
+security. Selected-module frontend coverage remains 93.91% statements, 89.59%
+branches, 98% functions and 97.23% lines. The separate logging coverage-identity
+issue is still unresolved.
+
+Independent read-only review found no introduced regression. Known limits are
+explicit: authentication is single-process and lost on restart; failed-login
+admission and failure recording are not one atomic operation; lifecycle shutdown
+requests monitor cancellation without joining its cleanup. Concurrent store
+tests check record integrity, not a hard five-request admission ceiling. These
+are follow-up design/hardening items, not capabilities claimed by this refactor.
+Routes, cookie settings, origin/CSRF checks, dynamic token reads, the scheduler,
+database schema and provider behaviour were not changed.
